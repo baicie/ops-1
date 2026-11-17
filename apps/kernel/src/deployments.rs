@@ -69,6 +69,35 @@ fn is_ghost_instance(row: &InstanceRow) -> bool {
     matches!(row.state.as_str(), "UNHEALTHY" | "UNREACHABLE") && row.container_id.is_none()
 }
 
+/// Whether the reconciler must REBUILD this row instead of maintaining it.
+///
+/// The ghost exclusion above fixed what a dead row *costs*; it did not fix what
+/// happens *to* it. In the loop, a ghost still satisfied `desired_action ==
+/// "START"`, so the "existing instance is fine, leave it alone" branch fired and
+/// wrote `desired_action='START'` back every single pass. That is the whole
+/// reason a manual `UPDATE ... SET desired_action='STOP'` was overwritten within
+/// the same second (measured on staging: `updated_at` equalled the clock at the
+/// query): the reconciler was not preserving the operator's intent, it was
+/// re-asserting its own, forever, about a container that does not exist.
+///
+/// So a ghost is not a row to keep. It is a row to RE-CREATE: clear the observed
+/// state, let the planner place it again, and let the node report afresh. The
+/// slot and the deployment generation are the identity that survives; the
+/// container facts do not, because there are none.
+///
+/// The three-way distinction matters and each part is tested:
+///
+///   * UNHEALTHY/UNREACHABLE with NO container -> rebuild. Nothing to manage.
+///   * UNHEALTHY with a container -> maintain. The resource is really there and
+///     the node may still be managing it; rebuilding would orphan a live
+///     container, which is the ownership invariant this repository treats as
+///     inviolable.
+///   * any other state -> maintain. STARTING/READY/STOPPING are all rows whose
+///     `container_id` may legitimately be null for one reconcile tick.
+fn must_rebuild(row: &InstanceRow) -> bool {
+    is_ghost_instance(row)
+}
+
 /// What occupies a node, as the placement planner counts it.
 ///
 /// Two aggregates read this - one for instance slots, one for CPU and memory -
@@ -1409,10 +1438,14 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
 
     for slot in 0..deployment.desired_replicas {
         let current = by_slot.get(&slot).cloned();
+        // A ghost does NOT count as "existing and fine", however healthy its
+        // `desired_action` looks. Without this clause the row is re-asserted as
+        // START on every pass and never rebuilt - see `must_rebuild`.
         let existing_node_ok = current
             .as_ref()
             .map(|row| {
                 row.desired_action == "START"
+                    && !must_rebuild(row)
                     && eligible_ids.contains(&row.node_id)
                     && used_nodes.get(&row.node_id).copied().unwrap_or(0) <= max_per_node
             })
@@ -1489,6 +1522,32 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
                         &requested,
                     );
                 }
+            } else if must_rebuild(&current) {
+                // Same node, but the row is a ghost: rebuild it HERE rather than
+                // moving it. The identity that survives a rebuild is the slot and
+                // the generation; every observed fact is cleared so the node
+                // reports afresh and `restart_count` starts from zero for the new
+                // attempt rather than accumulating across unrelated failures.
+                //
+                // A ghost holds no container by definition, so there is nothing
+                // to stop or adopt: the clear is not "forgetting" a resource, it
+                // is discarding a dead row's description of one.
+                sqlx::query(
+                    "UPDATE kernel.plugin_instances SET desired_action='START', state='STARTING', observed_at=NULL, container_id=NULL, image_digest=NULL, host_port=NULL, restart_count=0, last_error=NULL, deployment_generation=$2, updated_at=now() WHERE id=$1",
+                )
+                .bind(current.id)
+                .bind(deployment.generation)
+                .execute(&state.db)
+                .await?;
+                // It was START before, and it is START now: the placement it
+                // held in `used_nodes`/`global_counts`/`reserved` is the one it
+                // keeps. Re-accounting here would double-count the slot and make
+                // the node look fuller than it is - the exact class of drift the
+                // three capacity queries were unified to prevent.
+                debug_assert!(
+                    was_started,
+                    "a ghost is always desired_action=START by definition"
+                );
             } else {
                 sqlx::query("UPDATE kernel.plugin_instances SET desired_action='START', updated_at=now() WHERE id=$1")
                     .bind(current.id)
@@ -1973,8 +2032,9 @@ fn placement_failure_reason(node_name: &str, rejection: &PlacementRejection) -> 
 #[cfg(test)]
 mod tests {
     use super::{
-        evaluate_node, is_ghost_instance, node_has_capacity, placement_failure_reason, InstanceRow,
-        NodeUsage, PlacementContext, PlacementRejection, NOT_A_GHOST,
+        evaluate_node, is_ghost_instance, must_rebuild, node_has_capacity,
+        placement_failure_reason, InstanceRow, NodeUsage, PlacementContext, PlacementRejection,
+        NOT_A_GHOST,
     };
     use crate::nodes::NodeRow;
     use chrono::Utc;
@@ -2431,6 +2491,67 @@ mod tests {
             "a starting instance is on its way up and must keep its slot"
         );
     }
+
+    /// A ghost must be REBUILT, not maintained.
+    ///
+    /// This is the half the ghost-exclusion fix did not cover. Excluding the row
+    /// from the capacity sums stopped it costing a slot; it did not stop the
+    /// reconciler from re-asserting `desired_action='START'` on it every pass. So
+    /// a row whose container never existed was kept alive forever, and a manual
+    /// `UPDATE ... STOP` was overwritten within the same second - measured on
+    /// staging, where the row's `updated_at` equalled the clock at the query.
+    ///
+    /// `must_rebuild` is what the keep-alive branch now consults. These cases are
+    /// the whole rule, and the last two are the ones a careless "rebuild anything
+    /// that looks unhealthy" would break.
+    #[test]
+    fn a_ghost_is_rebuilt_and_a_live_container_is_not() {
+        let base = |state: &str, container: Option<&str>| InstanceRow {
+            id: Uuid::new_v4(),
+            deployment_id: Uuid::new_v4(),
+            node_id: Uuid::new_v4(),
+            slot: 0,
+            deployment_generation: 1,
+            desired_action: "START".into(),
+            state: state.into(),
+            observed_at: Some(Utc::now()),
+            container_id: container.map(str::to_string),
+            image_digest: None,
+            host_port: None,
+            restart_count: 0,
+            last_error: None,
+            runtime_adapter_version: None,
+            node_name: Some("staging-node".into()),
+            node_status: Some("READY".into()),
+            node_last_seen_at: Some(Utc::now()),
+            node_data_endpoint: None,
+            node_data_token: None,
+        };
+
+        assert!(
+            must_rebuild(&base("UNHEALTHY", None)),
+            "a failed pull leaves a row to re-create"
+        );
+        assert!(
+            must_rebuild(&base("UNREACHABLE", None)),
+            "a node that vanished leaves the same shape"
+        );
+
+        // The ownership invariant: a row that HAS a container describes a real
+        // resource. Rebuilding it would clear the only record of that container,
+        // and nothing would ever stop it. This is the case that must stay false.
+        assert!(
+            !must_rebuild(&base("UNHEALTHY", Some("abc123"))),
+            "an UNHEALTHY instance with a live container must be maintained, never rebuilt"
+        );
+        // And every state whose container id is simply not observed yet.
+        for state in ["STARTING", "READY", "STOPPING", "STOPPED"] {
+            assert!(
+                !must_rebuild(&base(state, None)),
+                "{state} may legitimately have no container id for one tick and must not be rebuilt"
+            );
+        }
+    }
     /// Both capacity aggregates must exclude the same shape.
     ///
     /// They are `&'static str` literals handed to `sqlx::query_as`, so the
@@ -2522,6 +2643,10 @@ mod tests {
             .execute(pool)
             .await
             .expect("package inserts");
+            // `measure` only runs the two capacity aggregates; it never reaches
+            // the planner, so it needs no selector. Adding one here (my first
+            // attempt did, by matching the wrong `INSERT`) fails to compile and,
+            // had it compiled, would have changed what this fixture measures.
             sqlx::query(
                 "INSERT INTO kernel.plugin_deployments
                    (id, plugin_id, package_id, version, desired_replicas, generation,
@@ -2584,21 +2709,242 @@ mod tests {
         }
 
         async fn node(pool: &PgPool) -> Uuid {
+            node_labelled(pool, &Uuid::new_v4().to_string()).await
+        }
+
+        /// A node carrying `test-run=<run>` so a deployment can select exactly it.
+        async fn node_labelled(pool: &PgPool, run: &str) -> Uuid {
             let id = Uuid::new_v4();
             let token = Uuid::new_v4().to_string();
+            // `last_seen_at` is not optional in practice: `reconcile_once` sweeps
+            // every node whose heartbeat is older than `node_stale_seconds` to
+            // UNREACHABLE before it plans anything, and a null heartbeat is
+            // infinitely stale. A fixture without it tests nothing - the first
+            // version of `a_ghost_is_rebuilt_to_starting_and_stays_there` read
+            // UNREACHABLE and looked like a product defect.
             sqlx::query(
                 "INSERT INTO kernel.nodes
                    (id, name, control_token_hash, data_token, generation, os, arch,
-                    labels, capabilities, status, enrolled_at)
-                 VALUES ($1,$2,'x',$3,1,'linux','amd64','{}'::jsonb,'[]'::jsonb,'READY',now())",
+                    labels, capabilities, status, enrolled_at, last_seen_at, resource_snapshot)
+                 VALUES ($1,$2,'x',$3,1,'linux','amd64',$4,'[]'::jsonb,'READY',now(),now(),$5)",
             )
             .bind(id)
             .bind(format!("test-node-{}", &token[..8]))
             .bind(&token)
+            .bind(serde_json::json!({ "test-run": run }))
+            // A node that has never reported capacity cannot be placed on at all:
+            // `evaluate_node` refuses with RESOURCE_SNAPSHOT_MISSING before it
+            // looks at anything else. The second thing this fixture was missing -
+            // the first was `last_seen_at`. Both were found by running the real
+            // reconciler and reading its status_reason, not by reading the code.
+            .bind(serde_json::json!({
+                "cpuCores": 8,
+                "memoryTotalBytes": 16_i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0_i64,
+            }))
             .execute(pool)
             .await
             .expect("node inserts");
             id
+        }
+
+        /// THE CONVERGENCE TEST. Runs the real `reconcile_deployment`, not the
+        /// predicate.
+        ///
+        /// The predicate tests above prove `must_rebuild` is correct. They cannot
+        /// prove the reconciler USES it, and that was the actual defect: a ghost
+        /// satisfied `desired_action == "START"` in the keep-alive branch, so every
+        /// pass wrote START back to a row whose container never existed. The
+        /// measured symptom on staging was that a manual `UPDATE ... SET
+        /// desired_action='STOP'` was overwritten within the same second -
+        /// `updated_at` equalled the clock at the query.
+        ///
+        /// This test is the counterfactual for that: with the keep-alive clause
+        /// removed, the ghost is left `state='UNHEALTHY'` and `last_error` intact
+        /// forever, and the two assertions below fail.
+        ///
+        /// Two passes, because convergence is a fixed point: the second must not
+        /// change what the first produced. A reconciler that rebuilds on every pass
+        /// would loop forever on staging and never let the node report.
+        #[tokio::test]
+        async fn a_ghost_is_rebuilt_to_starting_and_stays_there() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let run = Uuid::new_v4().to_string();
+            let node_id = node_labelled(&pool, &run).await;
+            let (deployment_id, instance_id) = deployment_with_one(
+                &pool,
+                node_id,
+                &run,
+                "UNHEALTHY",
+                None,
+                Some("image pull failed: manifest unknown"),
+            )
+            .await;
+
+            let state = crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool.clone(),
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            };
+            // `reconcile_once`, not `reconcile_deployment`: the loop that runs on
+            // staging is the former, and it also does the staleness sweep that
+            // rewrites instances whose node stopped reporting. Testing the inner
+            // function would miss that interplay.
+            super::super::reconcile_once(&state)
+                .await
+                .expect("first reconcile");
+            let generation_after: i64 =
+                sqlx::query_scalar("SELECT generation FROM kernel.plugin_deployments WHERE id=$1")
+                    .bind(deployment_id)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("deployment reads back");
+
+            let (state1, error1, gen1, restarts1, container1): (
+                String,
+                Option<String>,
+                i64,
+                i32,
+                Option<String>,
+            ) = sqlx::query_as(
+                "SELECT state, last_error, deployment_generation, restart_count, container_id
+                 FROM kernel.plugin_instances WHERE id=$1",
+            )
+            .bind(instance_id)
+            .fetch_one(&pool)
+            .await
+            .expect("instance reads back");
+
+            assert_eq!(
+                state1, "STARTING",
+                "a ghost must be re-created, not left in the failed state it died in"
+            );
+            assert!(
+                error1.is_none(),
+                "the rebuild clears last_error; a new attempt is not the old one's failure"
+            );
+            assert!(
+                container1.is_none(),
+                "and there is still no container to hold"
+            );
+            assert_eq!(restarts1, 0, "a fresh attempt counts from zero");
+            assert_eq!(
+                gen1, generation_after,
+                "the rebuild is bound to the current generation"
+            );
+
+            // Second pass: the fixed point. `STARTING` is not a ghost, so this pass
+            // must MAINTAIN the row - if it rebuilt again the reconcile loop would
+            // never let the node report.
+            super::super::reconcile_once(&state)
+                .await
+                .expect("second reconcile");
+            let (state2, gen2, restarts2): (String, i64, i32) = sqlx::query_as(
+                "SELECT state, deployment_generation, restart_count
+                 FROM kernel.plugin_instances WHERE id=$1",
+            )
+            .bind(instance_id)
+            .fetch_one(&pool)
+            .await
+            .expect("instance reads back");
+            assert_eq!(
+                state2, "STARTING",
+                "a rebuilt row is maintained on the next pass, not rebuilt again"
+            );
+            assert_eq!(gen2, gen1);
+            assert_eq!(restarts2, restarts1);
+
+            // And it now occupies its slot again: the row is a live attempt.
+            let count: i64 = sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.plugin_instances
+                 WHERE node_id=$1 AND desired_action='START'
+                   AND NOT (state IN ('UNHEALTHY','UNREACHABLE') AND container_id IS NULL)",
+            )
+            .bind(node_id)
+            .fetch_one(&pool)
+            .await
+            .expect("count reads back");
+            assert_eq!(
+                count, 1,
+                "a rebuilt instance is a live attempt and holds its slot"
+            );
+        }
+
+        /// One deployment, one instance of a given shape, whatever `last_error`.
+        async fn deployment_with_one(
+            pool: &PgPool,
+            node_id: Uuid,
+            run: &str,
+            state: &str,
+            container: Option<&str>,
+            last_error: Option<&str>,
+        ) -> (Uuid, Uuid) {
+            let plugin = format!("test.converge.{}", Uuid::new_v4());
+            let package_id = Uuid::new_v4();
+            let deployment_id = Uuid::new_v4();
+            let instance_id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'0.0.1','1.1','test-publisher','{}'::jsonb,
+                         $3,$4,$5,'INSTALLED','VERIFIED')",
+            )
+            .bind(package_id)
+            .bind(&plugin)
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .execute(pool)
+            .await
+            .expect("package inserts");
+            // The selector pins this deployment to the one node the test created.
+            //
+            // Without it the planner sees every node in the shared test database -
+            // including the ten left behind by earlier runs - and `max_instances`
+            // is pool-wide. Measured: the first version of this test inserted an
+            // ACTIVE deployment with an empty placement, the planner found no node
+            // with a free slot among the accumulated ones, took the "no candidate"
+            // branch, and wrote `desired_action='STOP'`. The ghost was never
+            // rebuilt and the failure looked like a product defect.
+            let selector = serde_json::json!({
+                "nodeSelector": { "test-run": run },
+                "maxInstancesPerNode": 20,
+            });
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 VALUES ($1,$2,$3,'0.0.1',1,1,$4,
+                         '{\"cpuMillis\":500,\"memoryMiB\":256}'::jsonb,'ACTIVE',now(),now())",
+            )
+            .bind(deployment_id)
+            .bind(&plugin)
+            .bind(package_id)
+            .bind(&selector)
+            .execute(pool)
+            .await
+            .expect("deployment inserts");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_instances
+                   (id, deployment_id, node_id, slot, deployment_generation,
+                    desired_action, state, container_id, last_error)
+                 VALUES ($1,$2,$3,0,1,'START',$4,$5,$6)",
+            )
+            .bind(instance_id)
+            .bind(deployment_id)
+            .bind(node_id)
+            .bind(state)
+            .bind(container.map(str::to_string))
+            .bind(last_error.map(str::to_string))
+            .execute(pool)
+            .await
+            .expect("instance inserts");
+            (deployment_id, instance_id)
         }
 
         /// The staging failure, replayed: three occupants and one ghost against a

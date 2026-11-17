@@ -492,5 +492,61 @@ for (const workflow of Object.keys({ ...SUITE_WORKFLOW, 'ci.yml': null })) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// A REQUIRED check that a change cannot produce blocks forever.
+//
+// This is the argument against listing the delegated suites in the branch
+// ruleset, and it is measured rather than asserted:
+//
+//     node tests/ci/impact.mjs --files docs/README.md
+//     run: (none)
+//
+// A docs change starts no suite. If `golden-path` were a required context, that
+// PR would sit at "Expected — Waiting for status to be reported" until someone
+// edited the ruleset again: data-foundation.yml's `pull_request.paths` does not
+// match `docs/**`, so the check is never created.
+//
+// The invariant, per suite: either some path the analyzer maps to it can reach a
+// workflow that produces it, or it must not be named in the ruleset. `ci-gate`
+// is the exception that makes the ruleset workable - it runs on every PR and
+// decides per-change - which is why docs/ci/ruleset-migration.md proposes
+// requiring it and not the individual checks.
+//
+// The list below is the set of suites the ruleset could plausibly name. Keep it
+// in step with DELEGATED_CHECK_OWNERS in ci-gate.mjs.
+{
+  const RULESET_CANDIDATES = [
+    'linux-runtime', 'quality-faults', 'data-foundation', 'plugin-lifecycle',
+    'runtime-conformance', 'g12-acceptance', 'browser-e2e',
+  ];
+  // One representative path per suite, taken from the analyzer itself.
+  const SAMPLE = {
+    'linux-runtime': 'apps/node/src/main.rs',
+    'quality-faults': 'tests/reliability/lease_fencing.sh',
+    'data-foundation': 'tests/acceptance/pipeline_orphan_worker.sh',
+    'plugin-lifecycle': 'scripts/build-plugins.sh',
+    'runtime-conformance': 'tests/contract/run_conformance.py',
+    'g12-acceptance': 'apps/kernel/src/gateway.rs',
+    'browser-e2e': 'apps/platform-console/src/App.tsx',
+  };
+  for (const suite of RULESET_CANDIDATES) {
+    const sample = SAMPLE[suite];
+    if (!sample) continue;
+    const decision = analyse([sample]);
+    if (!decision.suites[suite]) {
+      errors += 1;
+      process.stdout.write(`ERROR sample path ${sample} does not require ${suite}; the ruleset-candidates table is stale\n`);
+    }
+  }
+  // The property the proposal rests on: a docs change requires nothing, so a
+  // delegated suite cannot be a static required context.
+  const docs = analyse(['docs/README.md']);
+  const anyRequired = Object.values(docs.suites).some(Boolean);
+  if (anyRequired) {
+    warnings += 1;
+    process.stdout.write('warn  a docs-only change now requires a suite; re-check whether delegated checks can be required statically\n');
+  }
+}
+
 process.stdout.write(`\nimpact/filter consistency: ${errors} error(s), ${warnings} warning(s)\n`);
 if (errors > 0 || (strict && warnings > 0)) process.exit(1);

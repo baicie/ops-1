@@ -115,18 +115,138 @@ staging，且不报任何错**。这正是本轮要防的那类故障，低一�
 
 ---
 
+## Wave B — 交付可信度（本轮）
+
+### B-1 幽灵实例的生命周期 FIXED
+
+上一轮修的是幽灵**占不占容量**；状态机的收敛没修。`reconcile_deployment` 的
+`existing_node_ok` 只读 `desired_action == "START"`，于是幽灵每一轮都被写回 `START`——
+手工 `UPDATE ... STOP` 在同一秒被覆盖就是这条路径。
+
+新增 `must_rebuild`，幽灵走重建（清空 state/container/generation 重新绑定），不是维持。
+三态规则逐条断言：
+
+```
+UNHEALTHY/UNREACHABLE 且无容器  -> 重建（没有任何东西可管理）
+UNHEALTHY 但有容器              -> 维持（重建会清掉唯一记录，违反所有权铁律）
+其它状态（STARTING/READY/...）  -> 维持（container_id 可以合法地空一轮）
+```
+
+**反事实**：删掉 `&& !must_rebuild(row)`，`a_ghost_is_rebuilt_to_starting_and_stays_there`
+立刻报 `left: "UNHEALTHY", right: "STARTING"`——正是 staging 的症状。测试跑真实
+`reconcile_once` + 真实 PostgreSQL，并断言第二次 reconcile 是**不动点**（否则循环永不让节点上报）。
+
+### B-8 CI Gate 的 pending 语义 FIXED
+
+`delegated-pending` 曾经不阻塞 gate。而 `data-foundation`、`plugin-lifecycle`、
+`runtime-conformance`、`g12-acceptance`、`browser-e2e` **都不在 Ruleset 里**，所以一个
+suite 启动、被判 pending、然后失败，会留下一枚绿 gate 和一个无人反对的合并。
+
+现在：有界等待（预算 30 分钟，取自实测 p95——data-foundation 1530s、plugin-lifecycle
+1174s），**超时即 FAIL**。同时加了归属（`check_suite.id` ↔ workflow run）与
+PART 3（任何红色 check 都不能只作 note，实测 `deploy to staging host` 正是这样被放过的）。
+
+### B-9 `node --test` 对空文件返回 0 FIXED
+
+实测 Node 22.12.0：空文件、纯注释文件、全部 skip 的文件，**退出码都是 0**。
+所以「删掉断言」是一条把红变绿的路径，此前没有任何东西会察觉。
+`check-test-substance.mjs` 从 workflow 文件里发现 CI 真正跑的文件，检查四条。
+
+反事实抓到了我自己的 bug：`assertions === 0` 在 47/48 被删时仍然通过（注释里残留一个
+`assert.`）。补了比例下限（`tests >= 5 && assertions * 5 < tests`）。
+
+---
+
+## Wave A 在真实 Staging 上的验证结果：**没有通过**
+
+本轮第一次拿到真实失败证据。main `c3edae4` 的 `staging-preview` 运行
+（run 44016184862，2026-11-17T04:21–04:26）在 `Publish the data plugin bundles` 失败：
+
+```
+data-integration: pushed 127.0.0.1:15001/opsweave/data-integration:0.0.17455
+staged opsweave.data-catalog@0.0.17455 bundle=sha256:9b759df7...
+  PENDING 0/0 ready (No eligible healthy node matches the placement selector
+  [INSTANCE_CAPACITY_EXCEEDED] node staging-node: 4 instances already scheduled
+  on this node against a per-node limit of 4)
+Error: timed out waiting for deployment readiness
+```
+
+三件事，按严重程度：
+
+1. **幽灵修复没有解决 staging 的实际问题。** #135–#137 修的是「幽灵占不占容量」，
+   但 staging 上仍然是 4/4。
+
+   日志文案确定了是哪一份计数：`against a per-node limit of 4` 来自
+   `PlacementRejection::InstanceCapacityExceeded { scope: "per-node" }`，
+   而它读的是 `usage.node_instances` = **`global_instance_counts`** —— 也就是
+   **已经排除了幽灵**的那份 SQL。所以那 4 行都通过了幽灵排除。
+
+   可能是哪 4 行：`container_id IS NOT NULL`（有真实容器）或状态不在
+   `UNHEALTHY`/`UNREACHABLE`。本次发布只涉及 `data-catalog` 一个插件，所以
+   这 4 行属于**其它插件的历史实例**，或者 data-catalog 自己的旧 generation。
+   两种都不是幽灵，都不是本轮修复的对象。
+
+   **无法登录主机核实**：SSH 凭据只在 CI secrets 里，本地私钥被拒绝
+   （`Permission denied (publickey)`）。所以「哪 4 行」这个事实本身是 BLOCKED。
+
+   最可能的解释是**节点容量真的只有 4，而且已经被占满**——这不是缺陷，
+   是容量配置。在这种情况下本轮所有容量修复都是对的，但都不改变 staging 的结果。
+   这一点必须说清楚，而不是把它算作「修好了」。
+
+2. **这正是 ADR-026 描述的「Kernel 新 / Plugin 旧」状态，且它真的发生了。**
+   Kernel 与 Node 已替换、健康检查通过，然后插件发布失败。平台此刻是一个
+   没有任何一次运行验证过的混合体，而唯一记录是一条红 check。
+
+3. **`deploy to staging host` 在 main 上是红的**（`conclusion: failure`，实测）。
+   它不在 Ruleset 的 9 项必需检查里，所以一个部署失败的主分支可以继续接受合并。
+   这与 B-10 是同一个洞的两半：gate 不强制，部署 check 也不强制。
+
+### 因果闭环：为什么「点治理就退出登录」还没修好
+
+这轮把整条链查通了，而结论是：**代码已经对，线上仍是旧镜像。**
+
+```
+1. 前端点「治理」 -> gatewayGet('opsweave.data-catalog', ...)
+2. staging 上的 data-catalog 镜像（2026-10-28）读 x-opsweave-user-role
+3. 该 header 自 9990f79（2026-11-08）起不再发送
+4. 插件返回 401 "caller identity required"
+5. 前端 api.ts 把任何 401 当作会话失效 -> 登出
+```
+
+第 2 步的镜像为什么换不掉：插件发布链从未成功过。今晚的 run 44016184862 就是证据——
+bundle 组装成功（`staged opsweave.data-catalog@0.0.17455`），部署因
+`INSTANCE_CAPACITY_EXCEEDED` 超时。所以：
+
+- 源码里的 `identity.mjs` 已经只读签名 context（正确）；
+- staging 跑的还是旧镜像（错误）；
+- 两者之间的桥——发布链——断在容量上。
+
+**这就是为什么本轮修的容量问题重要，也是为什么它没修好这个问题**：容量修复
+让下一次发布有机会成功，但 node 上那 4 个占位不是幽灵，所以还没成功。
+
+### 本轮因此不能声称的
+
+- 不能声称幽灵容量问题已修复。代码层面的统计与收敛修好了，**staging 仍然失败**。
+- 不能声称插件发布链可用。它从未成功过：`data-catalog` 的 bundle 组装完成后
+  部署即超时。
+- 不能声称 `must_rebuild` 修复了 staging。它重建的是幽灵自己；如果占用槽位的
+  4 行**不是**幽灵，这个修复对上线的帮助为零。这也是为什么第 1 条必须标 BLOCKED
+  而不是猜测。
+
+---
+
 ## 待处理（本轮尚未动手）
 
 | # | 项 | 状态 | 说明 |
 |---|---|---|---|
-| B-1 | 幽灵实例的**生命周期**（不是统计） | NOT_RUN | 见下 |
 | B-2 | 并发部署是否重复预留资源 | NOT_RUN | TASK-01 要求，未测 |
 | B-3 | CPU 满 / 内存满但实例数未满 的独立用例 | NOT_RUN | 集成测试缺这两个分支 |
 | B-4 | Tag 被指向不同 digest 时拒绝 | NOT_RUN | 需要保存上次 digest 才能判断 |
 | B-5 | 签名移出长驻 kernel 容器 | NEEDS_DECISION | 需要 `opsctl` 脱离容器运行 |
-| B-6 | 版本 `% 100000` 碰撞 | ACCEPTED_RISK | 概率低但非零；当前版本号是内容指纹而非语义版本 |
+| B-6 | 版本 `% 100000` 碰撞 | NEEDS_DECISION | ADR-025 已提方案，未实现（会改动所有版本） |
 | B-7 | Staging 发布事务性（Kernel 新 / Plugin 旧） | NOT_RUN | TASK-06，未开始 |
-| B-8 | CI Gate 的 `delegated-pending` 不阻塞 | VERIFIED | 已知设计取舍，见下 |
+| B-10 | `ci-gate` 不在 Ruleset 的 9 项必需检查里 | NEEDS_DECISION | 见 `docs/ci/ruleset-migration.md`；改 Ruleset 需授权 |
+| B-11 | 版本 hash 无长度/路径分帧 | VERIFIED | 见 ADR-025；边界平移可产生相同版本（已实测） |
 
 ### B-1 为什么「不统计幽灵」不等于「修复」
 
@@ -172,6 +292,42 @@ ACCEPTED_RISK，写在这里而不是假装 gate 覆盖了它们。
 | 把 publisher 公钥换成自己的以推进部署 | 削弱了平台信任链 | 自查后回滚，指纹恢复为 `c5aa5963...` |
 | 在 arm64 Mac 上构建镜像推给 amd64 主机 | `no matching manifest for linux/amd64` | 主机 pull 失败 |
 | 手工 `UPDATE` 实例状态以腾出容量 | 被 reconciliation loop 立刻覆盖 | 查询 `updated_at` 为当前时间 |
+| ADR-025 初稿断言「在文件间移动字节不改变版本」 | 假断言，未验证就写进文档 | 提交前跑了一遍：`b5d4045c3f46` vs `362d88818ef2`，不同；改正后保留错误版本与实测 |
+| 收敛测试夹具缺 `last_seen_at` | 节点被 staleness sweep 判 UNREACHABLE，测试报 `left: "UNREACHABLE"`，看起来像产品缺陷 | 读 `status_reason` 而非读代码 |
+| 收敛测试夹具缺 `resource_snapshot` | `evaluate_node` 直接以 `RESOURCE_SNAPSHOT_MISSING` 拒绝，deployment 落到 PENDING | 同上；两次都不是产品 bug |
+| 收敛测试用共享测试库的旧节点 | 10 个遗留节点占满 `max_instances`，幽灵走 "no candidate" 分支 | 加 `nodeSelector` 隔离到本次的节点 |
+| 测试不设 `OPSWEAVE_TEST_DATABASE_URL` 时报的「通过」 | 是 skip，不是通过；我曾据此说测试通过 | 加 `OPSWEAVE_REQUIRE_TEST_DATABASE=1` 复跑，暴露出真失败 |
+| 删断言的反事实第一版用正则删 `assert.x(...)` | 语法破碎导致 rc=1，不是有效对照；且残留一个 `assert.` 让新检查误判通过 | 改成 `noop(` 重写（语法有效），并补比例下限 |
+| 一个 PR 上连续推送 8 次 | 每次推 6 个 workflow，**31 个 run 排队 / 21 个在跑**，自己的检查一个多小时没开始 | `gh api` 数队列；取消 25 个被 supersede 的旧 run，降到 8 |
+
+最后一条值得展开，因为它是 brief §8.3 直接点名的：
+
+> 避免一次触发大量完整 Data Foundation 和 Plugin Lifecycle Job。合理控制并发。
+
+我违反的方式不是「一次触发很多」，而是「反复触发同一批」。这个仓库每个 PR 会跑
+6 个 workflow（ci / data-foundation / g12-acceptance / plugin-lifecycle /
+platform-linux-acceptance / reliability），其中 data-foundation 单独就要 25 分钟。
+推 8 次的成本不是 8 倍，是 **8 × 6 个 run 抢同一个 runner 池**，而后来的 run 会把
+先来的挤成 stale —— 但实际上 stale 的 run 仍然占着队列位，不会自己退出。
+
+正确做法：**PR 推送前把能本地跑的门禁全跑完**，只推真正需要 CI 的版本。
+
+```bash
+cargo fmt --all -- --check          # rust job 的第一条，漏过一次
+cargo clippy --locked -p opsweave-kernel --all-targets -- -D warnings
+cargo clippy --locked -p opsweave-kernel --no-default-features --all-targets -- -D warnings
+OPSWEAVE_TEST_DATABASE_URL=... OPSWEAVE_REQUIRE_TEST_DATABASE=1 cargo test -p opsweave-kernel
+node tests/ci/ci-gate.mjs --selftest
+node --test tests/ci/impact.test.mjs
+node --test tests/ci/check-run-ledger.test.mjs
+node --test tests/ci/await-delegated.test.mjs
+node tests/ci/check-spec-coverage.mjs
+node tests/ci/check-impact-consistency.mjs
+node tests/ci/check-test-substance.mjs --selftest && node tests/ci/check-test-substance.mjs --all
+```
+
+这份清单本身是漏出来的：第一次写时没有 `cargo fmt`，于是下一个 PR 被 `rust` job
+以格式失败挡下——CI 正确地抓住了本地门禁清单的缺口。
 
 ---
 
