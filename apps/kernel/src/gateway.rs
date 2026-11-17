@@ -296,7 +296,10 @@ async fn route_candidates(state: &AppState, plugin_id: &str) -> AppResult<Vec<Ro
 
 #[cfg(test)]
 mod tests {
-    use super::{identity_headers, route_candidates, safe_forward_path};
+    // `route_candidates` is imported inside `route_gates` instead: it only
+    // exists with the default features, and a top-level import breaks
+    // `cargo clippy --no-default-features -- -D warnings` with "unused import".
+    use super::{identity_headers, safe_forward_path};
     use uuid::Uuid;
 
     #[test]
@@ -372,10 +375,13 @@ mod tests {
             plugin: String,
             publisher: String,
             node: Uuid,
-            package: Uuid,
-            deployment: Uuid,
             instance: Uuid,
             revision: Uuid,
+            // `package` and `deployment` were read by nothing: the cases reach
+            // them through `instance`/`revision`, which cascade. Keeping unused
+            // fields cost a `-D warnings` failure on the no-default-features
+            // build only, which is exactly the kind of difference between two
+            // CI commands that local runs with one feature set do not catch.
         }
 
         async fn fixture(pool: &PgPool) -> Fixture {
@@ -476,8 +482,6 @@ mod tests {
                 plugin,
                 publisher,
                 node,
-                package,
-                deployment,
                 instance,
                 revision,
             }
