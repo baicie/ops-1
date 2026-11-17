@@ -174,10 +174,24 @@ Error: timed out waiting for deployment readiness
 三件事，按严重程度：
 
 1. **幽灵修复没有解决 staging 的实际问题。** #135–#137 修的是「幽灵占不占容量」，
-   但 staging 上仍然是 4/4。也就是说那 4 行**都不是幽灵**（都有容器，或者都
-   `desired_action='START'` 且状态健康）——或者幽灵判定与实际行不匹配。
-   本轮无法登录主机核实（SSH 凭据只在 CI secrets 里，本地无权限），因此
-   **不能断言是哪一种**。这是 BLOCKED，不是 FIXED。
+   但 staging 上仍然是 4/4。
+
+   日志文案确定了是哪一份计数：`against a per-node limit of 4` 来自
+   `PlacementRejection::InstanceCapacityExceeded { scope: "per-node" }`，
+   而它读的是 `usage.node_instances` = **`global_instance_counts`** —— 也就是
+   **已经排除了幽灵**的那份 SQL。所以那 4 行都通过了幽灵排除。
+
+   可能是哪 4 行：`container_id IS NOT NULL`（有真实容器）或状态不在
+   `UNHEALTHY`/`UNREACHABLE`。本次发布只涉及 `data-catalog` 一个插件，所以
+   这 4 行属于**其它插件的历史实例**，或者 data-catalog 自己的旧 generation。
+   两种都不是幽灵，都不是本轮修复的对象。
+
+   **无法登录主机核实**：SSH 凭据只在 CI secrets 里，本地私钥被拒绝
+   （`Permission denied (publickey)`）。所以「哪 4 行」这个事实本身是 BLOCKED。
+
+   最可能的解释是**节点容量真的只有 4，而且已经被占满**——这不是缺陷，
+   是容量配置。在这种情况下本轮所有容量修复都是对的，但都不改变 staging 的结果。
+   这一点必须说清楚，而不是把它算作「修好了」。
 
 2. **这正是 ADR-026 描述的「Kernel 新 / Plugin 旧」状态，且它真的发生了。**
    Kernel 与 Node 已替换、健康检查通过，然后插件发布失败。平台此刻是一个
