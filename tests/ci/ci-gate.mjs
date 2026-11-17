@@ -48,7 +48,10 @@
  * Exit: 0 pass, 1 fail, 2 bad usage.
  */
 
+import { execFileSync } from 'node:child_process';
 import { analyse, SUITES } from './impact.mjs';
+import { attributeChecks, checkState, UNFINISHED_STATUS } from './check-run-ledger.mjs';
+import { awaitDelegated, DEFAULT_BUDGET_MS } from './await-delegated.mjs';
 
 /**
  * Suites that every pull request must run, whatever it changed.
@@ -180,6 +183,42 @@ export const DELEGATED_CHECKS = {
 };
 
 /**
+ * Suite -> (check name -> the workflow that must have produced it).
+ *
+ * THE TABLE ABOVE IS DERIVED FROM THIS ONE, not maintained beside it. Two tables
+ * that both claim to say which check belongs to which suite is the same shape as
+ * the analyzer/filter drift this whole file exists to catch - and it would drift
+ * the same way, silently, because nothing compares them.
+ *
+ * The workflow is what makes an attribution claim checkable. `acceptance` is
+ * produced by `g12-acceptance.yml`; if `data-foundation.yml` ever grew a job by
+ * that name, a name-only lookup would credit whichever started later. A red
+ * required check could then be masked by a green impostor - and this session has
+ * already been bitten by a gate reading the wrong thing and reporting success.
+ */
+export const DELEGATED_CHECK_OWNERS = {
+  'linux-runtime': { 'linux-runtime': 'platform-linux-acceptance.yml' },
+  'quality-faults': { 'quality-faults': 'reliability.yml' },
+  'data-foundation': {
+    'golden-path': 'data-foundation.yml',
+    'legacy-regression': 'data-foundation.yml',
+  },
+  'browser-e2e': {
+    acceptance: 'g12-acceptance.yml',
+    'golden-path': 'data-foundation.yml',
+  },
+  'plugin-lifecycle': { 'full TypeScript lifecycle': 'plugin-lifecycle.yml' },
+  'runtime-conformance': { conformance: 'runtime-conformance.yml' },
+  'g12-acceptance': { acceptance: 'g12-acceptance.yml' },
+};
+
+// The derived view, asserted equal to the hand-written table above by the
+// selftest, so the two cannot disagree without a red test.
+export const DELEGATED_CHECKS_FROM_OWNERS = Object.fromEntries(
+  Object.entries(DELEGATED_CHECK_OWNERS).map(([suite, owners]) => [suite, Object.keys(owners)]),
+);
+
+/**
  * Suites whose listed checks are ALTERNATIVES rather than facets.
  *
  * `data-foundation` is a facet case: one suite, two jobs that both run, and both
@@ -252,48 +291,104 @@ export const REQUIRE_ANY_CHECK = new Set(['browser-e2e']);
  *        but unfinished carries its status (`in_progress`, `queued`, ...).
  * @param {string[]} suites delegated suites the impact analyzer required
  * @returns {{verified: string[], failed: string[], skipped: string[], pending:
- *            string[], absent: string[], unverifiable: string[]}}
+ *            string[], absent: string[], unverifiable: string[], impostor:
+ *            string[], ambiguous: string[]}}
  */
 const UNFINISHED = new Set(['queued', 'in_progress', 'waiting', 'requested', 'pending']);
 
+/**
+ * Fold a flat name -> conclusion map into the ledger shape.
+ *
+ * `delegatedVerdict` used to take this map directly. It no longer can, because a
+ * flat map has already thrown away the two facts that decide the hard cases: the
+ * attempt history behind a re-run, and which workflow produced the check. Kept as
+ * a named adapter rather than an inline literal so the lossiness is visible: any
+ * caller still holding a flat map gets `workflow: null`, which the verdict
+ * reports as `ambiguous` when a name has several producers and as normal
+ * `absent`/`success` when it has one.
+ */
+export function ledgerFromFlat(checks) {
+  const byName = {};
+  for (const [name, state] of Object.entries(checks ?? {})) {
+    if (state === null || state === undefined) continue;
+    byName[name] = [{ name, state: String(state), status: String(state), conclusion: null, workflow: null, suiteId: null, startedAt: null, runId: null }];
+  }
+  return { byName, unattributed: [], duplicates: [], suites: {} };
+}
+
+/**
+ * Decide each delegated suite from the ledger.
+ *
+ * THE STATES, and why `pending` is no longer a PASS:
+ *
+ *   verified      every facet (or, for an alternative suite, one alternative) is
+ *                 `success` on this commit, produced by the workflow that owns it.
+ *   failed        it exists and did not pass. A merge blocker.
+ *   skipped       it exists and was skipped. A merge blocker for a required suite.
+ *   pending       still running when the caller gave up waiting. THE CALLER NOW
+ *                 WAITS (`await-delegated.mjs`), and a suite still unfinished
+ *                 after the budget is a `timeout`, not a pass.
+ *   absent        no check with that name on this commit. The workflow did not run.
+ *   impostor      a check with that name exists, produced by a DIFFERENT workflow
+ *                 than the one that owns the suite.
+ *   ambiguous     the name has producers in more than one workflow and the caller
+ *                 did not say which one it wanted.
+ *   unverifiable  the suite has no check mapping at all.
+ *
+ * `pending` is retained as a state because a caller may still choose to read
+ * without waiting (the CLI's `--no-wait`). In that mode it is reported and does
+ * not fail - but it is never a pass, and the CLI prints the explicit warning that
+ * the decision was made before the result existed.
+ */
 export function delegatedVerdict(checks, suites) {
+  const ledger = checks && checks.byName ? checks : ledgerFromFlat(checks);
   const verified = [];
   const failed = [];
   const skipped = [];
   const pending = [];
   const absent = [];
   const unverifiable = [];
+  const impostor = [];
+  const ambiguous = [];
+
   for (const suite of suites) {
-    const names = DELEGATED_CHECKS[suite];
-    if (!names) { unverifiable.push(suite); continue; }
-    const states = names.map((n) => [n, checks[n] ?? null]);
-    const missing = states.filter(([, c]) => c === null).map(([n]) => n);
-    const unfinished = states.filter(([, c]) => c !== null && UNFINISHED.has(c)).map(([n, c]) => `${n}: ${c}`);
-    // A check that is skipped is red for this purpose even when a sibling is
-    // still running: the answer for that facet is already known and it is "no".
-    const skippedNow = states.filter(([, c]) => c === 'skipped').map(([n]) => n);
-    const red = states.filter(([, c]) => c !== null && c !== 'success'
-      && !UNFINISHED.has(c) && c !== 'skipped').map(([n, c]) => `${n}: ${c}`);
-    const green = states.filter(([, c]) => c === 'success').map(([n]) => n);
+    const owners = DELEGATED_CHECK_OWNERS[suite];
+    if (!owners) { unverifiable.push(suite); continue; }
+    const names = Object.keys(owners);
+
+    const states = names.map((n) => [n, checkState(ledger.byName, n, { workflow: owners[n] })]);
+    const byState = (s) => states.filter(([, st]) => st.state === s).map(([n, st]) => `${n}: ${st.reason}`);
+
+    const green = states.filter(([, st]) => st.state === 'success').map(([n]) => n);
+    const red = byState('failed');
+    const skippedNow = states.filter(([, st]) => st.state === 'skipped').map(([n]) => n);
+    const unfinished = byState('pending');
+    const missing = states.filter(([, st]) => st.state === 'absent').map(([n, st]) => `${n}: ${st.reason}`);
+    const impostors = byState('impostor');
+    const ambiguousNow = byState('ambiguous');
 
     // Alternatives: one green check is the whole answer, and only a failure when
     // EVERY alternative ran and none of them passed.
     if (REQUIRE_ANY_CHECK.has(suite)) {
       if (green.length) { verified.push(`${suite} (${green.join(', ')})`); continue; }
-      if (red.length) { failed.push(`${suite} (${red.join(', ')})`); continue; }
+      if (red.length) { failed.push(`${suite} (${red.join('; ')})`); continue; }
+      if (impostors.length) { impostor.push(`${suite} (${impostors.join('; ')})`); continue; }
+      if (ambiguousNow.length) { ambiguous.push(`${suite} (${ambiguousNow.join('; ')})`); continue; }
       if (skippedNow.length) { skipped.push(`${suite} (${skippedNow.join(', ')} was skipped)`); continue; }
-      if (unfinished.length) { pending.push(`${suite} (${unfinished.join(', ')}); no alternative had finished when this gate ran`); continue; }
-      absent.push(`${suite} (none of ${names.join(', ')} exists on this commit; no workflow that produces it ran)`);
+      if (unfinished.length) { pending.push(`${suite} (${unfinished.join('; ')}); no alternative had finished when this gate gave up`); continue; }
+      absent.push(`${suite} (none of ${names.join(', ')} exists on this commit from the workflow that owns it)`);
       continue;
     }
 
     if (skippedNow.length) { skipped.push(`${suite} (${skippedNow.join(', ')} was skipped)`); continue; }
-    if (red.length) { failed.push(`${suite} (${red.join(', ')})`); continue; }
-    if (unfinished.length) { pending.push(`${suite} (${unfinished.join(', ')}); the result did not exist when this gate ran`); continue; }
-    if (missing.length) { absent.push(`${suite} (no check named ${missing.join(', ')} on this commit; ${DELEGATED[suite]} did not run for it)`); continue; }
+    if (red.length) { failed.push(`${suite} (${red.join('; ')})`); continue; }
+    if (impostors.length) { impostor.push(`${suite} (${impostors.join('; ')})`); continue; }
+    if (ambiguousNow.length) { ambiguous.push(`${suite} (${ambiguousNow.join('; ')})`); continue; }
+    if (unfinished.length) { pending.push(`${suite} (${unfinished.join('; ')}); the result did not exist when this gate gave up`); continue; }
+    if (missing.length) { absent.push(`${suite} (${missing.join('; ')})`); continue; }
     verified.push(suite);
   }
-  return { verified, failed, skipped, pending, absent, unverifiable };
+  return { verified, failed, skipped, pending, absent, unverifiable, impostor, ambiguous };
 }
 
 /**
@@ -325,7 +420,7 @@ export function normaliseNeeds(raw) {
   return out;
 }
 
-export function gate(rawNeeds, impact) {
+export function gate(rawNeeds, impact, ledgerForGate = null) {
   const needs = normaliseNeeds(rawNeeds);
   const required = new Set(HARD_REQUIRED);
   for (const suite of SUITES) {
@@ -452,6 +547,37 @@ export function gate(rawNeeds, impact) {
       notes.push(`${jobId} is not mapped to an impact suite; the gate cannot attribute its result`);
     } else {
       failed.push(`${jobId}: ${result}; this job is not mapped to an impact suite, but it ran on this commit`);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // PART 3 — no RED check on this commit goes unmentioned.
+  //
+  // Parts 1 and 2 only see what `ci.yml` hands the gate: its own `needs`. Every
+  // check produced by ANOTHER workflow is invisible there unless the impact
+  // analyzer happened to require its suite. Measured on a real commit: twelve
+  // checks from `staging-preview.yml` - including `deploy to staging host` - fell
+  // through as "not mapped to an impact suite" NOTES, so a failed deploy would
+  // have printed a note and passed the gate.
+  //
+  // The ruleset does not require those checks either, so this is the only place
+  // that would notice. `ci-gate` is not itself a required check today (see
+  // docs/ci/ruleset-migration.md) — which is why the honest fix is BOTH: report
+  // it here, and ask a human to make this check required.
+  //
+  // A green unmapped check stays a note: it is not a hole, only an attribution
+  // gap. A red one is a red check on this commit, and the gate is not the place
+  // it goes to be forgotten.
+  // ---------------------------------------------------------------------------
+  for (const [name, runs] of Object.entries(ledgerForGate?.byName ?? {})) {
+    if (runs.length === 0) continue;
+    const st = checkState(ledgerForGate.byName, name, {});
+    // Skip the checks this gate already decided in parts 1 and 2 - by name, so a
+    // ci.yml job and a foreign check with the same name cannot double-report.
+    if (Object.values(DELEGATED_CHECK_OWNERS).some((o) => name in o)) continue;
+    if (st.state === 'failed') {
+      const from = [...new Set(runs.map((r) => r.workflow ?? 'unattributable'))].join(', ');
+      failed.push(`${name} (${from}: ${st.reason}; this check is not mapped to a suite, but it ran on this commit)`);
     }
   }
 
@@ -720,10 +846,9 @@ const DELEGATED_SELFTEST = [
     // its conclusion. Measured live in the gate's own log:
     // {"acceptance":"in_progress","golden-path":"in_progress"}. `in_progress` and
     // `queued` are not successes and must not be read as one - but they are not
-    // failures either. `ci-gate` cannot wait on another workflow's run, so it
-    // necessarily sees its siblings mid-flight; folding that into `failed` made it
-    // the first red on a branch whose other 23 checks were green.
-    name: 'delegated: a check still in progress is PENDING, not a failure',
+    // failures either: the caller WAITS on them and only reports `pending` when
+    // the budget runs out, which is then a timeout and a FAIL.
+    name: 'delegated: a check still in progress is PENDING, not a pass',
     suites: ['data-foundation'],
     checks: { 'golden-path': 'in_progress', 'legacy-regression': 'queued' },
     want: { verified: 0, failed: 0, skipped: 0, pending: 1, absent: 0, unverifiable: 0 },
@@ -788,10 +913,123 @@ const DELEGATED_SELFTEST = [
     checks: { anything: 'success' },
     want: { verified: 0, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 1 },
   },
+
+  // ---------------------------------------------------------------------------
+  // ATTRIBUTION. These are why the ledger exists. Before it, a check name was
+  // taken at face value no matter which workflow produced it, so a green check by
+  // the wrong workflow could satisfy a required suite - and this repository has
+  // already been bitten once by a gate that read the wrong thing and reported
+  // success (a red g13b17-principal produced a green gate).
+  // ---------------------------------------------------------------------------
+  {
+    // The impostor, green. `acceptance` is g12-acceptance's check. A job of that
+    // name in data-foundation.yml must NOT satisfy g12-acceptance.
+    name: 'delegated: a green check from the WRONG workflow does not verify',
+    suites: ['g12-acceptance'],
+    checks: { acceptance: 'success' },
+    from: { acceptance: 'data-foundation.yml' },
+    want: { verified: 0, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 0, impostor: 1 },
+  },
+  {
+    // The impostor, red. The other direction: a red check from the wrong workflow
+    // must not block a suite whose own check never ran.
+    name: 'delegated: a red check from the WRONG workflow does not fail the suite',
+    suites: ['g12-acceptance'],
+    checks: { acceptance: 'failure' },
+    from: { acceptance: 'data-foundation.yml' },
+    want: { verified: 0, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 0, impostor: 1 },
+  },
+  {
+    // The right workflow, and it is green.
+    name: 'delegated: the owning workflow satisfies the suite',
+    suites: ['g12-acceptance'],
+    checks: { acceptance: 'success' },
+    from: { acceptance: 'g12-acceptance.yml' },
+    want: { verified: 1, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
+  },
+  {
+    // A re-run: the first attempt failed, the second passed. The latest completed
+    // attempt is the answer - that is what re-running means.
+    name: 'delegated: a re-run that passed clears the earlier failure',
+    suites: ['linux-runtime'],
+    checks: { 'linux-runtime': 'success' },
+    attempts: { 'linux-runtime': ['failure', 'success'] },
+    want: { verified: 1, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
+  },
+  {
+    // And the reverse: green then red. The latest attempt is red, so the suite is.
+    name: 'delegated: a re-run that failed is a failure even after a green attempt',
+    suites: ['linux-runtime'],
+    checks: { 'linux-runtime': 'failure' },
+    attempts: { 'linux-runtime': ['success', 'failure'] },
+    want: { verified: 0, failed: 1, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
+  },
+  {
+    // A name with two producers and no owner in the table: the caller cannot say
+    // which one it wanted, so the gate refuses to guess. This is the state a
+    // suite would be in if it were mapped in DELEGATED_CHECKS but not in
+    // DELEGATED_CHECK_OWNERS - the reason the owner table exists.
+    name: 'delegated: a two-producer name with no declared owner is ambiguous',
+    suites: ['a-suite-nobody-mapped'],
+    checks: { conformance: 'success' },
+    from: { conformance: 'runtime-conformance.yml' },
+    alsoFrom: { conformance: 'data-foundation.yml' },
+    want: { verified: 0, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 1, ambiguous: 0 },
+  },
 ];
+/**
+ * Turn a compact fixture into the ledger `delegatedVerdict` now reads.
+ *
+ * A fixture says `checks: {acceptance: 'success'}`; the ledger needs to know
+ * which workflow produced it, because that is what attribution means. The
+ * default is the OWNING workflow from DELEGATED_CHECK_OWNERS - i.e. "the right
+ * one" - and a case overrides it per name with `from:` to simulate an impostor.
+ * `attempts:` produces several runs of one name in order, which is how a re-run
+ * is expressed; `started_at` rises with each so "latest" is well defined.
+ * `unowned: true` leaves the workflow null, which is the shape a flat
+ * name -> conclusion map collapses to.
+ */
+function fixtureLedger(c) {
+  const owners = {};
+  for (const suite of c.suites) Object.assign(owners, DELEGATED_CHECK_OWNERS[suite] ?? {});
+  const byName = {};
+  let tick = 0;
+  for (const [name, state] of Object.entries(c.checks ?? {})) {
+    const workflow = c.unowned
+      ? null
+      : (c.from?.[name] ?? owners[name] ?? null);
+    const attempts = c.attempts?.[name] ?? [state];
+    byName[name] = attempts.map((attemptState) => {
+      tick += 1;
+      const finished = !UNFINISHED.has(attemptState);
+      return {
+        name,
+        state: attemptState,
+        status: finished ? 'completed' : attemptState,
+        conclusion: finished ? attemptState : null,
+        workflow,
+        suiteId: workflow == null ? null : `suite-${workflow}`,
+        startedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, tick)).toISOString(),
+        runId: String(tick),
+      };
+    });
+  }
+  // `unowned` also has to look like two producers, or `checkState` sees a single
+  // unattributed run and reports it as an ordinary answer rather than ambiguous.
+  if (c.unowned) {
+    for (const name of Object.keys(byName)) {
+      const base = byName[name][0];
+      byName[name].push({ ...base, workflow: 'reliability.yml', suiteId: 'suite-reliability.yml', startedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, 0)).toISOString() });
+    }
+  }
+  return { byName, unattributed: [], duplicates: [], suites: {} };
+}
 
 function selftest() {
   let bad = 0;
+  // Tracked explicitly so the summary reports how many assertions actually ran.
+  const baseChecks = SELFTEST.length;
+  let inlineChecks = 0;
   for (const c of SELFTEST) {
     const got = gate(c.needs, c.impact);
     const okVerdict = got.verdict === c.want;
@@ -811,36 +1049,115 @@ function selftest() {
     // reason is the defect class this whole file exists to prevent.
     if (c.becauseFailed) okReason = okReason && c.becauseFailed.test(got.failed.join('\n'));
     const ok = okVerdict && okReason;
+    inlineChecks += 1;
     if (!ok) bad += 1;
     process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ${c.want}${c.because ? ` because ${c.because}` : ''}, got ${got.verdict} (failed=${got.failed.length} skipped=${got.skippedRequired.length} notWired=${got.notWired.length} delegated=${got.delegated.length})\n`);
   }
+  // PART 3: a red check from a workflow the gate does not own.
+  {
+    const ledger = {
+      byName: {
+        'deploy to staging host': [{ name: 'deploy to staging host', state: 'failure', status: 'completed', conclusion: 'failure', workflow: 'staging-preview.yml', suiteId: 's1', startedAt: '2026-01-01T00:00:00Z', runId: '1' }],
+      },
+      unattributed: [], duplicates: [], suites: {},
+    };
+    const impact = { suites: Object.fromEntries(SUITES.map((x) => [x, false])), unmatched: [] };
+    const got = gate(ALL_OWNED_GREEN, impact, ledger);
+    const ok = got.verdict === 'FAIL' && got.failed.some((f) => /deploy to staging host/.test(f));
+    inlineChecks += 1;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} a red check from another workflow fails the gate: got ${got.verdict} failed=${JSON.stringify(got.failed)}\n`);
+  }
+  // PART 3 does not invent failures: a green foreign check stays out of `failed`.
+  {
+    const ledger = {
+      byName: {
+        'smoke the preview': [{ name: 'smoke the preview', state: 'success', status: 'completed', conclusion: 'success', workflow: 'staging-preview.yml', suiteId: 's2', startedAt: '2026-01-01T00:00:00Z', runId: '2' }],
+      },
+      unattributed: [], duplicates: [], suites: {},
+    };
+    const impact = { suites: Object.fromEntries(SUITES.map((x) => [x, false])), unmatched: [] };
+    const got = gate(ALL_OWNED_GREEN, impact, ledger);
+    const ok = got.verdict === 'PASS' && got.failed.length === 0;
+    inlineChecks += 1;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} a green check from another workflow is not a failure: got ${got.verdict}\n`);
+  }
+  // And a name the delegated tables own is decided by delegatedVerdict, not here -
+  // otherwise one red check would be reported twice with two different reasons.
+  {
+    const ledger = {
+      byName: {
+        'linux-runtime': [{ name: 'linux-runtime', state: 'failure', status: 'completed', conclusion: 'failure', workflow: 'platform-linux-acceptance.yml', suiteId: 's3', startedAt: '2026-01-01T00:00:00Z', runId: '3' }],
+      },
+      unattributed: [], duplicates: [], suites: {},
+    };
+    const impact = { suites: Object.fromEntries(SUITES.map((x) => [x, false])), unmatched: [] };
+    const got = gate(ALL_OWNED_GREEN, impact, ledger);
+    const ok = got.failed.filter((f) => /linux-runtime/.test(f)).length === 0;
+    inlineChecks += 1;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} PART 3 does not double-report a delegated check: ${JSON.stringify(got.failed)}\n`);
+  }
+
   for (const c of DELEGATED_SELFTEST) {
-    const got = delegatedVerdict(c.checks, c.suites);
+    const got = delegatedVerdict(fixtureLedger(c), c.suites);
     const ok = got.verified.length === c.want.verified
       && got.failed.length === c.want.failed
       && got.skipped.length === c.want.skipped
       && got.pending.length === c.want.pending
       && got.absent.length === c.want.absent
-      && got.unverifiable.length === c.want.unverifiable;
+      && got.unverifiable.length === c.want.unverifiable
+      // `undefined` in a fixture means "must be zero", which keeps the 20 cases
+      // written before attribution existed readable.
+      && got.impostor.length === (c.want.impostor ?? 0)
+      && got.ambiguous.length === (c.want.ambiguous ?? 0);
     if (!ok) bad += 1;
-    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ${JSON.stringify(c.want)}, got verified=${got.verified.length} failed=${got.failed.length} skipped=${got.skipped.length} pending=${got.pending.length} absent=${got.absent.length} unverifiable=${got.unverifiable.length}\n`);
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ${JSON.stringify(c.want)}, got verified=${got.verified.length} failed=${got.failed.length} skipped=${got.skipped.length} pending=${got.pending.length} absent=${got.absent.length} unverifiable=${got.unverifiable.length} impostor=${got.impostor.length} ambiguous=${got.ambiguous.length}\n`);
   }
-  const total = SELFTEST.length + DELEGATED_SELFTEST.length;
-  process.stdout.write(bad === 0 ? `gate selftest: ${total}/${total} pass\n` : `gate selftest: ${bad} FAILED\n`);
+
+  // The two tables that both claim to say which check belongs to which suite must
+  // not be able to disagree. Two copies of one fact is exactly the drift this
+  // file exists to catch, so the derived one is compared to the hand-written one
+  // here rather than trusted.
+  {
+    const mismatch = [];
+    for (const suite of new Set([...Object.keys(DELEGATED_CHECKS), ...Object.keys(DELEGATED_CHECKS_FROM_OWNERS)])) {
+      const a = [...(DELEGATED_CHECKS[suite] ?? [])].sort().join(',');
+      const b = [...(DELEGATED_CHECKS_FROM_OWNERS[suite] ?? [])].sort().join(',');
+      if (a !== b) mismatch.push(`${suite}: ${a || '(none)'} vs ${b || '(none)'}`);
+    }
+    const ok = mismatch.length === 0;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} the check table and the owner table agree${ok ? '' : `: ${mismatch.join('; ')}`}\n`);
+  }
+  // Count what actually ran, not the size of two arrays: the inline cases above
+  // (PART 3, the owner-table agreement) are not in either array, and a total that
+  // ignores them under-reports the coverage.
+  const ran = baseChecks + DELEGATED_SELFTEST.length + inlineChecks;
+  process.stdout.write(bad === 0 ? `gate selftest: ${ran}/${ran} pass\n` : `gate selftest: ${bad} of ${ran} FAILED\n`);
   return bad === 0 ? 0 : 1;
 }
 
-function main(argv) {
+async function main(argv) {
   if (argv.includes('--selftest')) return selftest();
 
   let needsJson = null;
   let impactJson = null;
   let checksJson = null;
+  let workflowRunsJson = null;
+  let noWait = false;
+  let fetchMode = false;
+  let budgetMs = DEFAULT_BUDGET_MS;
   let files = [];
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--needs-json') { needsJson = argv[++i]; }
     else if (argv[i] === '--impact-json') { impactJson = argv[++i]; }
     else if (argv[i] === '--checks-json') { checksJson = argv[++i]; }
+    else if (argv[i] === '--workflow-runs-json') { workflowRunsJson = argv[++i]; }
+    else if (argv[i] === '--fetch') { fetchMode = true; }
+    else if (argv[i] === '--no-wait') { noWait = true; }
+    else if (argv[i] === '--budget-ms') { budgetMs = Number(argv[++i]); }
     else if (argv[i] === '--files') { while (i + 1 < argv.length && !argv[i + 1].startsWith('--')) files.push(argv[++i]); }
     else { process.stderr.write(`ci-gate: unknown argument ${argv[i]}\n`); return 2; }
   }
@@ -850,7 +1167,62 @@ function main(argv) {
   try { needs = JSON.parse(needsJson); } catch { process.stderr.write('ci-gate: --needs-json is not JSON\n'); return 2; }
   const impact = impactJson ? JSON.parse(impactJson) : analyse(files);
 
-  const result = gate(needs, impact);
+  // ---------------------------------------------------------------------------
+  // Read the ledger BEFORE `gate()` runs, not after.
+  //
+  // `gate()` needs it for PART 3 (no red check on this commit goes unmentioned),
+  // and the delegated verdict needs it for attribution. Reading it in two places
+  // is how the first version of this drifted into reading twice and judging a
+  // third time; there is one reader and both consumers get its output.
+  //
+  // A THROWN FETCH IS NOT AN EMPTY COMMIT. The old pipeline ended in
+  // `2>/dev/null || echo '{}'`, so a TLS handshake timeout - measured against
+  // api.github.com in this session - became "no checks exist" and then
+  // `delegated-absent` for every suite: red for a reason that has nothing to do
+  // with the commit, and indistinguishable from the real defect the lookup exists
+  // to catch. It is reported as `delegated-api-error` and the gate fails.
+  // ---------------------------------------------------------------------------
+  let ledger = null;
+  let apiError = null;
+  let readLedgerRef = null;
+  const wantLedger = fetchMode || checksJson !== null;
+  if (wantLedger) {
+    if (fetchMode) {
+      try {
+        const fetchPages = (endpoint) => {
+          const pages = JSON.parse(execFileSync('gh', [
+            'api', '--paginate', '--slurp', endpoint,
+          ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+          return pages.flat();
+        };
+        const readLedger = () => {
+          const checkPages = fetchPages(`/repos/${process.env.REPO}/commits/${process.env.CHECKS_SHA}/check-runs?per_page=100`);
+          const runPages = fetchPages(`/repos/${process.env.REPO}/actions/runs?head_sha=${process.env.CHECKS_SHA}&per_page=100`);
+          return {
+            checkRuns: checkPages.flatMap((p) => p.check_runs ?? []),
+            workflowRuns: runPages.flatMap((p) => p.workflow_runs ?? []),
+          };
+        };
+        readLedgerRef = readLedger;
+        const { checkRuns, workflowRuns } = readLedger();
+        ledger = attributeChecks(checkRuns, workflowRuns);
+      } catch (error) {
+        apiError = String(error?.stderr?.toString?.() ?? error?.message ?? error);
+      }
+    } else {
+      let checks;
+      try { checks = JSON.parse(checksJson); } catch { process.stderr.write('ci-gate: --checks-json is not JSON\n'); return 2; }
+      ledger = Array.isArray(checks)
+        ? attributeChecks(checks, workflowRunsJson ? JSON.parse(workflowRunsJson) : [])
+        : (checks.byName ? checks : ledgerFromFlat(checks));
+    }
+    if (ledger === null) {
+      process.stdout.write(`\nverdict: FAIL\n  delegated-api-error: the check-run API could not be read for this commit; no delegated suite can be judged\n  ${String(apiError).split('\n')[0]}\n`);
+      return 1;
+    }
+  }
+
+  const result = gate(needs, impact, ledger);
   let verdict = result.verdict;
 
   // The delegated suites: `gate()` can only say "another workflow owns this".
@@ -858,29 +1230,80 @@ function main(argv) {
   // Without them it still reports each one, but as unverified - it never claims
   // a suite it did not read.
   let del = null;
-  if (checksJson !== null) {
-    let checks;
-    try { checks = JSON.parse(checksJson); } catch { process.stderr.write('ci-gate: --checks-json is not JSON\n'); return 2; }
+  let timedOut = [];
+  if (ledger !== null) {
     const requiredDelegated = result.delegated
       .map((line) => line.split(' ')[0])
-      .filter((s) => s in DELEGATED_CHECKS);
-    del = delegatedVerdict(checks, requiredDelegated);
-    // `pending` is NOT a failure: the workflow started, so a result will exist.
-    // `skipped` and `absent` are, and `absent` is the one this lookup exists for.
-    if (del.failed.length || del.skipped.length || del.absent.length) verdict = 'FAIL';
+      .filter((s) => s in DELEGATED_CHECK_OWNERS);
+
+    del = delegatedVerdict(ledger, requiredDelegated);
+
+    // WAIT for the suites that are running, then judge. Without this, "pending"
+    // was reported and the gate passed - and because these suites are not in the
+    // branch ruleset, a suite that started, was called "pending", and then FAILED
+    // left a green gate behind it and a merge nothing objected to.
+    if (!noWait && del.pending.length > 0) {
+      const wanted = [];
+      for (const suite of requiredDelegated) {
+        const owners = DELEGATED_CHECK_OWNERS[suite];
+        if (!owners) continue;
+        for (const [name, workflow] of Object.entries(owners)) wanted.push({ name, workflow, suite });
+      }
+      // Only `--fetch` can re-read: `--checks-json` is a snapshot the caller took,
+      // and polling a snapshot would loop forever on the same stale answer.
+      if (readLedgerRef !== null) {
+        const outcome = await awaitDelegated({
+          read: () => {
+            const { checkRuns, workflowRuns } = readLedgerRef();
+            return { ledger: attributeChecks(checkRuns, workflowRuns), workflowRuns };
+          },
+          wanted,
+          budgetMs,
+          log: (line) => process.stdout.write(`  wait: ${line}\n`),
+        });
+        timedOut = outcome.timedOut;
+        // Judge from a fresh read rather than the loop's last snapshot: a suite can
+        // settle between the final poll and this line, and the verdict printed
+        // below must come from the same data as the judgement.
+        const { checkRuns, workflowRuns } = readLedgerRef();
+        del = delegatedVerdict(attributeChecks(checkRuns, workflowRuns), requiredDelegated);
+      } else {
+        process.stdout.write('  wait: not waiting - --checks-json is a fixed snapshot; pass --fetch to wait for running suites\n');
+      }
+    }
+
+    // A suite still running after the budget is a TIMEOUT, and a timeout is a
+    // FAIL. "It did not finish in the time its own p95 says it needs" is not
+    // "probably fine"; it is a result that does not exist, and this gate does not
+    // merge on those. `--no-wait` is the only way to read without judging, and it
+    // says so in the summary.
+    if (del.failed.length || del.skipped.length || del.absent.length
+      || del.impostor.length || del.ambiguous.length
+      || (!noWait && del.pending.length)) verdict = 'FAIL';
   }
 
   const out = { ...result, verdict };
   if (del) out.delegatedResults = del;
+  if (timedOut.length) out.timedOut = timedOut;
   process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
   process.stdout.write(`\nverdict: ${verdict}\n`);
   if (del) {
     for (const v of del.verified) process.stdout.write(`  delegated-verified: ${v}\n`);
     for (const f of del.failed) process.stdout.write(`  delegated-failed: ${f}\n`);
     for (const s of del.skipped) process.stdout.write(`  delegated-skipped: ${s}\n`);
-    for (const p of del.pending) process.stdout.write(`  delegated-pending: ${p}\n`);
+    for (const i of del.impostor) process.stdout.write(`  delegated-impostor: ${i}\n`);
+    for (const a of del.ambiguous) process.stdout.write(`  delegated-ambiguous: ${a}\n`);
     for (const a of del.absent) process.stdout.write(`  delegated-absent: ${a}\n`);
     for (const u of del.unverifiable) process.stdout.write(`  delegated-unverifiable: ${u}\n`);
+    if (del.pending.length) {
+      for (const p of del.pending) process.stdout.write(`  delegated-pending: ${p}\n`);
+      if (noWait) {
+        process.stdout.write('  WARNING: --no-wait was set. The suites above had no result when this gate ran.\n');
+        process.stdout.write('  WARNING: this is NOT a pass for them. The CLI returned PASS only because it was told not to wait.\n');
+      } else {
+        process.stdout.write(`  delegated-timeout: ${del.pending.length} suite(s) still running after ${Math.round(budgetMs / 1000)}s\n`);
+      }
+    }
   }
   if (verdict === 'FAIL') {
     for (const f of result.failed) process.stdout.write(`  failed: ${f}\n`);
@@ -895,5 +1318,7 @@ function main(argv) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  process.exit(main(process.argv.slice(2)));
+  // `main` is async because the delegated wait is: the gate now blocks on a
+  // bounded poll rather than reading whatever happened to exist at start.
+  process.exit(await main(process.argv.slice(2)));
 }

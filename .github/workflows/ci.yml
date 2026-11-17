@@ -1309,17 +1309,29 @@ jobs:
   # wired, cancelled counted as pass).
   ci-gate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # 40 minutes, not 10.
+    #
+    # The gate now WAITS for the suites other workflows produce instead of reading
+    # whatever happened to exist when it started. The budget is 30 minutes
+    # (`DEFAULT_BUDGET_MS`), derived from measured p95: data-foundation.yml is
+    # 1530 s, plugin-lifecycle.yml 1174 s. A job timeout below the wait budget
+    # would kill the gate mid-wait and report a cancelled check, which is a
+    # different and less useful failure than a timeout with a reason.
+    timeout-minutes: 40
     if: always()
     # `checks: read` is what lets this job stop taking the other workflows on
-    # faith. It queries the check runs on THIS commit by name, so a suite the
-    # impact analyzer requires whose workflow never started (a path filter that
-    # does not match, a `paths:` typo, a disabled workflow) produces "absent"
-    # instead of a silent pass. Read-only; the workflow-level default is
-    # `contents: read` and this adds one scope.
+    # faith. It queries the check runs on THIS commit - by name, AND by the
+    # workflow that produced them - so a suite the impact analyzer requires whose
+    # workflow never started produces "absent" instead of a silent pass, and a
+    # check by the wrong workflow cannot be credited to the right one.
+    # `actions: read` is for the second half of that: check runs carry a
+    # check_suite id, and only the workflow-runs endpoint says which workflow a
+    # check_suite belongs to.
+    # Read-only; the workflow-level default is `contents: read`.
     permissions:
       contents: read
       checks: read
+      actions: read
     needs:
       - scope
       - rust
@@ -1409,12 +1421,24 @@ jobs:
           #
           # A push to main has no `pull_request.head.sha`; the check runs are then
           # queried for github.sha, which is the same commit for that event.
-          CHECKS_SHA="${HEAD_SHA:-$GITHUB_SHA}"
-          CHECKS="$(gh api --paginate \
-            "/repos/$REPO/commits/$CHECKS_SHA/check-runs?per_page=100" \
-            --jq '[.check_runs[] | {name, conclusion, status, started: .started_at}] | sort_by(.started // "") | group_by(.name) | map(last) | map({key: .name, value: (if .conclusion == null then .status else .conclusion end)}) | from_entries' \
-            2>/dev/null || echo '{}')"
-          echo "check runs on $CHECKS_SHA:"; printf '%s\n' "$CHECKS" | head -c 2000; echo
+          # The old read here had two defects, both measured:
+          #
+          #  1. `--paginate` with `--jq` prints ONE ARRAY PER PAGE, not one array.
+          #     A commit with 23 check runs fits in a single page of 100, so this
+          #     was invisible - but the moment a commit crosses 100 the caller
+          #     feeds a multi-document stream to JSON.parse and dies with a syntax
+          #     error instead of a verdict. `--slurp` collects the pages into one
+          #     array of pages, which is what the caller then flattens.
+          #  2. `group_by(.name) | map(last)` threw away `check_suite.id`, the only
+          #     field that says WHICH workflow produced a check. ci-gate.mjs now
+          #     joins that against the workflow-runs endpoint, so a check by the
+          #     wrong workflow is `delegated-impostor` rather than credited.
+          #
+          # The fetch is left to ci-gate.mjs (it re-reads on every poll while
+          # waiting), so this step only hands it the SHA and the token.
+          export CHECKS_SHA="${HEAD_SHA:-$GITHUB_SHA}"
+          export REPO
+          echo "gate will read check runs and workflow runs for $CHECKS_SHA"
 
           # `|| true` because this script runs under `set -e`: without it a gate
           # that exits 1 ends the step on the spot, the summary below is never
@@ -1422,8 +1446,17 @@ jobs:
           # explanation - which is exactly what happened on the #120 merge commit
           # (61b73f0). The comment on the block below says "capture, write the
           # summary, then fail"; this line is what makes that true.
+          #
+          # `--fetch` tells the gate to read the ledger itself, which is what lets
+          # it poll while suites are still running. Passing a shell-built snapshot
+          # here is what made the old gate judge a moving target once and never
+          # look again.
           GATE_RC=0
-          node tests/ci/ci-gate.mjs --needs-json "$NEEDS" --impact-json "$IMPACT" --checks-json "$CHECKS" > /tmp/gate.txt 2>&1 || GATE_RC=$?
+          node tests/ci/ci-gate.mjs \
+            --needs-json "$NEEDS" \
+            --impact-json "$IMPACT" \
+            --fetch \
+            --budget-ms "${GATE_BUDGET_MS:-1800000}" > /tmp/gate.txt 2>&1 || GATE_RC=$?
           cat /tmp/gate.txt
           # Deliberately not `| tee`: under `set -e` a `ci-gate` exit of 1 ends the
           # step before the summary is written, and a red gate is exactly when the
