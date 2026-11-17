@@ -60,6 +60,38 @@ PLUGINS=(data-catalog data-integration)
 say() { printf '%s\n' "$*"; }
 die() { printf '::error::%s\n' "$*" >&2; exit 1; }
 
+# The publisher private key must not outlive this script inside the kernel
+# container. It used to be removed at the end of the loop, which is a line that
+# `set -e` skips whenever `bundle`, `install` or `deploy` fails - so the exit
+# path that most needs the cleanup was the one that never reached it. The key
+# then sat in a long-running container at /tmp/publisher.key until the next
+# deploy recreated it.
+#
+# The trap runs on success, failure, SIGINT and SIGTERM. It is deliberately
+# narrow: one known path inside one known container, not a sweep - this script
+# does not own anything else in there.
+KEY_IN_CONTAINER=0
+cleanup() {
+  local rc=$?
+  if [ "$KEY_IN_CONTAINER" = "1" ]; then
+    if sudo docker exec "$KERNEL_CONTAINER" rm -f /tmp/publisher.key 2>/dev/null; then
+      KEY_IN_CONTAINER=0
+    else
+      # Say so rather than exiting quietly: a key left behind is a fact the
+      # operator has to know about, and a silent success would hide it.
+      printf '::error::could not remove /tmp/publisher.key from %s; the publisher private key may still be in that container\n' \
+        "$KERNEL_CONTAINER" >&2
+    fi
+  fi
+  # The staging copies are not secret material (assembled manifests), but a
+  # failed run should not leave half-built trees either.
+  sudo rm -rf /tmp/opsweave-bundle-* 2>/dev/null || true
+  return "$rc"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 [ -d "$SRC/plugins" ] || die "no plugin source at $SRC"
 for name in "${PLUGINS[@]}"; do
   [ -f "$SRC/plugins/$name/web/dist/remoteEntry.js" ] \
@@ -90,7 +122,13 @@ for name in "${PLUGINS[@]}"; do
     say "$name: building $version"
     sudo docker build --build-arg PLUGIN_VERSION="$version" -t "$img" "$dir" >/dev/null
   fi
-  sudo docker push "$img" >/dev/null 2>&1 || true
+  # A push that failed must stop the publish. This used to be
+  # `docker push ... || true` followed by an unconditional "pushed" line, so an
+  # unreachable registry, a rejected layer or a full disk all printed success -
+  # and the bundle that followed pointed at an image that was not there.
+  if ! sudo docker push "$img" >/dev/null; then
+    die "$name: pushing $img failed; the registry does not have this version"
+  fi
   say "$name: pushed $img"
 done
 
@@ -212,6 +250,7 @@ for name in "${PLUGINS[@]}"; do
   sudo docker cp "/tmp/opsweave-bundle-$name" "$KERNEL_CONTAINER:/tmp/bundle-$name" >/dev/null
   sudo docker exec -u 0 "$KERNEL_CONTAINER" chown -R opsweave:opsweave "/tmp/bundle-$name"
   sudo docker cp "$PUBLISHER_KEY" "$KERNEL_CONTAINER:/tmp/publisher.key" >/dev/null
+  KEY_IN_CONTAINER=1
   sudo docker exec -u 0 "$KERNEL_CONTAINER" chown opsweave:opsweave /tmp/publisher.key
   sudo docker exec -u 0 "$KERNEL_CONTAINER" chmod 0400 /tmp/publisher.key
 
@@ -222,8 +261,11 @@ for name in "${PLUGINS[@]}"; do
   sudo docker exec "$KERNEL_CONTAINER" /usr/local/bin/opsctl --url "$KERNEL_URL" \
     deploy "$plugin" "$version" --wait 2>&1 | tail -2
 
-  # The private key does not stay in the container.
-  sudo docker exec "$KERNEL_CONTAINER" rm -f /tmp/publisher.key "/tmp/$name.plugin.zip"
+  # The fast path; the EXIT trap covers every other way out of this loop.
+  if sudo docker exec "$KERNEL_CONTAINER" rm -f /tmp/publisher.key; then
+    KEY_IN_CONTAINER=0
+  fi
+  sudo docker exec "$KERNEL_CONTAINER" rm -f "/tmp/$name.plugin.zip"
   sudo rm -rf "/tmp/opsweave-bundle-$name"
 done
 
