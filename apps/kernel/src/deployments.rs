@@ -1276,6 +1276,35 @@ pub fn spawn_reconciler(state: AppState) {
 }
 
 pub async fn reconcile_once(state: &AppState) -> anyhow::Result<()> {
+    reconcile_once_scoped(state, None).await
+}
+
+/// `reconcile_once`, optionally restricted to ONE deployment.
+///
+/// The `None` case is production: every sweep is global and every active
+/// deployment is planned, because that is what a single-node kernel has to do.
+///
+/// `Some(id)` exists for tests, and it is not a convenience - it is the
+/// difference between a test that measures its own fixture and one that measures
+/// whatever else happens to be in the database.
+///
+/// Measured cost of not having it: this module's tests share one database and
+/// `cargo test` runs them in parallel. `a_ghost_is_rebuilt_to_starting_and_stays_there`
+/// calls the global reconcile, which
+///
+///   * sweeps every node whose heartbeat is older than `node_stale_seconds` to
+///     UNREACHABLE, and every instance on it - including the nodes other tests
+///     created seconds earlier with `now()` heartbeats, and
+///   * plans every deployment, re-asserting `desired_action` on instances other
+///     fixtures had just inserted.
+///
+/// On CI that surfaced as `a_ghost_occupies_neither_a_slot_nor_cpu` failing with
+/// `left: 1, right: 3` - a capacity test broken by an unrelated reconciler run.
+/// Scoping removes the interference without changing what production does.
+async fn reconcile_once_scoped(
+    state: &AppState,
+    only_deployment: Option<Uuid>,
+) -> anyhow::Result<()> {
     let stale_seconds = state.config.node_stale_seconds;
     sqlx::query(
         "UPDATE kernel.nodes SET status='UNREACHABLE' WHERE status IN ('READY','DEGRADED') AND (last_seen_at IS NULL OR last_seen_at < now() - ($1 || ' seconds')::interval)",
@@ -1307,6 +1336,9 @@ pub async fn reconcile_once(state: &AppState) -> anyhow::Result<()> {
     .fetch_all(&state.db)
     .await?;
     for deployment in deployments {
+        if only_deployment.is_some_and(|id| id != deployment.id) {
+            continue;
+        }
         if let Err(error) = reconcile_deployment(state, deployment).await {
             tracing::error!(error = %error, "deployment reconciliation failed");
         }
@@ -2790,11 +2822,18 @@ mod tests {
                 cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
                 rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
             };
-            // `reconcile_once`, not `reconcile_deployment`: the loop that runs on
-            // staging is the former, and it also does the staleness sweep that
-            // rewrites instances whose node stopped reporting. Testing the inner
-            // function would miss that interplay.
-            super::super::reconcile_once(&state)
+            // The real loop, SCOPED to this deployment.
+            //
+            // `reconcile_once` itself (production) does the same work over every
+            // deployment and every node - which, in a shared test database under
+            // parallel `cargo test`, means this test reaches into fixtures other
+            // tests are still asserting on. Measured: an unrelated capacity test
+            // in this module failed CI with `left: 1, right: 3` because this
+            // test's reconcile had swept its nodes stale.
+            //
+            // Scoping keeps the parts that matter here - the staleness sweep and
+            // the full `reconcile_deployment` path - while removing the reach.
+            super::super::reconcile_once_scoped(&state, Some(deployment_id))
                 .await
                 .expect("first reconcile");
             let generation_after: i64 =
@@ -2840,7 +2879,7 @@ mod tests {
             // Second pass: the fixed point. `STARTING` is not a ghost, so this pass
             // must MAINTAIN the row - if it rebuilt again the reconcile loop would
             // never let the node report.
-            super::super::reconcile_once(&state)
+            super::super::reconcile_once_scoped(&state, Some(deployment_id))
                 .await
                 .expect("second reconcile");
             let (state2, gen2, restarts2): (String, i64, i32) = sqlx::query_as(
