@@ -115,18 +115,60 @@ staging，且不报任何错**。这正是本轮要防的那类故障，低一�
 
 ---
 
+## Wave B — 交付可信度（本轮）
+
+### B-1 幽灵实例的生命周期 FIXED
+
+上一轮修的是幽灵**占不占容量**；状态机的收敛没修。`reconcile_deployment` 的
+`existing_node_ok` 只读 `desired_action == "START"`，于是幽灵每一轮都被写回 `START`——
+手工 `UPDATE ... STOP` 在同一秒被覆盖就是这条路径。
+
+新增 `must_rebuild`，幽灵走重建（清空 state/container/generation 重新绑定），不是维持。
+三态规则逐条断言：
+
+```
+UNHEALTHY/UNREACHABLE 且无容器  -> 重建（没有任何东西可管理）
+UNHEALTHY 但有容器              -> 维持（重建会清掉唯一记录，违反所有权铁律）
+其它状态（STARTING/READY/...）  -> 维持（container_id 可以合法地空一轮）
+```
+
+**反事实**：删掉 `&& !must_rebuild(row)`，`a_ghost_is_rebuilt_to_starting_and_stays_there`
+立刻报 `left: "UNHEALTHY", right: "STARTING"`——正是 staging 的症状。测试跑真实
+`reconcile_once` + 真实 PostgreSQL，并断言第二次 reconcile 是**不动点**（否则循环永不让节点上报）。
+
+### B-8 CI Gate 的 pending 语义 FIXED
+
+`delegated-pending` 曾经不阻塞 gate。而 `data-foundation`、`plugin-lifecycle`、
+`runtime-conformance`、`g12-acceptance`、`browser-e2e` **都不在 Ruleset 里**，所以一个
+suite 启动、被判 pending、然后失败，会留下一枚绿 gate 和一个无人反对的合并。
+
+现在：有界等待（预算 30 分钟，取自实测 p95——data-foundation 1530s、plugin-lifecycle
+1174s），**超时即 FAIL**。同时加了归属（`check_suite.id` ↔ workflow run）与
+PART 3（任何红色 check 都不能只作 note，实测 `deploy to staging host` 正是这样被放过的）。
+
+### B-9 `node --test` 对空文件返回 0 FIXED
+
+实测 Node 22.12.0：空文件、纯注释文件、全部 skip 的文件，**退出码都是 0**。
+所以「删掉断言」是一条把红变绿的路径，此前没有任何东西会察觉。
+`check-test-substance.mjs` 从 workflow 文件里发现 CI 真正跑的文件，检查四条。
+
+反事实抓到了我自己的 bug：`assertions === 0` 在 47/48 被删时仍然通过（注释里残留一个
+`assert.`）。补了比例下限（`tests >= 5 && assertions * 5 < tests`）。
+
+---
+
 ## 待处理（本轮尚未动手）
 
 | # | 项 | 状态 | 说明 |
 |---|---|---|---|
-| B-1 | 幽灵实例的**生命周期**（不是统计） | NOT_RUN | 见下 |
 | B-2 | 并发部署是否重复预留资源 | NOT_RUN | TASK-01 要求，未测 |
 | B-3 | CPU 满 / 内存满但实例数未满 的独立用例 | NOT_RUN | 集成测试缺这两个分支 |
 | B-4 | Tag 被指向不同 digest 时拒绝 | NOT_RUN | 需要保存上次 digest 才能判断 |
 | B-5 | 签名移出长驻 kernel 容器 | NEEDS_DECISION | 需要 `opsctl` 脱离容器运行 |
-| B-6 | 版本 `% 100000` 碰撞 | ACCEPTED_RISK | 概率低但非零；当前版本号是内容指纹而非语义版本 |
+| B-6 | 版本 `% 100000` 碰撞 | NEEDS_DECISION | ADR-025 已提方案，未实现（会改动所有版本） |
 | B-7 | Staging 发布事务性（Kernel 新 / Plugin 旧） | NOT_RUN | TASK-06，未开始 |
-| B-8 | CI Gate 的 `delegated-pending` 不阻塞 | VERIFIED | 已知设计取舍，见下 |
+| B-10 | `ci-gate` 不在 Ruleset 的 9 项必需检查里 | NEEDS_DECISION | 见 `docs/ci/ruleset-migration.md`；改 Ruleset 需授权 |
+| B-11 | 版本 hash 无长度/路径分帧 | VERIFIED | 见 ADR-025；边界平移可产生相同版本（已实测） |
 
 ### B-1 为什么「不统计幽灵」不等于「修复」
 
@@ -172,6 +214,12 @@ ACCEPTED_RISK，写在这里而不是假装 gate 覆盖了它们。
 | 把 publisher 公钥换成自己的以推进部署 | 削弱了平台信任链 | 自查后回滚，指纹恢复为 `c5aa5963...` |
 | 在 arm64 Mac 上构建镜像推给 amd64 主机 | `no matching manifest for linux/amd64` | 主机 pull 失败 |
 | 手工 `UPDATE` 实例状态以腾出容量 | 被 reconciliation loop 立刻覆盖 | 查询 `updated_at` 为当前时间 |
+| ADR-025 初稿断言「在文件间移动字节不改变版本」 | 假断言，未验证就写进文档 | 提交前跑了一遍：`b5d4045c3f46` vs `362d88818ef2`，不同；改正后保留错误版本与实测 |
+| 收敛测试夹具缺 `last_seen_at` | 节点被 staleness sweep 判 UNREACHABLE，测试报 `left: "UNREACHABLE"`，看起来像产品缺陷 | 读 `status_reason` 而非读代码 |
+| 收敛测试夹具缺 `resource_snapshot` | `evaluate_node` 直接以 `RESOURCE_SNAPSHOT_MISSING` 拒绝，deployment 落到 PENDING | 同上；两次都不是产品 bug |
+| 收敛测试用共享测试库的旧节点 | 10 个遗留节点占满 `max_instances`，幽灵走 "no candidate" 分支 | 加 `nodeSelector` 隔离到本次的节点 |
+| 测试不设 `OPSWEAVE_TEST_DATABASE_URL` 时报的「通过」 | 是 skip，不是通过；我曾据此说测试通过 | 加 `OPSWEAVE_REQUIRE_TEST_DATABASE=1` 复跑，暴露出真失败 |
+| 删断言的反事实第一版用正则删 `assert.x(...)` | 语法破碎导致 rc=1，不是有效对照；且残留一个 `assert.` 让新检查误判通过 | 改成 `noop(` 重写（语法有效），并补比例下限 |
 
 ---
 
