@@ -1509,6 +1509,15 @@ jobs:
           # rejected them as NOT_REFERENCED, correctly.
           node --test tests/ci/check-run-ledger.test.mjs
           node --test tests/ci/await-delegated.test.mjs
+          # A test file that asserts nothing is not a passing test file.
+          #
+          # `node --test` exits 0 for an empty file, a comment-only file, and a
+          # file whose only test is `{skip: true}` - all three measured on Node
+          # 22.12.0. So "delete the assertions" is a way to make a red suite
+          # green and nothing here noticed. This checks the files CI actually
+          # runs, discovered from these workflow files rather than hard-coded.
+          node tests/ci/check-test-substance.mjs --selftest
+          node tests/ci/check-test-substance.mjs --all
           # The analyzer's output is what the gate judges, so its own tests run
           # here too - including the cases that pin the analyzer to the suites a
           # workflow can actually start.
