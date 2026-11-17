@@ -69,6 +69,22 @@ fn is_ghost_instance(row: &InstanceRow) -> bool {
     matches!(row.state.as_str(), "UNHEALTHY" | "UNREACHABLE") && row.container_id.is_none()
 }
 
+/// What occupies a node, as the placement planner counts it.
+///
+/// Two aggregates read this - one for instance slots, one for CPU and memory -
+/// and they drifted: a ghost exclusion was added to the count and not to the
+/// allocation sum, so a failed instance stopped using a slot while still
+/// reserving its full CPU and memory. The node then looked free by one measure
+/// and full by another, and the answer depended on which check ran first.
+///
+/// Both queries are built from the same fragment, and
+/// `the_capacity_queries_both_exclude_ghosts` fails if either stops matching.
+/// An instance that failed and holds no container is not using the node; one
+/// that failed but still has a container is, because the resource is really
+/// there and may still be under management.
+#[cfg(test)]
+const NOT_A_GHOST: &str = "NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)";
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, FromRow)]
 pub struct ActivationRow {
@@ -1301,6 +1317,7 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
         WHERE i.desired_action='START'
           AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+          AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)
         GROUP BY i.node_id
         "#,
     )
@@ -1957,7 +1974,7 @@ fn placement_failure_reason(node_name: &str, rejection: &PlacementRejection) -> 
 mod tests {
     use super::{
         evaluate_node, is_ghost_instance, node_has_capacity, placement_failure_reason, InstanceRow,
-        NodeUsage, PlacementContext, PlacementRejection,
+        NodeUsage, PlacementContext, PlacementRejection, NOT_A_GHOST,
     };
     use crate::nodes::NodeRow;
     use chrono::Utc;
@@ -2413,5 +2430,256 @@ mod tests {
             !is_ghost_instance(&base("STARTING", None)),
             "a starting instance is on its way up and must keep its slot"
         );
+    }
+    /// Both capacity aggregates must exclude the same shape.
+    ///
+    /// They are `&'static str` literals handed to `sqlx::query_as`, so the
+    /// fragment cannot be shared by the language - it is written twice. This
+    /// asserts both copies are present, which is the only thing standing between
+    /// "one query was edited" and a node that reports two different capacities
+    /// depending on which check runs first.
+    ///
+    /// The drift is not hypothetical: `global_instance_counts` gained the
+    /// exclusion and `allocations` did not, and the deploy kept failing on a node
+    /// that had free CPU and memory but no free slot.
+    #[test]
+    fn the_capacity_queries_both_exclude_ghosts() {
+        let src = include_str!("deployments.rs");
+        let occurrences = src.matches(NOT_A_GHOST).count();
+        assert!(
+            occurrences >= 3,
+            "expected the ghost exclusion in NOT_A_GHOST and in BOTH capacity queries, \
+             found {occurrences} occurrence(s) of {NOT_A_GHOST:?}"
+        );
+    }
+
+    /// The two capacity aggregates, run against a real PostgreSQL.
+    ///
+    /// The unit test above proves the rule. This proves the SQL - which is where
+    /// the defect actually lived, twice: the count excluded ghosts and the
+    /// allocation sum did not, and before that neither did. A predicate test
+    /// cannot see either, because the predicate was correct both times.
+    ///
+    /// The fixture is the staging state that failed: three real occupants, one
+    /// failed instance with no container, a node limit of four. The decision the
+    /// planner has to get right is "is there room", so both aggregates are
+    /// asserted to land on the same side of that line.
+    #[cfg(test)]
+    mod capacity_sql {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options)
+                .await
+                .expect("cannot connect to the test database");
+            crate::db::migrate(&pool)
+                .await
+                .expect("the test database rejected the migrations");
+            Some(pool)
+        }
+
+        /// Build a node with `n` instances of a given shape and return
+        /// (instance_count, cpu_millis, memory_mib) as the planner would see them.
+        async fn measure(
+            pool: &PgPool,
+            node_id: Uuid,
+            instances: &[(&str, Option<&str>)],
+        ) -> (i64, i64, i64) {
+            let plugin = format!("test.capacity.{}", Uuid::new_v4());
+            let package_id = Uuid::new_v4();
+            let deployment_id = Uuid::new_v4();
+            // `plugin_deployments.package_id` is a real foreign key; fabricating
+            // the uuid would fail before the query under test ever ran.
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'0.0.1','1.1','test-publisher','{}'::jsonb,
+                         $3,$4,$5,'INSTALLED','VERIFIED')",
+            )
+            .bind(package_id)
+            .bind(&plugin)
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .execute(pool)
+            .await
+            .expect("package inserts");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 VALUES ($1,$2,$3,'0.0.1',1,1,'{}'::jsonb,
+                         '{\"cpuMillis\":500,\"memoryMiB\":256}'::jsonb,'ACTIVE',now(),now())",
+            )
+            .bind(deployment_id)
+            .bind(&plugin)
+            .bind(package_id)
+            .execute(pool)
+            .await
+            .expect("deployment inserts");
+
+            for (slot, (state, container)) in instances.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_instances
+                       (id, deployment_id, node_id, slot, deployment_generation,
+                        desired_action, state, container_id)
+                     VALUES ($1,$2,$3,$4,1,'START',$5,$6)",
+                )
+                .bind(Uuid::new_v4())
+                .bind(deployment_id)
+                .bind(node_id)
+                .bind(slot as i32)
+                .bind(state)
+                .bind(container.map(str::to_string))
+                .execute(pool)
+                .await
+                .expect("instance inserts");
+            }
+
+            let count: i64 = sqlx::query_scalar(concat!(
+                "SELECT count(*)::bigint FROM kernel.plugin_instances i ",
+                "JOIN kernel.plugin_deployments d ON d.id=i.deployment_id ",
+                "WHERE i.node_id=$1 AND i.desired_action='START' ",
+                "AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED') ",
+                "AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)"
+            ))
+            .bind(node_id)
+            .fetch_one(pool)
+            .await
+            .expect("count query");
+
+            let (cpu, mem): (i64, i64) = sqlx::query_as(concat!(
+                "SELECT COALESCE(SUM((d.resources->>'cpuMillis')::bigint)::bigint,0), ",
+                "COALESCE(SUM((d.resources->>'memoryMiB')::bigint)::bigint,0) ",
+                "FROM kernel.plugin_instances i ",
+                "JOIN kernel.plugin_deployments d ON d.id=i.deployment_id ",
+                "WHERE i.node_id=$1 AND i.desired_action='START' ",
+                "AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED') ",
+                "AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)"
+            ))
+            .bind(node_id)
+            .fetch_one(pool)
+            .await
+            .expect("allocation query");
+
+            (count, cpu, mem)
+        }
+
+        async fn node(pool: &PgPool) -> Uuid {
+            let id = Uuid::new_v4();
+            let token = Uuid::new_v4().to_string();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at)
+                 VALUES ($1,$2,'x',$3,1,'linux','amd64','{}'::jsonb,'[]'::jsonb,'READY',now())",
+            )
+            .bind(id)
+            .bind(format!("test-node-{}", &token[..8]))
+            .bind(&token)
+            .execute(pool)
+            .await
+            .expect("node inserts");
+            id
+        }
+
+        /// The staging failure, replayed: three occupants and one ghost against a
+        /// limit of four. Before the fix the count was 4 and the planner refused;
+        /// the allocation sum was also 4x500, so CPU was over-reserved too.
+        #[tokio::test]
+        async fn a_ghost_occupies_neither_a_slot_nor_cpu() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let id = node(&pool).await;
+            let (count, cpu, mem) = measure(
+                &pool,
+                id,
+                &[
+                    ("READY", Some("c1")),
+                    ("READY", Some("c2")),
+                    ("READY", Some("c3")),
+                    ("UNHEALTHY", None),
+                ],
+            )
+            .await;
+
+            assert_eq!(
+                count, 3,
+                "a failed instance with no container must not take a slot"
+            );
+            assert_eq!(cpu, 3 * 500, "nor may it reserve CPU");
+            assert_eq!(mem, 3 * 256, "nor memory");
+        }
+
+        /// The cases that must STILL count. Excluding too much would let the
+        /// scheduler over-pack a node, which is the opposite failure and worse:
+        /// it puts more work on a machine than it can run.
+        #[tokio::test]
+        async fn every_other_shape_still_occupies() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+
+            for (label, state, container, want) in [
+                ("unhealthy but has a container", "UNHEALTHY", Some("c1"), 1),
+                (
+                    "unreachable but has a container",
+                    "UNREACHABLE",
+                    Some("c1"),
+                    1,
+                ),
+                (
+                    "ready before its container id is observed",
+                    "READY",
+                    None,
+                    1,
+                ),
+                ("starting", "STARTING", None, 1),
+            ] {
+                let id = node(&pool).await;
+                let (count, cpu, _) = measure(&pool, id, &[(state, container)]).await;
+                assert_eq!(count, want, "{label}: slot count");
+                assert_eq!(cpu, want * 500, "{label}: cpu reservation");
+            }
+        }
+
+        /// Two deployments on one node share its capacity. A ghost in either must
+        /// not hide the other's usage.
+        #[tokio::test]
+        async fn capacity_is_shared_across_plugins() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let id = node(&pool).await;
+            let (a_count, _, _) = measure(&pool, id, &[("READY", Some("c1"))]).await;
+            let (ab_count, ab_cpu, _) =
+                measure(&pool, id, &[("READY", Some("c2")), ("UNHEALTHY", None)]).await;
+
+            assert_eq!(a_count, 1);
+            assert_eq!(
+                ab_count, 2,
+                "the ghost must not hide the other plugin's instance"
+            );
+            assert_eq!(ab_cpu, 2 * 500);
+        }
     }
 }
