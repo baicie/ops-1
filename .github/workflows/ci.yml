@@ -1501,6 +1501,14 @@ jobs:
           # repository has been bitten by repeatedly. Run it before trusting it.
           node tests/ci/ci-gate.mjs --selftest
           node --test tests/ci/impact.test.mjs
+          # The ledger and the bounded wait are the two halves of "the gate reads
+          # the right check for the right workflow, and does not pass on a result
+          # that does not exist yet". Both are tested here, next to the gate they
+          # belong to, so a change to either cannot land unverified - which is
+          # what happened on this branch's first run: `check-spec-coverage.mjs`
+          # rejected them as NOT_REFERENCED, correctly.
+          node --test tests/ci/check-run-ledger.test.mjs
+          node --test tests/ci/await-delegated.test.mjs
           # The analyzer's output is what the gate judges, so its own tests run
           # here too - including the cases that pin the analyzer to the suites a
           # workflow can actually start.
