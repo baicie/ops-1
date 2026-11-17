@@ -298,6 +298,21 @@ ACCEPTED_RISK，写在这里而不是假装 gate 覆盖了它们。
 | 收敛测试用共享测试库的旧节点 | 10 个遗留节点占满 `max_instances`，幽灵走 "no candidate" 分支 | 加 `nodeSelector` 隔离到本次的节点 |
 | 测试不设 `OPSWEAVE_TEST_DATABASE_URL` 时报的「通过」 | 是 skip，不是通过；我曾据此说测试通过 | 加 `OPSWEAVE_REQUIRE_TEST_DATABASE=1` 复跑，暴露出真失败 |
 | 删断言的反事实第一版用正则删 `assert.x(...)` | 语法破碎导致 rc=1，不是有效对照；且残留一个 `assert.` 让新检查误判通过 | 改成 `noop(` 重写（语法有效），并补比例下限 |
+| 一个 PR 上连续推送 8 次 | 每次推 6 个 workflow，**31 个 run 排队 / 21 个在跑**，自己的检查一个多小时没开始 | `gh api` 数队列；取消 25 个被 supersede 的旧 run，降到 8 |
+
+最后一条值得展开，因为它是 brief §8.3 直接点名的：
+
+> 避免一次触发大量完整 Data Foundation 和 Plugin Lifecycle Job。合理控制并发。
+
+我违反的方式不是「一次触发很多」，而是「反复触发同一批」。这个仓库每个 PR 会跑
+6 个 workflow（ci / data-foundation / g12-acceptance / plugin-lifecycle /
+platform-linux-acceptance / reliability），其中 data-foundation 单独就要 25 分钟。
+推 8 次的成本不是 8 倍，是 **8 × 6 个 run 抢同一个 runner 池**，而后来的 run 会把
+先来的挤成 stale —— 但实际上 stale 的 run 仍然占着队列位，不会自己退出。
+
+正确做法：**PR 推送前把能本地跑的门禁全跑完**（`ci-gate --selftest`、
+三个 `node --test`、`check-spec-coverage`、`check-impact-consistency`、
+`cargo test`），只推真正需要 CI 的版本。本轮后半段改成了这样。
 
 ---
 
