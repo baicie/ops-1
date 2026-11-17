@@ -157,6 +157,47 @@ PART 3（任何红色 check 都不能只作 note，实测 `deploy to staging hos
 
 ---
 
+## Wave A 在真实 Staging 上的验证结果：**没有通过**
+
+本轮第一次拿到真实失败证据。main `c3edae4` 的 `staging-preview` 运行
+（run 44016184862，2026-11-17T04:21–04:26）在 `Publish the data plugin bundles` 失败：
+
+```
+data-integration: pushed 127.0.0.1:15001/opsweave/data-integration:0.0.17455
+staged opsweave.data-catalog@0.0.17455 bundle=sha256:9b759df7...
+  PENDING 0/0 ready (No eligible healthy node matches the placement selector
+  [INSTANCE_CAPACITY_EXCEEDED] node staging-node: 4 instances already scheduled
+  on this node against a per-node limit of 4)
+Error: timed out waiting for deployment readiness
+```
+
+三件事，按严重程度：
+
+1. **幽灵修复没有解决 staging 的实际问题。** #135–#137 修的是「幽灵占不占容量」，
+   但 staging 上仍然是 4/4。也就是说那 4 行**都不是幽灵**（都有容器，或者都
+   `desired_action='START'` 且状态健康）——或者幽灵判定与实际行不匹配。
+   本轮无法登录主机核实（SSH 凭据只在 CI secrets 里，本地无权限），因此
+   **不能断言是哪一种**。这是 BLOCKED，不是 FIXED。
+
+2. **这正是 ADR-026 描述的「Kernel 新 / Plugin 旧」状态，且它真的发生了。**
+   Kernel 与 Node 已替换、健康检查通过，然后插件发布失败。平台此刻是一个
+   没有任何一次运行验证过的混合体，而唯一记录是一条红 check。
+
+3. **`deploy to staging host` 在 main 上是红的**（`conclusion: failure`，实测）。
+   它不在 Ruleset 的 9 项必需检查里，所以一个部署失败的主分支可以继续接受合并。
+   这与 B-10 是同一个洞的两半：gate 不强制，部署 check 也不强制。
+
+### 本轮因此不能声称的
+
+- 不能声称幽灵容量问题已修复。代码层面的统计与收敛修好了，**staging 仍然失败**。
+- 不能声称插件发布链可用。它从未成功过：`data-catalog` 的 bundle 组装完成后
+  部署即超时。
+- 不能声称 `must_rebuild` 修复了 staging。它重建的是幽灵自己；如果占用槽位的
+  4 行**不是**幽灵，这个修复对上线的帮助为零。这也是为什么第 1 条必须标 BLOCKED
+  而不是猜测。
+
+---
+
 ## 待处理（本轮尚未动手）
 
 | # | 项 | 状态 | 说明 |
