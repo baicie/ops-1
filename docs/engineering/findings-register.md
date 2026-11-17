@@ -193,6 +193,23 @@ Error: timed out waiting for deployment readiness
    是容量配置。在这种情况下本轮所有容量修复都是对的，但都不改变 staging 的结果。
    这一点必须说清楚，而不是把它算作「修好了」。
 
+   **第二次实测确认（main `bc19140`，run 44029228405，2026-11-17T06:24）：**
+   合入 `must_rebuild` 之后重跑，结果完全相同：
+
+   ```
+   data-catalog:     pushed ...0.0.17455
+   data-integration: pushed ...0.0.17455
+   staged opsweave.data-integration@0.0.17455 bundle=sha256:55c7e80f...
+     PENDING 0/0 ready ([INSTANCE_CAPACITY_EXCEEDED] node staging-node:
+     4 instances already scheduled on this node against a per-node limit of 4)
+   ```
+
+   这否定了「`must_rebuild` 会改善 staging」这个假设——正如预测，那 4 行不是幽灵，
+   重建逻辑没有对象可作用。**修复是对的，但不是这台机器需要的修复。**
+
+   同时这次也说明发布链的**前半段是健康的**：两个插件的镜像都推送成功、
+   两个 bundle 都组装并签名成功。断点唯一且明确：**部署阶段的节点容量**。
+
 2. **这正是 ADR-026 描述的「Kernel 新 / Plugin 旧」状态，且它真的发生了。**
    Kernel 与 Node 已替换、健康检查通过，然后插件发布失败。平台此刻是一个
    没有任何一次运行验证过的混合体，而唯一记录是一条红 check。
@@ -200,6 +217,43 @@ Error: timed out waiting for deployment readiness
 3. **`deploy to staging host` 在 main 上是红的**（`conclusion: failure`，实测）。
    它不在 Ruleset 的 9 项必需检查里，所以一个部署失败的主分支可以继续接受合并。
    这与 B-10 是同一个洞的两半：gate 不强制，部署 check 也不强制。
+
+### 根因找到了：升级从不回收旧版本
+
+上面两条实测（`c3edae4` 与 `bc19140` 都是 4/4）指向一个比容量更根本的缺陷。
+
+`deploy_plugin` 按 **`(plugin_id, version)`** 查找 deployment：
+
+```rust
+"SELECT * FROM kernel.plugin_deployments WHERE plugin_id=$1 AND version=$2"
+```
+
+`plugin_deployments` **每个版本一行**，而 `deploy_plugin` 从不把上一个版本的
+deployment 置为 `DISABLED`。所以每次发布都留下旧的 deployment 继续 `START` 自己的
+实例，新版本再要一个槽位：
+
+```
+发布 0.0.17453 -> deployment A, 1 实例 -> 1/4
+发布 0.0.17454 -> deployment B, 1 实例 -> 2/4   (A 仍在跑)
+发布 0.0.17455 -> deployment C, 1 实例 -> 3/4   (A、B 仍在跑)
+发布 0.0.17456 -> INSTANCE_CAPACITY_EXCEEDED
+```
+
+**平台让每一个曾经部署过的版本一直在跑。** 这不是容量配置问题，也不是幽灵问题。
+
+这解释了为什么本轮两个修复都帮不上：
+
+- `is_ghost_instance` / 容量谓词（#135–#137）排除的是 `UNHEALTHY`/`UNREACHABLE`
+  且无容器的行。这 4 行是健康的、有容器的，**被正确计数**。
+- `must_rebuild`（本轮）重建幽灵。没有幽灵可重建——实测重跑结果一字不差。
+
+两个修复都对，但都指向另一个缺陷。staging 失败一直看起来像容量 bug，是因为
+**它的报错信息就是容量信息**；根因在生命周期。
+
+见 `docs/adr/ADR-027-upgrade-releases-old-version.md`：方案是 deploy 时先把
+同 `plugin_id` 的其它 deployment 置为 `DRAINING`，并让 `placement.rollout`
+显式选择 stop-then-start（默认）或 surge。未实现——它改变 `deploy` 的语义，
+是 ADR 不是补丁。
 
 ### 因果闭环：为什么「点治理就退出登录」还没修好
 
