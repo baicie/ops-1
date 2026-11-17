@@ -201,6 +201,29 @@ Error: timed out waiting for deployment readiness
    它不在 Ruleset 的 9 项必需检查里，所以一个部署失败的主分支可以继续接受合并。
    这与 B-10 是同一个洞的两半：gate 不强制，部署 check 也不强制。
 
+### 因果闭环：为什么「点治理就退出登录」还没修好
+
+这轮把整条链查通了，而结论是：**代码已经对，线上仍是旧镜像。**
+
+```
+1. 前端点「治理」 -> gatewayGet('opsweave.data-catalog', ...)
+2. staging 上的 data-catalog 镜像（2026-10-28）读 x-opsweave-user-role
+3. 该 header 自 9990f79（2026-11-08）起不再发送
+4. 插件返回 401 "caller identity required"
+5. 前端 api.ts 把任何 401 当作会话失效 -> 登出
+```
+
+第 2 步的镜像为什么换不掉：插件发布链从未成功过。今晚的 run 44016184862 就是证据——
+bundle 组装成功（`staged opsweave.data-catalog@0.0.17455`），部署因
+`INSTANCE_CAPACITY_EXCEEDED` 超时。所以：
+
+- 源码里的 `identity.mjs` 已经只读签名 context（正确）；
+- staging 跑的还是旧镜像（错误）；
+- 两者之间的桥——发布链——断在容量上。
+
+**这就是为什么本轮修的容量问题重要，也是为什么它没修好这个问题**：容量修复
+让下一次发布有机会成功，但 node 上那 4 个占位不是幽灵，所以还没成功。
+
 ### 本轮因此不能声称的
 
 - 不能声称幽灵容量问题已修复。代码层面的统计与收敛修好了，**staging 仍然失败**。
