@@ -1544,7 +1544,10 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
                 // keeps. Re-accounting here would double-count the slot and make
                 // the node look fuller than it is - the exact class of drift the
                 // three capacity queries were unified to prevent.
-                debug_assert!(was_started, "a ghost is always desired_action=START by definition");
+                debug_assert!(
+                    was_started,
+                    "a ghost is always desired_action=START by definition"
+                );
             } else {
                 sqlx::query("UPDATE kernel.plugin_instances SET desired_action='START', updated_at=now() WHERE id=$1")
                     .bind(current.id)
@@ -2525,8 +2528,14 @@ mod tests {
             node_data_token: None,
         };
 
-        assert!(must_rebuild(&base("UNHEALTHY", None)), "a failed pull leaves a row to re-create");
-        assert!(must_rebuild(&base("UNREACHABLE", None)), "a node that vanished leaves the same shape");
+        assert!(
+            must_rebuild(&base("UNHEALTHY", None)),
+            "a failed pull leaves a row to re-create"
+        );
+        assert!(
+            must_rebuild(&base("UNREACHABLE", None)),
+            "a node that vanished leaves the same shape"
+        );
 
         // The ownership invariant: a row that HAS a container describes a real
         // resource. Rebuilding it would clear the only record of that container,
@@ -2785,14 +2794,15 @@ mod tests {
             // staging is the former, and it also does the staleness sweep that
             // rewrites instances whose node stopped reporting. Testing the inner
             // function would miss that interplay.
-            super::super::reconcile_once(&state).await.expect("first reconcile");
-            let generation_after: i64 = sqlx::query_scalar(
-                "SELECT generation FROM kernel.plugin_deployments WHERE id=$1",
-            )
-            .bind(deployment_id)
-            .fetch_one(&pool)
-            .await
-            .expect("deployment reads back");
+            super::super::reconcile_once(&state)
+                .await
+                .expect("first reconcile");
+            let generation_after: i64 =
+                sqlx::query_scalar("SELECT generation FROM kernel.plugin_deployments WHERE id=$1")
+                    .bind(deployment_id)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("deployment reads back");
 
             let (state1, error1, gen1, restarts1, container1): (
                 String,
@@ -2817,14 +2827,22 @@ mod tests {
                 error1.is_none(),
                 "the rebuild clears last_error; a new attempt is not the old one's failure"
             );
-            assert!(container1.is_none(), "and there is still no container to hold");
+            assert!(
+                container1.is_none(),
+                "and there is still no container to hold"
+            );
             assert_eq!(restarts1, 0, "a fresh attempt counts from zero");
-            assert_eq!(gen1, generation_after, "the rebuild is bound to the current generation");
+            assert_eq!(
+                gen1, generation_after,
+                "the rebuild is bound to the current generation"
+            );
 
             // Second pass: the fixed point. `STARTING` is not a ghost, so this pass
             // must MAINTAIN the row - if it rebuilt again the reconcile loop would
             // never let the node report.
-            super::super::reconcile_once(&state).await.expect("second reconcile");
+            super::super::reconcile_once(&state)
+                .await
+                .expect("second reconcile");
             let (state2, gen2, restarts2): (String, i64, i32) = sqlx::query_as(
                 "SELECT state, deployment_generation, restart_count
                  FROM kernel.plugin_instances WHERE id=$1",
@@ -2833,7 +2851,10 @@ mod tests {
             .fetch_one(&pool)
             .await
             .expect("instance reads back");
-            assert_eq!(state2, "STARTING", "a rebuilt row is maintained on the next pass, not rebuilt again");
+            assert_eq!(
+                state2, "STARTING",
+                "a rebuilt row is maintained on the next pass, not rebuilt again"
+            );
             assert_eq!(gen2, gen1);
             assert_eq!(restarts2, restarts1);
 
@@ -2847,7 +2868,10 @@ mod tests {
             .fetch_one(&pool)
             .await
             .expect("count reads back");
-            assert_eq!(count, 1, "a rebuilt instance is a live attempt and holds its slot");
+            assert_eq!(
+                count, 1,
+                "a rebuilt instance is a live attempt and holds its slot"
+            );
         }
 
         /// One deployment, one instance of a given shape, whatever `last_error`.
