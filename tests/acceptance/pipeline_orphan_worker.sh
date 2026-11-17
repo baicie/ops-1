@@ -48,7 +48,33 @@ for node in node-a node-b; do
 done
 sleep 3
 touch "$ROOT/data-ci/node-b/worker-enabled"
-sleep 2
+
+# Wait for a worker PROCESS, not for a number of seconds.
+#
+# This slept 2s and then posted the job, on the assumption that re-enabling the
+# marker was immediately effective. It is not: `worker_supervisor.rs` polls the
+# marker every 2 seconds, then has to spawn `opsweave-pipeline-worker`, which
+# boots, reads its node identity and connects before it can claim anything. Two
+# seconds covers at most one poll and none of the startup.
+#
+# It passed most of the time because the worker from the previous step was often
+# still alive. When it was not - the SIGKILL step just before this one restarts
+# Node B - the job was created, went RUNNING, and produced no effect inside the
+# 24s window below, which read as "Node B did not produce the first effect".
+# Measured on run 44003355535: that is exactly what happened.
+#
+# The condition is the same one the supervisor uses: a worker child of Node B.
+node_b_pid="$(cat /tmp/node-b.pid 2>/dev/null || true)"
+worker_seen=0
+for _ in $(seq 1 60); do
+  if [ -n "$node_b_pid" ] && pgrep -P "$node_b_pid" -f opsweave-pipeline-worker >/dev/null 2>&1; then
+    worker_seen=1
+    break
+  fi
+  sleep 0.5
+done
+[ "$worker_seen" = "1" ] || bad "Node B did not start a pipeline worker within 30s of re-enabling it"
+
 JOB="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H "Idempotency-Key: orphan-$(date +%s%N)" --data-binary '{"pipelineId":"two-node-bulk","pipelineRevision":1,"input":{},"maxAttempts":4,"timeoutSeconds":300}' "$URL/api/v1/jobs" | json "d['jobId']")"
 echo "orphan job: $JOB"
 for _ in $(seq 1 120); do
