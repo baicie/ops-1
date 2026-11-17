@@ -92,7 +92,7 @@ jobs:
           cat "$GITHUB_OUTPUT"
 
   rust:
-    if: ${{ needs.scope.outputs.rust == 'true' }}
+    # ALWAYS RUNS - `rust` is a required context. See the note on `web`.
     needs: [scope]
     runs-on: ubuntu-24.04
     # apps/kernel's DB-backed tests (src/jobs.rs, mod terminalization_tests) skip only when
@@ -164,7 +164,17 @@ jobs:
           test "$present" = "t"
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
   web:
-    if: ${{ needs.scope.outputs.web == 'true' }}
+    # ALWAYS RUNS. `web` is one of the nine contexts ruleset 26958761 requires,
+    # and a required check that is SKIPPED blocks a merge exactly as hard as one
+    # that is missing: the rule wants a conclusion named `web` on the head commit
+    # and `skipped` is not it. Measured on PR #144 - a `gateway.rs`-only change -
+    # the merge endpoint answered `9 of 9 required status checks are expected`
+    # with `web` and `web-unit` in `skipping`, and the PR could not merge at all.
+    #
+    # The scope fan-out is for jobs whose cost is worth avoiding. It must never
+    # reach a job the ruleset names. `image-build` and the `g13*` acceptance jobs
+    # are not required contexts, so gating those stays safe.
+
     needs: [scope]
     runs-on: ubuntu-latest
     steps:
@@ -222,7 +232,7 @@ jobs:
   # above only typechecks and builds, so a green pipeline never proved a unit test passed. It is
   # its own job so a red unit run is reported as such instead of hiding behind a build failure.
   web-unit:
-    if: ${{ needs.scope.outputs.web-unit == 'true' }}
+    # ALWAYS RUNS - `web-unit` is a required context. See the note on `web`.
     needs: [scope]
     runs-on: ubuntu-latest
     steps:
@@ -997,7 +1007,9 @@ jobs:
   # neither. The sabotage step below is that regression's counterfactual, and it
   # is the reason this job exists rather than a `docker build` one-liner.
   platform-image-build:
-    if: ${{ needs.scope.outputs.image-build == 'true' }}
+    # ALWAYS RUNS - `platform-image-build` is a required context. See the note on
+    # `web`. `runtime-image-build` below is NOT a required context, so gating that
+    # one stays safe and keeps its ~5 minutes off a docs-only change.
     needs: [scope]
     runs-on: ubuntu-latest
     steps:

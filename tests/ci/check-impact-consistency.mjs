@@ -548,5 +548,51 @@ for (const workflow of Object.keys({ ...SUITE_WORKFLOW, 'ci.yml': null })) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// A RULESET-REQUIRED CHECK MUST NEVER BE CONDITIONAL.
+//
+// Ruleset 26958761 names nine contexts. A job bearing one of those names must run
+// on every pull request: GitHub's required-status rule wants a *conclusion* named
+// `rust` on the head commit, and `skipped` is not one. A skipped required check
+// blocks a merge exactly as hard as a missing one - measured on PR #144, where a
+// `gateway.rs`-only change skipped `web` and `web-unit` and the merge endpoint
+// answered `9 of 9 required status checks are expected`.
+//
+// This is the automated form of "the scope fan-out must never reach a job the
+// ruleset names". It reads ci.yml directly, so gating a required job in future
+// fails here rather than in a merge attempt nobody can explain.
+{
+  const REQUIRED_CONTEXTS = [
+    'rust', 'web', 'web-unit', 'contracts', 'spec-coverage',
+    'platform-only', 'platform-image-build', 'quality-faults', 'linux-runtime',
+  ];
+  let ciText;
+  try { ciText = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8'); } catch { ciText = null; }
+  if (ciText) {
+    // Job blocks are two-space indented keys under `jobs:`. Walk them and look
+    // for a gating `if:` that mentions the scope job.
+    const lines = ciText.split('\n');
+    let inJobs = false;
+    let job = null;
+    const gated = new Map();
+    for (const line of lines) {
+      if (/^jobs:\s*$/.test(line)) { inJobs = true; continue; }
+      if (!inJobs) continue;
+      const jobMatch = /^  ([a-z0-9-]+):\s*$/.exec(line);
+      if (jobMatch) { job = jobMatch[1]; gated.set(job, null); continue; }
+      if (/^[a-z]/.test(line)) { inJobs = false; continue; }
+      if (job && /^    if:.*needs\.scope\.outputs/.test(line)) gated.set(job, line.trim());
+    }
+    for (const context of REQUIRED_CONTEXTS) {
+      const gate = gated.get(context);
+      if (gate) {
+        errors += 1;
+        process.stdout.write(`ERROR ${context} is a required context in ruleset 26958761 but ci.yml makes it conditional: ${gate}\n`);
+        process.stdout.write('        a skipped required check blocks a merge as hard as a missing one\n');
+      }
+    }
+  }
+}
+
 process.stdout.write(`\nimpact/filter consistency: ${errors} error(s), ${warnings} warning(s)\n`);
 if (errors > 0 || (strict && warnings > 0)) process.exit(1);

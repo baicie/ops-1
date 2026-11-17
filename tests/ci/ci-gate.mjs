@@ -506,13 +506,24 @@ export function gate(rawNeeds, impact, ledgerForGate = null) {
   }
 
   // ---------------------------------------------------------------------------
-  // PART 2 — every job the gate was handed must have succeeded.
+  // PART 2 — every job the gate was handed must have succeeded, or been skipped
+  // for a reason the ruleset allows.
   //
-  // `ci.yml` has no path filter: all fifteen of its jobs run on every pull
-  // request. So the question "did this change require that suite" is already
-  // answered by GitHub — it ran the job. A job that ran and did not succeed is a
-  // red check on this commit, and a merge gate that reads it and then does
-  // nothing is worse than no gate, because the check list looks covered.
+  // `ci.yml` HAS A PATH-LIKE FILTER NOW: the `scope` job decides which heavy
+  // groups run, and five jobs are conditional on it. That changed this part's
+  // premise, and the change had a cost worth recording: PR #144 (a
+  // `gateway.rs`-only change) skipped `web` and `web-unit`, both of which the
+  // ruleset requires, and the merge endpoint answered
+  //
+  //     9 of 9 required status checks are expected
+  //
+  // because a SKIPPED required check is as unusable as a missing one. The
+  // workflow was fixed to run every ruleset-required job unconditionally; this
+  // comment is the other half, so the next person gating a job knows the rule:
+  // **the scope fan-out must never reach a job the ruleset names.**
+  //
+  // For the jobs that may legitimately be skipped, a skip is a note rather than a
+  // failure — and only when the impact analyzer did not require that suite.
   //
   // Part 1 above decides "did every suite this change requires get a result".
   // That alone is not enough: before this part existed, `JOB_TO_SUITE` named only
