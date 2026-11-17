@@ -64,7 +64,12 @@ const TEST_CALL = /(^|[^.\w])(?:test|it)\s*\(/m;
 const SKIP_CALL = /(^|[^.\w])(?:test|it)\s*\(\s*[^)]*\{[^}]*\bskip\s*:\s*true/m;
 const SKIP_WHOLE = /(^|[^.\w])test\.skip\s*\(/m;
 /** Any assertion, from node:assert or from a hand-rolled helper. */
-const ASSERT_CALL = /(^|[^.\w])(?:assert|expect)\s*[.(]/m;
+// `gm`, not `m`. Without `g`, `String.match` returns only the FIRST match, so
+// every file with more than one assertion reported `assertions=1` - and the
+// proportional floor then failed three healthy suites on its first real run.
+// The selftest cases all had one or two assertions, which is why none of them
+// caught it: a detector tested only against tiny inputs is not tested.
+const ASSERT_CALL = /(^|[^.\w])(?:assert|expect)\s*[.(]/gm;
 /** A thrown Error inside a test body counts: `if (!x) throw new Error(...)`. */
 const THROW_CALL = /(^|[^.\w])throw\s+new\s+Error\s*\(/m;
 
@@ -189,6 +194,34 @@ const SELFTEST = [
     because: /no test is declared/,
   },
   {
+    // THE CASE THAT WOULD HAVE CAUGHT THE MISSING `g` FLAG.
+    //
+    // Every other selftest case has one or two assertions, so a regex that only
+    // matched the first one still produced the right answer. This one has ten, and
+    // a counter that reports 1 fails the proportional floor -
+    // `tests >= 5 && assertions * 5 < tests` with 2 tests and 1 assertion.
+    name: 'a suite with many assertions counts all of them',
+    source: `import test from 'node:test';
+import assert from 'node:assert/strict';
+test('a', () => {
+  assert.equal(1, 1);
+  assert.equal(2, 2);
+  assert.equal(3, 3);
+  assert.equal(4, 4);
+  assert.equal(5, 5);
+});
+test('b', () => {
+  assert.equal(6, 6);
+  assert.equal(7, 7);
+  assert.equal(8, 8);
+  assert.equal(9, 9);
+  assert.equal(10, 10);
+});
+`,
+    want: true,
+    assertionsAtLeast: 10,
+  },
+  {
     name: 'the skipped count and the test count are independent',
     source: "import test from 'node:test';\nimport assert from 'node:assert/strict';\ntest('a', { skip: true }, () => { assert.ok(1); });\ntest('b', () => { assert.ok(1); });\n",
     want: true,
@@ -201,6 +234,7 @@ function selftest() {
     const got = inspect(c.source);
     let ok = got.ok === c.want;
     if (ok && c.because) ok = c.because.test(got.problems.join('; '));
+    if (ok && c.assertionsAtLeast) ok = got.assertions >= c.assertionsAtLeast;
     if (!ok) bad += 1;
     process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ok=${c.want}, got ok=${got.ok} (${got.problems.join('; ') || 'no problems'})\n`);
   }
