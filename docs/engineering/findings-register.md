@@ -310,9 +310,24 @@ platform-linux-acceptance / reliability），其中 data-foundation 单独就要
 推 8 次的成本不是 8 倍，是 **8 × 6 个 run 抢同一个 runner 池**，而后来的 run 会把
 先来的挤成 stale —— 但实际上 stale 的 run 仍然占着队列位，不会自己退出。
 
-正确做法：**PR 推送前把能本地跑的门禁全跑完**（`ci-gate --selftest`、
-三个 `node --test`、`check-spec-coverage`、`check-impact-consistency`、
-`cargo test`），只推真正需要 CI 的版本。本轮后半段改成了这样。
+正确做法：**PR 推送前把能本地跑的门禁全跑完**，只推真正需要 CI 的版本。
+
+```bash
+cargo fmt --all -- --check          # rust job 的第一条，漏过一次
+cargo clippy --locked -p opsweave-kernel --all-targets -- -D warnings
+cargo clippy --locked -p opsweave-kernel --no-default-features --all-targets -- -D warnings
+OPSWEAVE_TEST_DATABASE_URL=... OPSWEAVE_REQUIRE_TEST_DATABASE=1 cargo test -p opsweave-kernel
+node tests/ci/ci-gate.mjs --selftest
+node --test tests/ci/impact.test.mjs
+node --test tests/ci/check-run-ledger.test.mjs
+node --test tests/ci/await-delegated.test.mjs
+node tests/ci/check-spec-coverage.mjs
+node tests/ci/check-impact-consistency.mjs
+node tests/ci/check-test-substance.mjs --selftest && node tests/ci/check-test-substance.mjs --all
+```
+
+这份清单本身是漏出来的：第一次写时没有 `cargo fmt`，于是下一个 PR 被 `rust` job
+以格式失败挡下——CI 正确地抓住了本地门禁清单的缺口。
 
 ---
 
