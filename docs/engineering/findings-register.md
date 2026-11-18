@@ -136,6 +136,72 @@ UNHEALTHY 但有容器              -> 维持（重建会清掉唯一记录，�
 立刻报 `left: "UNHEALTHY", right: "STARTING"`——正是 staging 的症状。测试跑真实
 `reconcile_once` + 真实 PostgreSQL，并断言第二次 reconcile 是**不动点**（否则循环永不让节点上报）。
 
+### B-12 必需检查可以通过四条路径「不产出结论」FIXED
+
+这一条是本轮最有价值的发现，因为它**推翻了我自己刚合入的修复**。
+
+Brief §7.2 说「Required Check 不会永久 Pending」。实际情况更糟：必需检查可以是
+`skipped`，而 GitHub 对 `skipped` 和「不存在」的处理完全一样——
+
+```
+9 of 9 required status checks are expected
+```
+
+Ruleset 26958761 的九项是：`rust` `web` `web-unit` `contracts` `spec-coverage`
+`platform-only` `platform-image-build` `quality-faults` `linux-runtime`。
+
+**四条独立路径，每条都能让其中一项不产出结论：**
+
+| # | 路径 | 怎么发生 | 实测 |
+|---|---|---|---|
+| 1 | `if:` 条件 | `if: needs.scope.outputs.web == 'true'` | PR #144 实际发生 |
+| 2 | `needs:` 级联 | 依赖的 job 失败/跳过，本 job 也跳过 | 我的第一版修复留下了 `needs: [scope]`，等于没修 |
+| 3 | 输入过大 | `execFileSync('cat')` 的 1 MiB `maxBuffer` | 1,026,000 字节 rc=0；1,053,000 字节 `spawnBuf ENOBUFS` |
+| 4 | 输出截断 | `process.exit()` 丢弃管道里未刷出的 stdout | 40,000 条路径 → 正好 8192 字节，字符串中间截断 |
+
+第 3、4 条都在 `impact.mjs`，而 `scope` job 正是用它来决定哪些重型 job 跑。所以
+一个足够大的 PR（大规模重命名、格式化扫描、vendored 导入——按本仓库 46.4 字节/路径
+计算约 22,700 个文件）会让 `scope` 崩溃，进而跳过四项必需检查。
+
+**第 4 条特别值得记**：它在 TTY 下完全不可见。本地跑一百次也不会复现，因为终端是行缓冲的。
+只有管道——也就是 CI 里的唯一形态——才会截断。
+
+### 守卫本身也曾是空的
+
+`check-impact-consistency.mjs` 里我加的「必需检查不得条件化」检查，第一版只匹配一个字面
+模式。对它跑八种变异，**全部报 0 error**：
+
+```
+rust: -> rust-build:            上下文直接消失
+web-unit: if: false             跳过
+web-unit: if: needs.scope.result 跳过
+web-unit: if: github.event_name  仅 push 时跑
+spec-coverage: needs: [scope]   级联跳过
+contracts: name: contract-...   报的是另一个名字
+pull_request.paths 加在供应该上下文的 workflow 上
+workflow 根本没有 pull_request 触发器
+```
+
+现在它解析 `jobs:` 与 `on:` 块，八种全部报错。**一个不会红的守卫和没有守卫是一回事**，
+而它自己在 CI 里是绿的——这正是最难发现的那种。
+
+### 反事实
+
+| 回退什么 | 结果 |
+|---|---|
+| `readSync(0)` → `execFileSync('cat')` | `impact.test.mjs` 第 24 例失败 |
+| `process.exitCode` → `process.exit` | 第 25 例失败（**专门为它加的 `--verbose` 用例**） |
+| 八种 workflow 变异中的任何一种 | 检查器报 `ERROR` |
+| `spec-coverage` 加回 `needs: [scope]` | `ERROR spec-coverage: ... has needs: [scope]` |
+
+注意第 2 行：`process.exit` 的回退一开始**没有**反事实——紧凑 JSON 只有 377 字节，
+截断不会触发。这就是为什么要加 `--verbose` 用例：它故意索要那个大文档。
+
+### 顺带修的：输出从 24.7 MB 降到 377 字节
+
+`--json` 曾经回显整个文件列表加每文件的 `reason` 映射。两个消费方（`ci.yml` 的
+`scope`、`ci-gate`）只读 `suites` 和 `unmatched`。现在默认紧凑，`--verbose` 保留诊断。
+
 ### B-8 CI Gate 的 pending 语义 FIXED
 
 `delegated-pending` 曾经不阻塞 gate。而 `data-foundation`、`plugin-lifecycle`、
@@ -353,6 +419,10 @@ ACCEPTED_RISK，写在这里而不是假装 gate 覆盖了它们。
 | 测试不设 `OPSWEAVE_TEST_DATABASE_URL` 时报的「通过」 | 是 skip，不是通过；我曾据此说测试通过 | 加 `OPSWEAVE_REQUIRE_TEST_DATABASE=1` 复跑，暴露出真失败 |
 | 删断言的反事实第一版用正则删 `assert.x(...)` | 语法破碎导致 rc=1，不是有效对照；且残留一个 `assert.` 让新检查误判通过 | 改成 `noop(` 重写（语法有效），并补比例下限 |
 | 一个 PR 上连续推送 8 次 | 每次推 6 个 workflow，**31 个 run 排队 / 21 个在跑**，自己的检查一个多小时没开始 | `gh api` 数队列；取消 25 个被 supersede 的旧 run，降到 8 |
+| 把 `if:` 删了但留下 `needs: [scope]` | **等于没修**——`needs` 失败同样导致跳过，缺陷换了一条路回来 | 审查工作流枚举「所有不产出结论的路径」时发现 |
+| 守卫只匹配一个字面模式 | 八种变异全部报 0 error，而守卫在 CI 里是绿的 | 逐个施加变异并确认它报错 |
+| 测试断言按 `node_id` 计数 | CI 报 `left: 2`（本地永远绿）——数进了别的测试的实例 | 读 CI 日志里的 left/right 数值 |
+| 收敛测试调用全局 `reconcile_once` | 会扫掉别的 fixture 的节点，让无关的容量测试失败 `left: 1, right: 3` | 同上；修法是 `reconcile_once_scoped(state, Some(id))` |
 
 最后一条值得展开，因为它是 brief §8.3 直接点名的：
 
