@@ -296,6 +296,9 @@ async fn route_candidates(state: &AppState, plugin_id: &str) -> AppResult<Vec<Ro
 
 #[cfg(test)]
 mod tests {
+    // `route_candidates` is imported inside `route_gates` instead: it only
+    // exists with the default features, and a top-level import breaks
+    // `cargo clippy --no-default-features -- -D warnings` with "unused import".
     use super::{identity_headers, safe_forward_path};
     use uuid::Uuid;
 
@@ -323,5 +326,392 @@ mod tests {
         assert!(!safe_forward_path("/api/%2E%2E/admin"));
         assert!(!safe_forward_path("/api/%2fadmin"));
         assert!(!safe_forward_path("/api\\admin"));
+    }
+
+    /// The five gates `route_candidates` puts between a plugin id and a socket.
+    ///
+    /// TASK-19 lists these as the attack matrix: a revoked publisher, a revoked
+    /// node, a disabled activation, a stale node, and a non-READY instance. The
+    /// query enforces all five (`trust_state = 'TRUSTED'`, `revoked_at IS NULL`,
+    /// `r.status = 'ACTIVE'`, the staleness predicate, `i.state = 'READY'`) and
+    /// **none of them had a test**. A predicate in a WHERE clause with no
+    /// counterfactual is a comment: deleting one line changes routing for every
+    /// plugin on the platform and every existing test still passes.
+    ///
+    /// Each case below removes exactly one condition and asserts the route
+    /// disappears. They share one fixture so a single bad insert cannot make a
+    /// case pass for the wrong reason.
+    #[cfg(test)]
+    mod route_gates {
+        use super::super::{route_candidates, RouteRow};
+        use crate::state::{AppState, RateLimiter};
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use std::sync::Arc;
+        use uuid::Uuid;
+
+        const REQUIRE: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE).ok().as_deref() == Some("1") {
+                        panic!("{REQUIRE} is set but OPSWEAVE_TEST_DATABASE_URL is unset");
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connects");
+            crate::db::migrate(&pool).await.expect("migrates");
+            Some(pool)
+        }
+
+        /// Everything the route needs, all gates open, plus handles to close each
+        /// one individually.
+        struct Fixture {
+            plugin: String,
+            publisher: String,
+            node: Uuid,
+            instance: Uuid,
+            revision: Uuid,
+            // `package` and `deployment` were read by nothing: the cases reach
+            // them through `instance`/`revision`, which cascade. Keeping unused
+            // fields cost a `-D warnings` failure on the no-default-features
+            // build only, which is exactly the kind of difference between two
+            // CI commands that local runs with one feature set do not catch.
+        }
+
+        async fn fixture(pool: &PgPool) -> Fixture {
+            let tag = Uuid::new_v4().simple().to_string();
+            let plugin = format!("test.gate.{tag}");
+            let publisher = format!("pub-{tag}");
+            let node = Uuid::new_v4();
+            let package = Uuid::new_v4();
+            let deployment = Uuid::new_v4();
+            let instance = Uuid::new_v4();
+            let revision = Uuid::new_v4();
+
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+
+            // `data_endpoint` must be present: the route query requires it, and a
+            // null one would make every case fail on the control assertion rather
+            // than on the gate under test. `last_seen_at` is refreshed at read
+            // time in `routes()` for the same reason - see the note there.
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint)
+                 VALUES ($1,$2,'x','tok',1,'linux','amd64','{}'::jsonb,'[]'::jsonb,
+                         'READY',now(),now(),'http://127.0.0.1:1')",
+            )
+            .bind(node)
+            .bind(format!("gate-node-{tag}"))
+            .execute(pool)
+            .await
+            .expect("node");
+
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            .bind(package)
+            .bind(&plugin)
+            .bind(&publisher)
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .execute(pool)
+            .await
+            .expect("package");
+
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 VALUES ($1,$2,$3,'1.0.0',1,1,'{}'::jsonb,
+                         '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'ACTIVE',now(),now())",
+            )
+            .bind(deployment)
+            .bind(&plugin)
+            .bind(package)
+            .execute(pool)
+            .await
+            .expect("deployment");
+
+            sqlx::query(
+                "INSERT INTO kernel.plugin_instances
+                   (id, deployment_id, node_id, slot, deployment_generation,
+                    desired_action, state)
+                 VALUES ($1,$2,$3,0,1,'START','READY')",
+            )
+            .bind(instance)
+            .bind(deployment)
+            .bind(node)
+            .execute(pool)
+            .await
+            .expect("instance");
+
+            sqlx::query(
+                "INSERT INTO kernel.activation_revisions
+                   (id, plugin_id, package_id, version, deployment_id, generation,
+                    status, policy_digest, activated_at)
+                 VALUES ($1,$2,$3,'1.0.0',$4,1,'ACTIVE','d',now())",
+            )
+            .bind(revision)
+            .bind(&plugin)
+            .bind(package)
+            .bind(deployment)
+            .execute(pool)
+            .await
+            .expect("revision");
+
+            Fixture {
+                plugin,
+                publisher,
+                node,
+                instance,
+                revision,
+            }
+        }
+
+        fn state(pool: &PgPool) -> AppState {
+            AppState {
+                config: Arc::new(crate::config::Config::from_env()),
+                db: pool.clone(),
+                http: reqwest::Client::new(),
+                cursor_secret: Arc::new(vec![0u8; 32]),
+                rate_limiter: Arc::new(RateLimiter::default()),
+            }
+        }
+
+        async fn routes(pool: &PgPool, plugin: &str) -> Vec<RouteRow> {
+            // Refresh ONLY this fixture's nodes.
+            //
+            // `node_stale_seconds` is 25 by default and the suite creates a dozen
+            // fixtures across tests that share one database, so a node inserted
+            // two assertions ago is stale by the third. The first version of this
+            // refreshed every node - `WHERE revoked_at IS NULL` - which also
+            // un-staled the fixtures other concurrently running tests had
+            // deliberately aged, so `a_stale_node_stops_routing` failed under the
+            // default parallel `cargo test` and passed at `--test-threads=1`.
+            // Scoping the update to the plugin under test fixes both.
+            sqlx::query(
+                "UPDATE kernel.nodes SET last_seen_at = now()
+                 WHERE revoked_at IS NULL AND id IN (
+                   SELECT i.node_id FROM kernel.plugin_instances i
+                   JOIN kernel.plugin_deployments d ON d.id = i.deployment_id
+                   WHERE d.plugin_id = $1)",
+            )
+            .bind(plugin)
+            .execute(pool)
+            .await
+            .expect("heartbeat refresh");
+            routes_raw(pool, plugin).await
+        }
+
+        /// No heartbeat refresh. For the cases that need to control staleness
+        /// themselves - `routes()` would undo the very condition under test.
+        async fn routes_raw(pool: &PgPool, plugin: &str) -> Vec<RouteRow> {
+            route_candidates(&state(pool), plugin)
+                .await
+                .expect("query runs")
+        }
+
+        #[tokio::test]
+        async fn an_all_green_route_is_reachable() {
+            let Some(pool) = pool().await else { return };
+            let f = fixture(&pool).await;
+            let got = routes(&pool, &f.plugin).await;
+            assert_eq!(got.len(), 1, "the control case: every gate open must route");
+            assert_eq!(got[0].instance_id, f.instance);
+        }
+
+        #[tokio::test]
+        async fn a_revoked_publisher_stops_routing() {
+            let Some(pool) = pool().await else { return };
+            let f = fixture(&pool).await;
+            sqlx::query(
+                "UPDATE kernel.trusted_publishers SET trust_state='REVOKED' WHERE publisher_id=$1",
+            )
+            .bind(&f.publisher)
+            .execute(&pool)
+            .await
+            .unwrap();
+            assert!(
+                routes(&pool, &f.plugin).await.is_empty(),
+                "a package signed by a revoked publisher must not be served"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_revoked_node_stops_routing() {
+            let Some(pool) = pool().await else { return };
+            let f = fixture(&pool).await;
+            sqlx::query("UPDATE kernel.nodes SET revoked_at=now() WHERE id=$1")
+                .bind(f.node)
+                .execute(&pool)
+                .await
+                .unwrap();
+            assert!(
+                routes(&pool, &f.plugin).await.is_empty(),
+                "a revoked node must not serve"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_stale_node_stops_routing() {
+            let Some(pool) = pool().await else { return };
+            let f = fixture(&pool).await;
+            sqlx::query(
+                "UPDATE kernel.nodes SET last_seen_at = now() - interval '1 day' WHERE id=$1",
+            )
+            .bind(f.node)
+            .execute(&pool)
+            .await
+            .unwrap();
+            assert!(
+                routes_raw(&pool, &f.plugin).await.is_empty(),
+                "a node that stopped reporting must not be routed to, however healthy its last word"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_disabled_activation_stops_routing() {
+            let Some(pool) = pool().await else { return };
+            let f = fixture(&pool).await;
+            sqlx::query("UPDATE kernel.activation_revisions SET status='DISABLED' WHERE id=$1")
+                .bind(f.revision)
+                .execute(&pool)
+                .await
+                .unwrap();
+            assert!(
+                routes(&pool, &f.plugin).await.is_empty(),
+                "a disabled activation must not route"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_superseded_activation_stops_routing() {
+            let Some(pool) = pool().await else { return };
+            let f = fixture(&pool).await;
+            sqlx::query("UPDATE kernel.activation_revisions SET status='SUPERSEDED' WHERE id=$1")
+                .bind(f.revision)
+                .execute(&pool)
+                .await
+                .unwrap();
+            assert!(
+                routes(&pool, &f.plugin).await.is_empty(),
+                "only the ACTIVE revision routes"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_stopped_instance_stops_routing() {
+            let Some(pool) = pool().await else { return };
+            let f = fixture(&pool).await;
+            sqlx::query("UPDATE kernel.plugin_instances SET desired_action='STOP' WHERE id=$1")
+                .bind(f.instance)
+                .execute(&pool)
+                .await
+                .unwrap();
+            assert!(
+                routes(&pool, &f.plugin).await.is_empty(),
+                "a stopped instance is not a destination"
+            );
+        }
+
+        #[tokio::test]
+        async fn an_instance_that_is_not_ready_stops_routing() {
+            let Some(pool) = pool().await else { return };
+            let f = fixture(&pool).await;
+            // The constraint `plugin_instances_state_check` allows
+            // STARTING/READY/UNHEALTHY/UNREACHABLE/STOPPED/UNKNOWN. `STOPPING` is
+            // not one of them - an earlier version of this loop used it and failed
+            // with a CHECK violation rather than an assertion, which reads as a
+            // schema problem instead of a test problem.
+            for state in ["STARTING", "UNHEALTHY", "UNREACHABLE", "UNKNOWN", "STOPPED"] {
+                sqlx::query("UPDATE kernel.plugin_instances SET state=$2 WHERE id=$1")
+                    .bind(f.instance)
+                    .bind(state)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                assert!(
+                    routes(&pool, &f.plugin).await.is_empty(),
+                    "an instance in {state} must not receive traffic"
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn a_node_with_no_data_endpoint_stops_routing() {
+            let Some(pool) = pool().await else { return };
+            let f = fixture(&pool).await;
+            sqlx::query("UPDATE kernel.nodes SET data_endpoint=NULL WHERE id=$1")
+                .bind(f.node)
+                .execute(&pool)
+                .await
+                .unwrap();
+            assert!(
+                routes(&pool, &f.plugin).await.is_empty(),
+                "there is nowhere to forward to; a null endpoint must not become an empty URL"
+            );
+        }
+
+        #[tokio::test]
+        async fn one_plugin_cannot_route_through_another_plugins_activation() {
+            let Some(pool) = pool().await else { return };
+            let a = fixture(&pool).await;
+            let b = fixture(&pool).await;
+            // B's instance is healthy and its node is fine; asking for A must not
+            // find it. This is the cross-plugin identity boundary, asserted at the
+            // routing layer rather than only in the plugin's own handler.
+            assert_eq!(routes(&pool, &a.plugin).await.len(), 1);
+            assert_eq!(routes(&pool, &b.plugin).await.len(), 1);
+            assert_ne!(a.instance, b.instance);
+            assert!(routes(&pool, "test.gate.nobody").await.is_empty());
+        }
+
+        #[tokio::test]
+        async fn the_gates_are_independent() {
+            let Some(pool) = pool().await else { return };
+            // Two fixtures, one gate closed on each, so a change that only checks
+            // "is anything wrong" instead of each condition fails here.
+            let a = fixture(&pool).await;
+            let b = fixture(&pool).await;
+            sqlx::query(
+                "UPDATE kernel.trusted_publishers SET trust_state='REVOKED' WHERE publisher_id=$1",
+            )
+            .bind(&a.publisher)
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query("UPDATE kernel.nodes SET revoked_at=now() WHERE id=$1")
+                .bind(b.node)
+                .execute(&pool)
+                .await
+                .unwrap();
+            assert!(
+                routes(&pool, &a.plugin).await.is_empty(),
+                "A closed by publisher"
+            );
+            assert!(
+                routes(&pool, &b.plugin).await.is_empty(),
+                "B closed by node"
+            );
+        }
     }
 }

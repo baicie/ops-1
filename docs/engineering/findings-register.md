@@ -367,7 +367,10 @@ platform-linux-acceptance / reliability），其中 data-foundation 单独就要
 正确做法：**PR 推送前把能本地跑的门禁全跑完**，只推真正需要 CI 的版本。
 
 ```bash
-cargo fmt --all -- --check          # rust job 的第一条，漏过一次
+cargo fmt --all -- --check
+# BOTH feature sets. This crate is built twice by `platform-only`, and an import
+# or a field that is fine with defaults is an error without them under -D warnings.
+cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo clippy --locked -p opsweave-kernel --all-targets -- -D warnings
 cargo clippy --locked -p opsweave-kernel --no-default-features --all-targets -- -D warnings
 OPSWEAVE_TEST_DATABASE_URL=... OPSWEAVE_REQUIRE_TEST_DATABASE=1 cargo test -p opsweave-kernel
@@ -380,8 +383,15 @@ node tests/ci/check-impact-consistency.mjs
 node tests/ci/check-test-substance.mjs --selftest && node tests/ci/check-test-substance.mjs --all
 ```
 
-这份清单本身是漏出来的：第一次写时没有 `cargo fmt`，于是下一个 PR 被 `rust` job
-以格式失败挡下——CI 正确地抓住了本地门禁清单的缺口。
+这份清单本身是漏出来的，漏了三次：
+
+1. 第一版没有 `cargo fmt` → 下一个 PR 被 `rust` job 挡下。
+2. 第二版只有 `-p opsweave-kernel` 的 clippy → `rust` job 跑的是 `--workspace`。
+3. 第三版补了 workspace，却仍只跑默认 features → `platform-only` 跑第二遍
+   `--no-default-features`，在那里 `route_candidates` 是未使用导入。
+
+三次都是同一种形状：**CI 跑的是一条我不曾完整抄下来的命令**。教训不是「记得跑 clippy」，
+而是「去 workflow 文件里抄命令，不要凭记忆写」。
 
 ---
 
