@@ -353,6 +353,40 @@ fi
 这一条写在这里，是因为它是最容易被误读成「修好了」的那类证据：绿 check、正确的时间戳、
 `healthy: true`。它只是没做任何事。
 
+### B-13 升级从不回收旧版本 FIXED（staging 未验证）
+
+**这是那两条 staging 4/4 失败的真正根因**，也是本轮唯一一个「找出并修掉底层产品缺陷」的条目。
+
+`plugin_deployments` 每个版本一行，而 `deploy_plugin` 从不把上一版置为 `DRAINING`。
+于是每次发布都留下旧 deployment 继续 `START` 自己的健康实例：
+
+```
+发布 A -> 1/4
+发布 B -> 2/4   （A 还在跑）
+发布 C -> 3/4   （A、B 还在跑）
+发布 D -> 4/4
+再发布 -> INSTANCE_CAPACITY_EXCEEDED
+```
+
+之前两个「容量修复」都打偏了：它们针对的是**幽灵**（`UNHEALTHY`/`UNREACHABLE` 且无容器），
+而这四行健康、有容器、被正确计数。报错是容量信息，因为容量**确实**被花掉了——花在没人
+要求继续运行的旧版本上。
+
+实现时又暴露出**第二个缺陷**：`reconcile_once` 只规划活跃集合，所以变成 `DISABLED` 的
+deployment 的实例再也不会被看到——`desired_action` 停在 `START`，槽位继续被占。
+与幽灵缺陷同一个形状，只是高了一层。是这条 PR 自己的测试发现的。
+
+**反事实（两条，都实际跑过）**：
+
+| 回退 | 结果 |
+|---|---|
+| 删掉 `drain_superseded_versions` 的 UPDATE | `left: "ACTIVE", right: "DRAINING"` |
+| 删掉 DISABLED -> STOP 那条语句 | `left: 2, right: 0`——槽位仍被占 |
+
+**未验证的部分**：staging 只有在插件**内容**变化时才会走到这条路径（版本是内容哈希），
+而上一次绿的部署恰恰因为内容没变而整个跳过了发布（`already installed; leaving it`）。
+所以要声称「修好了 staging」需要一次真实的内容变更加一次真实部署——本轮无权执行。
+
 ### 因果闭环：为什么「点治理就退出登录」还没修好
 
 这轮把整条链查通了，而结论是：**代码已经对，线上仍是旧镜像。**

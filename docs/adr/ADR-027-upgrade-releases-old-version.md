@@ -1,10 +1,35 @@
 # ADR-027: A plugin upgrade must release the old version's instances
 
-**Status: PROPOSED — the root cause is proven, the fix is not implemented.**
+**Status: ACCEPTED — implemented in PR #148 for decisions 1 and 3. Decisions 2
+and 4 remain open, and the staging verification is still outstanding.**
 
 Found 2026-11-17 while investigating why the staging publish chain has never
 succeeded. It changes what TASK-16 (plugin lifecycle) and TASK-01/11 (capacity)
 are actually about.
+
+## What was implemented
+
+`deploy_plugin` now calls `drain_superseded_versions` before inserting the new
+row: every other live deployment of the plugin becomes `DRAINING` with
+`drain_until` in the past, so one reconcile pass disables it.
+
+Implementing it exposed a **second** defect, which the ADR had not predicted:
+`reconcile_once` only plans the active set, so a deployment that became
+`DISABLED` never had its instances stopped — `desired_action` stayed `START` and
+the slot stayed held. The same shape as the ghost defect, one level up. Fixed in
+the same PR, with its own counterfactual.
+
+Still open:
+
+- **Decision 2** (is a brief downtime acceptable?) — the implementation takes
+  stop-then-start, so the answer is currently "yes, seconds". That is a product
+  decision this ADR asked for and did not receive.
+- **Decision 4** (what `uninstall` does to history) — unchanged; it already
+  disables by `plugin_id`, which is now consistent with upgrade.
+- **`placement.rollout`** — not implemented. One behaviour, the one that works on
+  a single node.
+- **Staging verification** — the fix is exercised only when a plugin's content
+  changes, and the last green deploy skipped the publish entirely for that reason.
 
 ## The defect
 
