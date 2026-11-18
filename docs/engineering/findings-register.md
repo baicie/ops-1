@@ -321,6 +321,38 @@ deployment 置为 `DISABLED`。所以每次发布都留下旧的 deployment 继�
 显式选择 stop-then-start（默认）或 surge。未实现——它改变 `deploy` 的语义，
 是 ADR 不是补丁。
 
+### staging 部署「成功」了一次，但那不是修复
+
+`edba489`（2026-11-18）的 `deploy to staging host` 结论是 `success`——本轮第一次。
+日志说明为什么，而原因不是修好了：
+
+```
+data-catalog:     pushed ...0.0.17455
+data-integration: pushed ...0.0.17455
+opsweave.data-catalog@0.0.17455     already installed; leaving it
+opsweave.data-integration@0.0.17455 already installed; leaving it
+data plugin bundles installed at 0.0.17455
+```
+
+`publish-data-plugins.sh` 第 251 行：
+
+```bash
+if [ "$installed" != "0" ]; then
+  say "$plugin@$version already installed; leaving it"
+  continue          # <- deploy 从未被调用
+fi
+```
+
+版本号是**内容哈希**（ADR-025），而这一轮我没改插件源码，所以版本仍是 `0.0.17455`——
+和上一次失败的那次完全相同。于是脚本判定「已安装」，`continue`，`opsctl deploy --wait`
+根本没执行，`INSTANCE_CAPACITY_EXCEEDED` 那条路径也就没被走到。
+
+**所以：这次成功证明的是「跳过逻辑有效」，不是「部署可用」。** 只要插件内容变一次，
+版本号就会变，部署会再次走到那个 4/4 容量断言。ADR-027 因此仍然完全成立，也仍然未实现。
+
+这一条写在这里，是因为它是最容易被误读成「修好了」的那类证据：绿 check、正确的时间戳、
+`healthy: true`。它只是没做任何事。
+
 ### 因果闭环：为什么「点治理就退出登录」还没修好
 
 这轮把整条链查通了，而结论是：**代码已经对，线上仍是旧镜像。**
