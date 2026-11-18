@@ -93,7 +93,19 @@ jobs:
 
   rust:
     # ALWAYS RUNS - `rust` is a required context. See the note on `web`.
-    needs: [scope]
+    # ALWAYS RUNS, and does NOT list `scope` in `needs`.
+    #
+    # Both halves matter, and the first fix missed the second. Removing the `if:`
+    # made this job unconditional, but leaving `needs: [scope]` re-created the same
+    # defect by another route: in GitHub Actions a job whose `needs` entry was
+    # skipped or failed is ITSELF skipped. `scope` runs `git fetch`, `git diff` and
+    # `node impact.mjs` under `set -euo pipefail` with a 5-minute timeout, so any
+    # non-zero exit there would take `rust`, `web`, `web-unit` and
+    # `platform-image-build` to `skipped` - four of the nine contexts ruleset
+    # 26958761 requires - and the merge endpoint would answer
+    # `9 of 9 required status checks are expected`.
+    #
+    # `scope` exists only to decide which of the NON-required heavy jobs run.
     runs-on: ubuntu-24.04
     # apps/kernel's DB-backed tests (src/jobs.rs, mod terminalization_tests) skip only when
     # OPSWEAVE_TEST_DATABASE_URL is genuinely unset; a set-but-unusable URL (bad syntax,
@@ -175,7 +187,19 @@ jobs:
     # reach a job the ruleset names. `image-build` and the `g13*` acceptance jobs
     # are not required contexts, so gating those stays safe.
 
-    needs: [scope]
+    # ALWAYS RUNS, and does NOT list `scope` in `needs`.
+    #
+    # Both halves matter, and the first fix missed the second. Removing the `if:`
+    # made this job unconditional, but leaving `needs: [scope]` re-created the same
+    # defect by another route: in GitHub Actions a job whose `needs` entry was
+    # skipped or failed is ITSELF skipped. `scope` runs `git fetch`, `git diff` and
+    # `node impact.mjs` under `set -euo pipefail` with a 5-minute timeout, so any
+    # non-zero exit there would take `rust`, `web`, `web-unit` and
+    # `platform-image-build` to `skipped` - four of the nine contexts ruleset
+    # 26958761 requires - and the merge endpoint would answer
+    # `9 of 9 required status checks are expected`.
+    #
+    # `scope` exists only to decide which of the NON-required heavy jobs run.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -233,7 +257,19 @@ jobs:
   # its own job so a red unit run is reported as such instead of hiding behind a build failure.
   web-unit:
     # ALWAYS RUNS - `web-unit` is a required context. See the note on `web`.
-    needs: [scope]
+    # ALWAYS RUNS, and does NOT list `scope` in `needs`.
+    #
+    # Both halves matter, and the first fix missed the second. Removing the `if:`
+    # made this job unconditional, but leaving `needs: [scope]` re-created the same
+    # defect by another route: in GitHub Actions a job whose `needs` entry was
+    # skipped or failed is ITSELF skipped. `scope` runs `git fetch`, `git diff` and
+    # `node impact.mjs` under `set -euo pipefail` with a 5-minute timeout, so any
+    # non-zero exit there would take `rust`, `web`, `web-unit` and
+    # `platform-image-build` to `skipped` - four of the nine contexts ruleset
+    # 26958761 requires - and the merge endpoint would answer
+    # `9 of 9 required status checks are expected`.
+    #
+    # `scope` exists only to decide which of the NON-required heavy jobs run.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1010,7 +1046,19 @@ jobs:
     # ALWAYS RUNS - `platform-image-build` is a required context. See the note on
     # `web`. `runtime-image-build` below is NOT a required context, so gating that
     # one stays safe and keeps its ~5 minutes off a docs-only change.
-    needs: [scope]
+    # ALWAYS RUNS, and does NOT list `scope` in `needs`.
+    #
+    # Both halves matter, and the first fix missed the second. Removing the `if:`
+    # made this job unconditional, but leaving `needs: [scope]` re-created the same
+    # defect by another route: in GitHub Actions a job whose `needs` entry was
+    # skipped or failed is ITSELF skipped. `scope` runs `git fetch`, `git diff` and
+    # `node impact.mjs` under `set -euo pipefail` with a 5-minute timeout, so any
+    # non-zero exit there would take `rust`, `web`, `web-unit` and
+    # `platform-image-build` to `skipped` - four of the nine contexts ruleset
+    # 26958761 requires - and the merge endpoint would answer
+    # `9 of 9 required status checks are expected`.
+    #
+    # `scope` exists only to decide which of the NON-required heavy jobs run.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

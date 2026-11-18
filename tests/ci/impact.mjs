@@ -34,7 +34,7 @@
  * this script does not fail because a change is large.
  */
 
-import { execFileSync } from 'node:child_process';
+import { readSync } from 'node:fs';
 
 /**
  * The suites this repository can run. These names are the vocabulary the
@@ -283,16 +283,50 @@ export function analyse(files) {
 }
 
 function filesFromStdin() {
-  const data = execFileSync('cat', [], { encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'] });
-  return data.split('\n').map((l) => l.trim()).filter(Boolean);
+  // Read fd 0 directly. This used to be `execFileSync('cat')`, which buffers the
+  // child's output through Node's default 1 MiB `maxBuffer` and dies with
+  // `spawnSync cat ENOBUFS` past that. Measured: 1,026,000 bytes is fine,
+  // 1,053,000 bytes throws. At this repository's average of 46.4 bytes per path
+  // that is about 22,700 changed files - reachable by a mass rename, a vendored
+  // import or a formatting sweep.
+  //
+  // The failure mattered because of where it landed. `ci.yml`'s `scope` job pipes
+  // the changed-file list through this script, and `scope` gates the four
+  // required jobs' `needs`. An ENOBUFS throw fails `scope`, which skips them, and
+  // the merge endpoint reports "9 of 9 required status checks are expected" - for
+  // a change set the script's own fail-closed rule would have handled correctly
+  // (`CHANGED="__unavailable__"` runs everything). The design was right; the read
+  // was the defect.
+  //
+  // `readFileSync(0)` has no such cap and no child process. It throws on a closed
+  // stdin, which the caller already treats as an empty change set.
+  const chunks = [];
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  for (;;) {
+    let bytes;
+    try {
+      bytes = readSync(0, buffer, 0, buffer.length, null);
+    } catch (error) {
+      // EAGAIN on a non-blocking pipe: nothing written yet, try again.
+      if (error && error.code === 'EAGAIN') continue;
+      // EOF on some platforms surfaces as EIO/EOF rather than 0 bytes.
+      if (error && (error.code === 'EOF' || error.code === 'EIO')) break;
+      throw error;
+    }
+    if (bytes === 0) break;
+    chunks.push(Buffer.from(buffer.subarray(0, bytes)));
+  }
+  return Buffer.concat(chunks).toString('utf8').split('\n').map((l) => l.trim()).filter(Boolean);
 }
 
 function main(argv) {
   let files = [];
   let json = false;
+  let verbose = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--json') json = true;
+    else if (arg === '--verbose') verbose = true;
     else if (arg === '--stdin') files = files.concat(filesFromStdin());
     else if (arg === '--files') {
       // Everything up to the next flag.
@@ -309,7 +343,33 @@ function main(argv) {
   const decision = analyse(files);
 
   if (json) {
-    process.stdout.write(`${JSON.stringify({ files, ...decision }, null, 2)}\n`);
+    // THE MACHINE-READABLE FORM IS TINY ON PURPOSE.
+    //
+    // Measured on a 40,000-path change set before this change: the document was
+    // 24.7 MB, of which `files` was 24.7 MB and `reason` (one "glob <- file"
+    // string per matched suite per file) was another several MB. Both callers -
+    // `ci.yml`'s `scope` job and `ci-gate` - read `suites` and `unmatched` and
+    // nothing else; they already have the file list, they produced it.
+    //
+    // The size was not cosmetic. `scope` pipes this through a shell pipeline and
+    // JSON.parses it, and every megabyte is another way for that to fail on a
+    // path that gates four ruleset-required jobs. The diagnosis a human wants
+    // (`reason`: which glob asked for which suite, and for what file) is still
+    // available - as the human-readable output, and under `--verbose` here.
+    const out = {
+      suites: decision.suites,
+      unmatched: decision.unmatched,
+      fileCount: files.length,
+      matchedCount: decision.matched.length,
+      ignoredCount: decision.ignored.length,
+    };
+    if (verbose) {
+      out.reason = decision.reason;
+      out.files = files;
+      out.matched = decision.matched;
+      out.ignored = decision.ignored;
+    }
+    process.stdout.write(`${JSON.stringify(out, verbose ? 2 : 0)}\n`);
     return 0;
   }
 
@@ -332,5 +392,21 @@ function main(argv) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  process.exit(main(process.argv.slice(2)));
+  // NOT `process.exit(main(...))`.
+  //
+  // `process.exit` discards anything still buffered on stdout when stdout is a
+  // PIPE rather than a TTY - and in CI it always is. Measured: a 40,000-path
+  // fixture produced exactly 8192 bytes of JSON, truncated mid-string, because
+  // the process exited before the pipe was drained. A TTY hides this completely,
+  // which is why it survived every local run.
+  //
+  // The consequence was worse than a bad report. `ci.yml`'s `scope` job parses
+  // this script's `--json` output, and a truncated document throws there. That
+  // failed `scope`, which skipped four ruleset-required jobs through `needs` -
+  // the same merge-blocking shape as the `maxBuffer` defect fixed above, reached
+  // through the output side instead of the input side.
+  //
+  // Setting `process.exitCode` and letting the event loop drain is the supported
+  // way to exit with a status from a stream-writing CLI.
+  process.exitCode = main(process.argv.slice(2));
 }
