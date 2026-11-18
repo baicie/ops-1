@@ -13,6 +13,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { analyse, SUITES } from './impact.mjs';
 
 /** Suites the decision turned on. */
@@ -298,4 +300,74 @@ test('Q the filter parser agrees with PyYAML where PyYAML exists', async () => {
   } finally {
     rmSync(fixture, { force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// `--stdin` must not have a size ceiling.
+//
+// `filesFromStdin` used to be `execFileSync('cat')`, which buffers through Node's
+// default 1 MiB `maxBuffer`. Measured before the fix: 1,026,000 bytes exits 0,
+// 1,053,000 bytes exits 1 with `spawnSync cat ENOBUFS`.
+//
+// That mattered because `ci.yml`'s `scope` job pipes the changed-file list
+// through this script, and `scope` used to gate four ruleset-required jobs
+// through `needs:`. An ENOBUFS throw failed `scope` and skipped them, so the
+// merge endpoint answered "9 of 9 required status checks are expected" - while
+// the script's own fail-closed rule (`CHANGED="__unavailable__"` runs everything)
+// would have handled the same change set correctly.
+//
+// This test drives the real process with a real pipe, because the defect lived in
+// how stdin was read, not in `analyse`.
+test('--stdin handles a change set far larger than the old 1 MiB pipe buffer', () => {
+
+  const COUNT = 40000;
+  // Long enough that the total comfortably exceeds the old 1 MiB cap.
+  const input = Array.from({ length: COUNT }, (_, i) => `apps/kernel/src/generated/very/long/module/path/segment/f${String(i).padStart(6, '0')}.rs`).join('\n') + '\n';
+  assert.ok(input.length > 1_100_000, `fixture must exceed the old 1 MiB cap (got ${input.length} bytes)`);
+
+  const script = fileURLToPath(new URL('./impact.mjs', import.meta.url));
+  const out = execFileSync(process.execPath, [script, '--stdin', '--json'], {
+    input,
+    encoding: 'utf8',
+    // The OUTPUT also goes through a buffer: `--json` echoes the full file list
+    // back, so a 40k-path fixture produces a multi-megabyte JSON document. This
+    // cap is the test's own reading limit, not the thing under test - the defect
+    // being pinned is on the INPUT side, in how impact.mjs reads stdin.
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const decision = JSON.parse(out);
+  assert.equal(decision.fileCount, COUNT, 'every path on stdin must reach the analyzer');
+  assert.equal(decision.unmatched.length, 0);
+  assert.equal(decision.suites.rust, true, 'a kernel-only change still asks for rust');
+});
+
+// ---------------------------------------------------------------------------
+// `--verbose --json` must survive a pipe.
+//
+// The compact form is ~400 bytes, so it cannot exercise the buffering problem;
+// this one asks for the big document on purpose. `process.exit()` discards
+// whatever is still buffered on stdout when stdout is a PIPE - and in CI it
+// always is. Measured before the fix: a 40,000-path fixture produced exactly
+// 8192 bytes of JSON, truncated mid-string, and a TTY hid it completely.
+//
+// The consequence was merge-blocking, not cosmetic: `ci.yml`'s `scope` job parses
+// this output, a truncated document throws there, `scope` fails, and `needs:`
+// skips four ruleset-required jobs.
+test('--verbose --json writes the whole document through a pipe', () => {
+  const COUNT = 3000;
+  const input = Array.from({ length: COUNT }, (_, i) => `apps/kernel/src/f${String(i).padStart(6, '0')}.rs`).join('\n') + '\n';
+  const script = fileURLToPath(new URL('./impact.mjs', import.meta.url));
+
+  const out = execFileSync(process.execPath, [script, '--stdin', '--json', '--verbose'], {
+    input,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+
+  // Must be parseable at all - a truncated document is not.
+  const decision = JSON.parse(out);
+  assert.equal(decision.fileCount, COUNT);
+  // And the verbose payloads must be complete, not clipped.
+  assert.equal(decision.files.length, COUNT, 'the echoed file list must not be truncated');
+  assert.equal(decision.matched.length, COUNT);
 });

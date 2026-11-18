@@ -549,48 +549,182 @@ for (const workflow of Object.keys({ ...SUITE_WORKFLOW, 'ci.yml': null })) {
 }
 
 // ---------------------------------------------------------------------------
-// A RULESET-REQUIRED CHECK MUST NEVER BE CONDITIONAL.
+// A RULESET-REQUIRED CHECK MUST REACH A CONCLUSION ON EVERY PULL REQUEST.
 //
-// Ruleset 26958761 names nine contexts. A job bearing one of those names must run
-// on every pull request: GitHub's required-status rule wants a *conclusion* named
-// `rust` on the head commit, and `skipped` is not one. A skipped required check
-// blocks a merge exactly as hard as a missing one - measured on PR #144, where a
-// `gateway.rs`-only change skipped `web` and `web-unit` and the merge endpoint
-// answered `9 of 9 required status checks are expected`.
+// Ruleset 26958761 names nine contexts. GitHub's required-status rule wants a
+// *conclusion* named `rust` on the head commit, and neither `skipped` nor an
+// absent check is one. Both block a merge identically:
 //
-// This is the automated form of "the scope fan-out must never reach a job the
-// ruleset names". It reads ci.yml directly, so gating a required job in future
-// fails here rather than in a merge attempt nobody can explain.
+//     9 of 9 required status checks are expected
+//
+// Measured three separate times in one day: PR #144 skipped `web` and `web-unit`
+// through an `if:`; the first fix removed that `if:` but left `needs: [scope]`,
+// which skips a job whose dependency failed - the same defect wearing a different
+// hat; and `impact.mjs --stdin` could die with ENOBUFS on a large change set,
+// which failed `scope` and cascaded to four required jobs through `needs`.
+//
+// So this check does not look for one bad pattern. It enumerates every way a
+// required job can fail to conclude, and it FAILS if it cannot positively confirm
+// the job is unconditional. The previous version matched only
+// `/^    if:.*needs\.scope\.outputs/`, which reported 0 errors against all of:
+//
+//     rust-build:            (the job renamed - the context `rust` disappears)
+//     web-unit: if: false
+//     web-unit: if: ${{ needs.scope.result == 'success' }}
+//     web-unit: if: ${{ github.event_name == 'push' }}
+//     spec-coverage: needs: [scope]
+//
+// Each of those is a required context that can stop reporting. Each ran green.
 {
   const REQUIRED_CONTEXTS = [
     'rust', 'web', 'web-unit', 'contracts', 'spec-coverage',
     'platform-only', 'platform-image-build', 'quality-faults', 'linux-runtime',
   ];
-  let ciText;
-  try { ciText = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8'); } catch { ciText = null; }
-  if (ciText) {
-    // Job blocks are two-space indented keys under `jobs:`. Walk them and look
-    // for a gating `if:` that mentions the scope job.
-    const lines = ciText.split('\n');
+
+  // Which workflow file supplies which context. `quality-faults` and
+  // `linux-runtime` live elsewhere; the check covers their triggers too.
+  const CONTEXT_FILE = {
+    rust: 'ci.yml',
+    web: 'ci.yml',
+    'web-unit': 'ci.yml',
+    contracts: 'ci.yml',
+    'spec-coverage': 'ci.yml',
+    'platform-only': 'ci.yml',
+    'platform-image-build': 'ci.yml',
+    'quality-faults': 'reliability.yml',
+    'linux-runtime': 'platform-linux-acceptance.yml',
+  };
+
+  const readWorkflow = (name) => {
+    try {
+      return readFileSync(new URL(`../../.github/workflows/${name}`, import.meta.url), 'utf8');
+    } catch { return null; }
+  };
+
+  /**
+   * Parse the `jobs:` block into { id -> { if, needs, hasName } }.
+   *
+   * Deliberately a line walker rather than a YAML parse: this script must run
+   * inside the `spec-coverage` job with no dependencies, and the shapes it needs
+   * (top-level `if:`/`needs:` of a job) are unambiguous at this indentation.
+   */
+  const parseJobs = (text) => {
+    const jobs = new Map();
+    if (!text) return jobs;
+    const lines = text.split('\n');
     let inJobs = false;
-    let job = null;
-    const gated = new Map();
+    let current = null;
     for (const line of lines) {
       if (/^jobs:\s*$/.test(line)) { inJobs = true; continue; }
       if (!inJobs) continue;
-      const jobMatch = /^  ([a-z0-9-]+):\s*$/.exec(line);
-      if (jobMatch) { job = jobMatch[1]; gated.set(job, null); continue; }
-      if (/^[a-z]/.test(line)) { inJobs = false; continue; }
-      if (job && /^    if:.*needs\.scope\.outputs/.test(line)) gated.set(job, line.trim());
-    }
-    for (const context of REQUIRED_CONTEXTS) {
-      const gate = gated.get(context);
-      if (gate) {
-        errors += 1;
-        process.stdout.write(`ERROR ${context} is a required context in ruleset 26958761 but ci.yml makes it conditional: ${gate}\n`);
-        process.stdout.write('        a skipped required check blocks a merge as hard as a missing one\n');
+      if (/^[A-Za-z_.#]/.test(line)) { inJobs = false; continue; }
+      const jobMatch = /^  ([A-Za-z0-9_-]+):\s*$/.exec(line);
+      if (jobMatch) {
+        current = { id: jobMatch[1], if: null, needs: null, name: null };
+        jobs.set(current.id, current);
+        continue;
       }
+      if (!current) continue;
+      const ifMatch = /^    if:\s*(.+?)\s*$/.exec(line);
+      if (ifMatch) { current.if = ifMatch[1]; continue; }
+      const needsMatch = /^    needs:\s*(.+?)\s*$/.exec(line);
+      if (needsMatch) { current.needs = needsMatch[1]; continue; }
+      const nameMatch = /^    name:\s*(.+?)\s*$/.exec(line);
+      if (nameMatch && current.name === null) { current.name = nameMatch[1]; }
     }
+    return jobs;
+  };
+
+  /**
+   * Parse the `on:` block for pull_request path filters.
+   *
+   * Returns null when the workflow has no `pull_request` trigger at all (which is
+   * its own defect - it then never runs for a PR), or the list of path globs, or
+   * an empty list when the trigger is unfiltered.
+   */
+  const pullRequestPaths = (text) => {
+    if (!text) return null;
+    const lines = text.split('\n');
+    let inOn = false;
+    let inPr = false;
+    let prFound = false;
+    const paths = [];
+    let inPaths = false;
+    for (const line of lines) {
+      if (/^on:\s*$/.test(line)) { inOn = true; continue; }
+      if (inOn && /^[A-Za-z_.#]/.test(line)) { inOn = false; inPr = false; inPaths = false; continue; }
+      if (!inOn) continue;
+      if (/^  (pull_request|pull_request_target):\s*$/.test(line)) { inPr = true; prFound = true; continue; }
+      if (/^  [a-z_]+:\s*$/.test(line)) { inPr = false; inPaths = false; continue; }
+      if (!inPr) continue;
+      if (/^    paths(-ignore)?:\s*$/.test(line)) { inPaths = true; continue; }
+      if (inPaths) {
+        const m = /^\s+-\s*'?"?([^'"]+)'?"?\s*$/.exec(line);
+        if (m) { paths.push(m[1]); continue; }
+        if (/^    [a-z]/.test(line)) { inPaths = false; }
+      }
+      // Inline form `pull_request: {paths: [...]}` is not used in this repo; the
+      // block form above is. A one-line form would need its own parse.
+    }
+    return prFound ? paths : null;
+  };
+
+  const problems = [];
+  const perFile = new Map();
+  for (const file of new Set(Object.values(CONTEXT_FILE))) {
+    perFile.set(file, readWorkflow(file));
+  }
+
+  for (const context of REQUIRED_CONTEXTS) {
+    const file = CONTEXT_FILE[context];
+    const text = perFile.get(file);
+
+    if (text === null) {
+      problems.push(`${context}: ${file} does not exist, so the required context is never produced`);
+      continue;
+    }
+
+    const paths = pullRequestPaths(text);
+    if (paths === null) {
+      problems.push(`${context}: ${file} has no \`pull_request\` trigger, so the context never appears on a PR`);
+    } else if (paths.length > 0) {
+      problems.push(`${context}: ${file} filters \`pull_request\` by paths (${paths.join(', ')}); a change matching none of them produces no ${context} check`);
+    }
+
+    const jobs = parseJobs(text);
+    const job = jobs.get(context);
+    if (!job) {
+      // The job id is what becomes the check name when there is no `name:`.
+      // A renamed job silently stops producing the required context, which is
+      // the defect the previous version of this check could not see.
+      problems.push(`${context}: no job with that id in ${file}; the required context would disappear (rename?)`);
+      continue;
+    }
+
+    // An effective check name that differs from the job id means the ruleset is
+    // naming something this job does not report.
+    if (job.name !== null && job.name.replace(/^['"]|['"]$/g, '') !== context) {
+      problems.push(`${context}: job \`${context}\` in ${file} declares \`name: ${job.name}\`, so it reports that name instead of \`${context}\``);
+    }
+
+    if (job.if !== null) {
+      problems.push(`${context}: job in ${file} has \`if: ${job.if}\`; any false evaluation skips the required context`);
+    }
+
+    // `needs` is the subtle one: a job whose dependency was skipped or failed is
+    // ITSELF skipped. `needs: [scope]` therefore makes a required job conditional
+    // on `scope` succeeding, even with no `if:` at all.
+    if (job.needs !== null) {
+      problems.push(`${context}: job in ${file} has \`needs: ${job.needs}\`; if any of those is skipped or fails, this job is skipped too - and ruleset 26958761 counts that as unreported`);
+    }
+  }
+
+  for (const problem of problems) {
+    errors += 1;
+    process.stdout.write(`ERROR ${problem}\n`);
+  }
+  if (problems.length === 0) {
+    process.stdout.write('required contexts: all nine run unconditionally on every pull request\n');
   }
 }
 
