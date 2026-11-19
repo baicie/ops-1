@@ -467,7 +467,7 @@ jobs:
           docker compose -p opsweave-p001b2 ps > /tmp/p001b2/diagnostics/ps.txt 2>&1 || true
           docker compose -p opsweave-p001b2 logs --tail 200 > /tmp/p001b2/diagnostics/logs.txt 2>&1 || true
           cp /tmp/p001b2/*.log /tmp/p001b2/diagnostics/ 2>/dev/null || true
-          cat /tmp/p001b2/diagnostics/logs.txt | tail -60
+          tail -60 /tmp/p001b2/diagnostics/logs.txt
 
       # The evidence of a SUCCESSFUL run is the step log itself; the files only
       # exist on the paths the acceptance wrote. `if-no-files-found: ignore`

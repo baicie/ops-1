@@ -106,9 +106,19 @@ jobs:
       - name: actionlint (workflow YAML and embedded shell)
         uses: raven-actions/actionlint@v2
         with:
-          # Pinned: actionlint releases change which shellcheck rules they surface,
-          # so an unpinned version can turn this job red without a commit. Bump
-          # deliberately.
+          # Pinned, and the pin has already mattered twice:
+          #
+          #   1. An UNPINNED version can turn this job red without a commit,
+          #      because actionlint releases change which shellcheck rules they
+          #      surface.
+          #   2. A LOCAL actionlint is not this actionlint. 1.7.12 (Homebrew, what
+          #      a developer has) reported 0 problems on this tree; 1.7.7 reported
+          #      SC2002 in platform-linux-acceptance.yml - `cat file | tail` - which
+          #      is real. The local run said clean and CI said fail, and the
+          #      version was the whole reason.
+          #
+          # Reproduce CI locally with:
+          #   docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7
           version: 1.7.7
       - name: shellcheck at error severity
         run: |
