@@ -87,12 +87,51 @@ rust web web-unit contracts spec-coverage platform-only platform-image-build qua
 
 ### 建议（需要人工授权，不得自行执行）
 
-把 `ci-gate` 加入 ruleset 的必需 check 列表。这是一行改动，已在
-`ruleset-migration.md` 里写明完整方案与回滚。
+把 `ci-gate` 加入 ruleset 的必需 check 列表。已在 `ruleset-migration.md` 里写明完整
+方案、前置检查与回滚。
 
-**代价必须一起接受**：`ci-gate` 现在会等 delegated suite 完成（有界，35 分钟）。所以
-一个 PR 的最坏等待时间从「九项里最慢的」变成「它要求的所有 suite 里最慢的」，实测
-`data-foundation` p95 是 34 分钟。这是用时间换真实性。
+**但前提是 §2.1 的修复先落地。** 这是 TASK-02 揭示的：在归属边界被修正之前，
+`ci-gate` 会把 `staging-preview.yml` 的部署失败算成 merge 失败。把它设成必需检
+查，等于让一次 staging 容量故障冻结**仓库上全部代码合并**。
+
+修复后（#159）：
+
+```
+GATE_OWNERSHIP = {
+  'ci.yml': 'merge', 'data-foundation.yml': 'merge', 'g12-acceptance.yml': 'merge',
+  'plugin-lifecycle.yml': 'merge', 'runtime-conformance.yml': 'merge',
+  'reliability.yml': 'merge', 'platform-linux-acceptance.yml': 'merge',
+  'typed-pipeline-contracts.yml': 'merge',
+  'staging-preview.yml': 'deployment',      <- 报告，永不阻止合并
+}
+```
+
+#### §2.1 归属边界（TASK-02）
+
+三个不同的门，三个不同的所有者：
+
+| 门 | 回答什么 | 谁拥有 |
+|---|---|---|
+| Merge Gate | 这份代码可以合吗？ | `ci-gate` |
+| Release Gate | 这个制品是它声称的那个吗？ | 构建 + 签名 + digest |
+| Deployment Gate | 它真的部署了并保持健康吗？ | `staging-preview.yml` |
+
+`ci-gate` 是 **Merge Gate**。它必须决定第一个，**不得**决定后两个——一次失败的
+staging 部署是关于环境的陈述，不是关于补丁的，部署在修的时候一个代码没问题的 PR
+必须仍然可合并。
+
+归属按**workflow 文件**判定，不是按 check 名：名字是作者选的字符串，两个 workflow
+可以产生同一个，而 workflow 可以在无人察觉的情况下改 job 名。
+
+**不是「未知的都忽略」**——那是另一种失效：
+
+- 未登记 workflow 的红 check **fail closed**，并指名是哪个
+- 完全无法归属的 check 也 fail closed
+- `OWNERSHIP COMPLETENESS` 遍历 `.github/workflows/`，未登记或有陈旧条目就红
+
+**代价必须一起接受**：`ci-gate` 会等 delegated suite 完成（有界）。一个 PR 的最坏等待
+从「九项里最慢的」变成「它要求的 suite 里最慢的那个」——**是 max，不是 sum**。
+实测 `data-foundation` p95 是 2040 s（34 分钟），`ci-gate` job 最长一次 1591 s。
 
 **如果不接受这个代价**，替代方案是把 `golden-path`、`acceptance`、
 `full TypeScript lifecycle`、`conformance` 加进 ruleset——但那样会在路径不匹配的 PR 上
@@ -190,7 +229,7 @@ commit，并且此后由 Dependabot 或人工更新——工作量真实，收�
 
 | 层 | 现状 | 缺口 |
 |---|---|---|
-| L0 静态与策略 | `spec-coverage`（必需）、`artifact-budget`（gate-only）、`contracts`（必需） | 无 actionlint、无 shellcheck、无 workflow 安全扫描 |
+| L0 静态与策略 | `spec-coverage`（必需）、`artifact-budget`（gate-only）、`contracts`（必需）、**`lint`（actionlint + shellcheck，gate-only）** | 无 workflow 安全扫描（权限/注入类） |
 | L1 核心 CI | `rust`、`web`、`web-unit`、`platform-only`、`platform-image-build`（全部必需） | — |
 | L2 影响驱动验收 | `scope` 决定 `g13*` 与 `runtime-image-build`；但 `data-foundation`、`g12-acceptance`、`plugin-lifecycle`、`runtime-conformance` 由**各自 workflow 的 paths 过滤**决定，不经过 `scope` | 两套判定机制并存，`check-impact-consistency.mjs` 在比对它们（52 个 warning） |
 | L3 全量 | 无 nightly 全量 workflow | `staging-preview` 有 `schedule`，但它部署，不是纯验证 |
@@ -198,7 +237,11 @@ commit，并且此后由 Dependabot 或人工更新——工作量真实，收�
 **建议（按性价比排序）**：
 
 1. **把 `ci-gate` 变成必需** —— 一行 ruleset 改动，让 17 个 check 的判决生效。最高杠杆。
-2. **补 actionlint / shellcheck 到 L0** —— 便宜，能抓 YAML 与 Shell 的真错。
+2. ~~补 actionlint / shellcheck 到 L0~~ —— **已做**（#156）。第一次运行就抓到两个潜伏缺陷：
+   `ci.yml` 里未加引号的 `DATABASE_URL=...?sslmode=disable`（SC2125）与
+   `platform-linux-acceptance.yml:465` 的 `cat f | tail`（SC2002）。
+   注意 pin 的是 actionlint **1.7.7**：本地 Homebrew 的 1.7.12 当时报 0 问题，
+   CI 报 SC2002，**版本差是全部原因**。
 3. **把 `check-impact-consistency.mjs` 的 52 个 warning 分类** —— 它们现在是噪音，
    降噪之后才能当门禁用。
 4. **新增纯验证的 nightly** —— 复用现有 suite，只在 `schedule` 触发，不部署。
