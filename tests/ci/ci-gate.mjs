@@ -942,15 +942,28 @@ const AWAIT_SELFTEST = [
   },
   {
     // A re-run still IN FLIGHT: the old attempt is green, the new one has not
-    // finished. `checkState` answers from the latest COMPLETED attempt, so this is
-    // a pass - correct only because the caller decided not to wait. Pinned so the
-    // semantics are a decision rather than an accident.
-    name: 'await: an in-flight rerun does not erase the last completed answer',
+    // finished.
+    //
+    // THIS EXPECTED `PASS` AND THE JUSTIFICATION WAS FALSE. The comment said
+    // "correct only because the caller decided not to wait" - but the caller does
+    // not make that decision. `whatToAwait` waits on `pending` and on nothing
+    // else (await-delegated.mjs:94-95), so with `checkState` answering `success`
+    // the in-flight re-run was never waited for, by anyone, at any layer.
+    //
+    // GitHub leaves the old attempt `completed` for ever and creates a new check
+    // run for every re-run - measured on SHA cc7be5c (run 44524547400,
+    // run_attempt 2): `golden-path id=135561535255 completed/failure` and
+    // `id=135572060029 completed/success` coexist. So for the minutes a re-run
+    // takes, a suite that someone found a problem with read as green.
+    //
+    // The in-flight attempt is the answer, and it does not have one yet: pending,
+    // and pending fails.
+    name: 'await: an in-flight rerun is pending, not the green attempt before it',
     suites: ['linux-runtime'],
     checks: { 'linux-runtime': 'success' },
     attempts: { 'linux-runtime': ['success', 'in_progress'] },
-    want: { verified: 1, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
-    expectVerdict: 'PASS',
+    want: { verified: 0, failed: 0, skipped: 0, pending: 1, absent: 0, unverifiable: 0 },
+    expectVerdict: 'FAIL',
   },
 ];
 
