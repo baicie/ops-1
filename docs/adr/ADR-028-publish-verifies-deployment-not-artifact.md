@@ -3,13 +3,18 @@
 **Status: PROPOSED — one half implemented (the retry), one half not (the state
 machine).**
 
-Found 2026-11-19, on the fourth consecutive "green" staging deploy that published
-nothing.
+Found 2026-11-19. Three staging deploys reported **success and published
+nothing**, and the earlier drafts of this ADR said "four" - the runs are:
+
+```
+e29953e  2026-11-18T04:15Z  success    published nothing (already installed)
+edba489  2026-11-18T05:10Z  success    published nothing (already installed)
+4baa4fb  2026-11-19T03:08Z  success    published nothing (already installed)
+```
 
 ## What happened
 
-`deploy to staging host` succeeded on `edba489` and again on `4baa4fb`. Its log
-says:
+All three logs say the same thing:
 
 ```
 opsweave.data-catalog@0.0.17455     already installed; leaving it
@@ -29,9 +34,16 @@ fi
 ```
 
 So a version that was **installed but never successfully deployed** is skipped
-forever. Staging has been in exactly that state: a publish installed
-`0.0.17455`, the deploy failed with `INSTANCE_CAPACITY_EXCEEDED`, and every
-publish since has said "already installed" and moved on.
+forever. Staging has been in that state since 2026-11-17: run `44016184862`
+pushed both images, assembled and signed both bundles, installed
+`data-catalog@0.0.17455`, and then failed to deploy it with
+`INSTANCE_CAPACITY_EXCEEDED`. Every publish after that saw the package present
+and skipped the whole loop iteration.
+
+(The precise history is one failed install-then-deploy per plugin, not one
+failure for both: `44016184862` installed `data-catalog` and was refused, then
+`data-integration` was pushed and staged in the same run before the step timed
+out. Both ended up installed and undeployed.)
 
 This is one of the two mechanisms behind the four-instance wall, and it is
 independent of ADR-027 - which has since been **withdrawn**, because its own

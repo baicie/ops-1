@@ -1423,6 +1423,18 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          # The delegated-wait budget. 35 minutes, not 30.
+          #
+          # Measured 2026-11-19 over the 16 most recent completed data-foundation
+          # runs: p50 1476 s, **p95 2040 s**, max 2040 s. A 30-minute budget is
+          # below that p95, so a healthy run would time the gate out and fail the
+          # PR - the exact failure mode the budget exists to avoid.
+          #
+          # The value is `vars.` so it can be raised without a commit, and this is
+          # the wiring that was missing: `--budget-ms "${GATE_BUDGET_MS:-...}"`
+          # appeared in the run block but nothing ever set the variable, so the
+          # default was the only value it could take.
+          GATE_BUDGET_MS: ${{ vars.OPSWEAVE_GATE_BUDGET_MS || '2100000' }}
         run: |
           set -euo pipefail
           # The files this commit changed.

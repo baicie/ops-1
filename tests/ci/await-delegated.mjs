@@ -25,19 +25,26 @@
  * BUDGET
  *
  * Measured on this repository from `actions/runs` (100 most recent completed
- * runs, 2026-11-17):
+ * runs, re-measured 2026-11-19 over a larger sample):
  *
- *     data-foundation.yml            p50 1433s   p95 1530s   max 1530s
- *     plugin-lifecycle.yml           p50 1040s   p95 1174s   max 1174s
- *     g12-acceptance.yml             p50  882s   p95 1008s   max 1008s
- *     platform-linux-acceptance.yml  p50  598s   p95  763s   max  807s
- *     reliability.yml                p50  146s   p95  272s   max  272s
+ *     workflow                        n    p50     p95     max
+ *     data-foundation.yml            16   1476s   2040s   2040s
+ *     plugin-lifecycle.yml            6   1083s   1258s   1258s
+ *     g12-acceptance.yml             10    965s   1124s   1124s
+ *     platform-linux-acceptance.yml  19    526s    623s    623s
+ *     reliability.yml                14    135s    258s    258s
  *
  * The budget is set from those numbers, not from a round figure: a deadline
  * shorter than a suite's own p95 would fail healthy runs, which is the failure
- * mode that teaches people to bypass the gate. `DEFAULT_BUDGET_MS` is 30 minutes,
- * comfortably above the slowest p95 with room for queue latency, and the caller
- * may pass a larger or smaller one explicitly.
+ * mode that teaches people to bypass the gate.
+ *
+ * `DEFAULT_BUDGET_MS` is 35 minutes. It was 30, which was BELOW the 34-minute p95
+ * of data-foundation - the earlier table in this comment said `p95 1530s`, which
+ * was one run's duration from a small sample, not a percentile. A healthy
+ * data-foundation run at p95 would have timed the gate out.
+ *
+ * The caller may pass a larger or smaller one explicitly; `ci.yml` does, via
+ * `GATE_BUDGET_MS`.
  *
  * WHAT COUNTS AS "WILL PRODUCE A RESULT"
  *
@@ -51,8 +58,8 @@
 
 import { checkState, UNFINISHED_STATUS } from './check-run-ledger.mjs';
 
-/** 30 minutes. See the measured p95 table above. */
-export const DEFAULT_BUDGET_MS = 30 * 60 * 1000;
+/** 35 minutes. See the measured p95 table above. */
+export const DEFAULT_BUDGET_MS = 35 * 60 * 1000;
 /** Start tight, then relax: cheap to catch the 146 s suites, still fine for 25 min ones. */
 export const DEFAULT_POLL_MS = 20_000;
 export const MAX_POLL_MS = 60_000;

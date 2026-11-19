@@ -157,9 +157,30 @@ test('the default budget covers the slowest measured suite', () => {
   // data-foundation.yml p95 measured at 1530 s on 2026-11-17. A budget below
   // that fails healthy runs, which is the failure mode that teaches people to
   // bypass the gate.
-  const P95_SLOWEST_MS = 1530 * 1000;
+  // data-foundation.yml: p50 1476 s, p95 2040 s over 16 completed runs
+  // (measured 2026-11-19). The number this test used to assert - 1530 s - was a
+  // single run's duration that an earlier comment mislabelled as a p95, so the
+  // assertion passed while the budget was below the real p95.
+  const P95_SLOWEST_MS = 2040 * 1000;
   assert.ok(DEFAULT_BUDGET_MS > P95_SLOWEST_MS,
     `budget ${DEFAULT_BUDGET_MS}ms must exceed the slowest p95 ${P95_SLOWEST_MS}ms`);
+});
+
+// The wiring, not just the default: a budget nobody can set is not configurable.
+test('ci.yml passes the gate a budget at least as large as the default', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const ci = readFileSync(fileURLToPath(new URL('../../.github/workflows/ci.yml', import.meta.url)), 'utf8');
+
+  assert.match(ci, /GATE_BUDGET_MS:/,
+    'ci.yml must SET GATE_BUDGET_MS in the step env; `--budget-ms "${GATE_BUDGET_MS:-...}"` '
+    + 'with the variable never assigned means the default is the only value it can take');
+
+  const m = /GATE_BUDGET_MS:\s*\$\{\{\s*vars\.OPSWEAVE_GATE_BUDGET_MS\s*\|\|\s*'(\d+)'\s*\}\}/.exec(ci);
+  assert.ok(m, 'GATE_BUDGET_MS must be a vars override with a numeric literal default');
+  const configuredMs = Number(m[1]);
+  assert.ok(configuredMs >= DEFAULT_BUDGET_MS,
+    `ci.yml default ${configuredMs}ms must not be below the module default ${DEFAULT_BUDGET_MS}ms`);
 });
 
 test('the poll interval backs off but is capped', async () => {

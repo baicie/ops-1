@@ -85,8 +85,15 @@ say "$name: pushed $img"          # 无条件打印
 registry 不可达、layer 被拒、磁盘满——三种情况都打印「pushed」并继续，随后为**不存在的
 镜像**签发 bundle。
 
-现在：推送失败即终止；推送后用 `docker manifest inspect` 与 `RepoDigests` 向 registry
-核实它实际提供了什么。
+现在：推送失败即终止（`die`，`publish-data-plugins.sh:146-148`）；推送后从本地镜像的
+`RepoDigests` 取出 digest 拼进 bundle 的 `imageRef`（`:272`）。
+
+**但要诚实说明它核实了什么、没核实什么。** 早先这里写的是「用 `docker manifest inspect`
+与 `RepoDigests` 向 registry 核实」——`docker manifest inspect` **并不存在**
+（`grep -n 'manifest inspect' scripts/publish-data-plugins.sh` 无输出）。
+`RepoDigests` 来自 `docker inspect` 的**本地**镜像记录，不是 registry 查询：它证明「这个
+tag 本地对应这个 digest」，不证明「registry 现在提供这个 digest」。真正的远端核实仍是缺口，
+记为 B-19。
 
 ### A-4 版本身份漏掉 manifest 与 Dockerfile FIXED
 
@@ -598,6 +605,9 @@ bundle 组装成功（`staged opsweave.data-catalog@0.0.17455`），部署因
 | B-11 | 版本 hash 无长度/路径分帧 | VERIFIED | 见 ADR-025；边界平移可产生相同版本（已实测） |
 | B-16 | staging 上四个旧 deployment 占满节点 | BLOCKED | 需要授权执行 `opsctl uninstall`；见下方「占用者」一节 |
 | B-17 | ADR-026 的发布状态机 | NOT_RUN | TASK-06 主体；ADR-028 记录了它还缺什么 |
+| B-18 | **发布链从不调用 `activate`** | VERIFIED | `grep -c activate scripts/publish-data-plugins.sh` = 0。`route_candidates` 要求 `r.status='ACTIVE'`，所以脚本装好并部署的插件**永远不会被路由**——即使实例健康、容量充足。这是「点治理就登出」的另一个独立原因，比容量更根本 |
+| B-19 | registry 侧 digest 核实 | NOT_RUN | 只有本地 `RepoDigests`，没有 `docker manifest inspect`；见 A-3 |
+| B-20 | gate 预算曾低于真实 p95 | FIXED | 30 分钟 vs data-foundation 实测 p95 2040s（34 分钟）；已改为 35 分钟并接上 `vars.OPSWEAVE_GATE_BUDGET_MS`，带反事实测试 |
 
 ### B-1 为什么「不统计幽灵」不等于「修复」
 
@@ -654,6 +664,26 @@ ACCEPTED_RISK，写在这里而不是假装 gate 覆盖了它们。
 | 守卫只匹配一个字面模式 | 八种变异全部报 0 error，而守卫在 CI 里是绿的 | 逐个施加变异并确认它报错 |
 | 测试断言按 `node_id` 计数 | CI 报 `left: 2`（本地永远绿）——数进了别的测试的实例 | 读 CI 日志里的 left/right 数值 |
 | 收敛测试调用全局 `reconcile_once` | 会扫掉别的 fixture 的节点，让无关的容量测试失败 `left: 1, right: 3` | 同上；修法是 `reconcile_once_scoped(state, Some(id))` |
+| **整份文档群的断言未经验证** | 对五份文档做对抗核查：**58 条可检验断言中 53 条被推翻**。含「p95 1530s」（其实是一次运行）、「`GATE_BUDGET_MS` 可配置」（从未被赋值）、「`docker manifest inspect` 向 registry 核实」（不存在）、「nothing records this」（`Collect host status` 一直在记录）、「发布链 bundle→install→deploy」（漏了它从不 `activate`） | 63 个 agent 并行核查，每条都跑真实命令；详见本节末尾 |
+
+### 这一轮文档为什么会错成这样
+
+上面那 53 条不是笔误，是同一个方法论问题：**我先写下结论，再去找支持它的事实**。
+具体的形状有三种，都值得记住：
+
+1. **把一次观测当成统计量。** 「p95 1530s」是一次运行的时长。p95 需要样本，
+   而我在只有一两个数据点时写下了「p95」。后果是真实的：gate 预算设在 30 分钟，
+   低于真实 p95 的 34 分钟，会杀死一次健康的运行。
+2. **把「我没看到」写成「不存在」。** `docker manifest inspect`、`activate`、
+   `Collect host status`、`GATE_BUDGET_MS` 的赋值——四个都是「grep 一下就能查清」
+   的东西。其中最后一个尤其讽刺：文档写着「可配置」，而变量从未被传入 step env，
+   所以默认值就是它能取到的唯一值。
+3. **把相邻的事实拼成结论。** 「`deploy_plugin` 里没有排空」+「报错是容量」⇒
+   「升级不回收旧版本」。两个前提都真，结论是假。
+
+对应的检查只需要一条命令：**任何「没有 X」或「X 是 Y」的断言，写进文档前先跑一次
+`grep`**。这一轮最后做的那次核查，成本是 63 个 agent；而它推翻的东西，本来一条
+`grep -rn` 就够了。
 
 最后一条值得展开，因为它是 brief §8.3 直接点名的：
 
