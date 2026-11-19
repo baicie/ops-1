@@ -46,20 +46,44 @@
                     └─────────────────────────────┘
 ```
 
-**实测证据，这是整份提案的支点：**
+**证据，以及一个我先写错、本轮纠正的断言。**
+
+早先这份文件说：「PR #149 的 `ci-gate` 判 failure 而 PR 仍然合入，证明红色门禁可被绕过。」
+**那是错的。** 两个不同的 SHA 被混为一谈：
 
 ```bash
-$ gh api "repos/baicie/ops-1/commits/9b4e4e145b0825e5e76f304cadd82c5e3dd9238b/check-runs?per_page=100" \
-    --jq '.check_runs[]|select(.name=="ci-gate")|"\(.name): \(.conclusion)"'
-ci-gate: failure
-$ gh pr view 149 --json state,mergedAt,mergeCommit --jq '"state=\(.state) merged=\(.mergedAt) commit=\(.mergeCommit.oid[0:7])"'
-state=MERGED merged=2026-11-19T04:13:23Z commit=9b4e4e1
+$ gh pr view 149 --json headRefOid,mergeCommit
+{"head":"621a12af09065fef586b54f97b5dc44bd80921ce",
+ "merge":"9b4e4e145b0825e5e76f304cadd82c5e3dd9238b"}
+
+$ gh api ".../commits/621a12af.../check-runs" --jq '..select(.name=="ci-gate")'
+ci-gate: success          <- PR HEAD：合并时它是绿的
+
+$ gh api ".../commits/9b4e4e14.../check-runs" --jq '...select(.name=="ci-gate")'
+ci-gate: failure          <- 合并提交，来自合并后 main 上的 push
 ```
 
-`ci-gate` 判 `failure`，同一棵树的 PR **合入了**。`ci-gate` 做对了它该做的每件事——
-它读到了 `deploy to staging host` 的失败并如实报告——只是它的结论没有强制力。
+- `621a12af` 是 PR 的 head，它的 `ci-gate` 是 **success**。
+- `9b4e4e14` 是 squash 后的 merge commit，`ci-gate` 是 **failure**——那次运行发生在**合并
+  之后**，由 `main` 的 push 触发。
+- **push 上的 workflow 无法阻止一个已经完成的合并。** 所以它证明的是「合并后验证失败」，
+  不是「该 PR 绕过了失败的检查」。
 
-这就是「测试覆盖好、门禁强制力坏」的一句话版本。
+**真正成立的事实，也是唯一需要的事实：** ruleset `26958761` 没有把 `ci-gate` 列为必需
+context，所以它不具备独立的 GitHub 合并强制力。这个结论不依赖上面那组错误的对比——
+它只需要读一次 ruleset：
+
+```bash
+$ gh api repos/baicie/ops-1/rulesets/26958761 \
+    --jq '.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context'
+rust web web-unit contracts spec-coverage platform-only platform-image-build quality-faults linux-runtime
+```
+
+九项，没有 `ci-gate`。
+
+**并且 `ci-gate` 目前的判决本身也需要修正**：它把 `staging-preview.yml` 的
+`deploy to staging host` 失败算成了 merge-gate 失败（见 §2.1）。在修正之前，
+把它设成必需检查会让**每一次 staging 故障都阻止所有代码合并**——这正是本轮的 TASK-02。
 
 ### 建议（需要人工授权，不得自行执行）
 

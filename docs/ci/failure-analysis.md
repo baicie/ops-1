@@ -71,9 +71,24 @@ FAIL  10/10 requests left v1 while v2 was not activated
 
 由 #151 修正（排空属于 `activate`，且平台本来就有）。**这是产品代码的错，不是测试的错。**
 
-### `9b4e4e1`（run 44456814714）— gate 正确判红，但拦不住合并
+### `9b4e4e1`（run 44456814714）— 合并之后的失败，不是合并时的失败
 
-`ci-gate` 的 `Decide` 步骤 FAIL，原因是：
+> **这一节原先的定性是错的，本轮纠正。** 我写的是「gate 正确判红，但拦不住合并」，
+> 并把它当成「红色门禁可被绕过」的证据。**两个 SHA 被混为一谈。**
+
+```bash
+$ gh pr view 149 --json headRefOid,mergeCommit
+head  = 621a12af...    ci-gate: success
+merge = 9b4e4e14...    ci-gate: failure
+```
+
+- `621a12af` 是 PR 的 head。它的 `ci-gate` 是 **success**——合并发生时有九项必需 check
+  全绿，`ci-gate` 也是绿的。
+- `9b4e4e14` 是 squash 合并提交。它的 `ci-gate` 是 **failure**，那次运行由 `main` 的
+  **push** 触发，发生在合并**之后**。
+
+`ci-gate` 在 push 上看到的是 `main` 这个提交自己的检查：`staging-preview` 的
+`deploy to staging host` 因为节点被四个旧 deployment 占满而失败，PART 3 如实把它算成红。
 
 ```
 failed: deploy to staging host (staging-preview.yml: check named
@@ -81,11 +96,21 @@ failed: deploy to staging host (staging-preview.yml: check named
 but it ran on this commit)
 ```
 
-**这是 PART 3 按设计工作**——#146 加的规则是「任何红色 check 都不能只作 note」。
-但 `ci-gate` 不在 ruleset 的九项必需 check 里，所以**它判红不阻止合并**。该提交仍然合入了。
+**所以这一条不是 `PRODUCT_FAILURE` 传导成门禁绕过。** 它是：
 
-**判定：`PRODUCT_FAILURE`（staging 部署失败）传导成 gate 红，但 gate 无强制力。**
-这是一个自我强化的问题：staging 越坏，gate 越红；gate 越红而越不挡合并，就越没人看它。
+| 事实 | 判定 |
+|---|---|
+| PR #149 合入时 `ci-gate` 绿 | 合并行为正常 |
+| 合并后 main 的 push 上 `ci-gate` 红 | 合并后验证失败 |
+| push workflow 不能撤销已完成的合并 | GitHub 语义，不是缺陷 |
+
+**真正的缺陷在别处，而且是两个**：
+
+1. **`ci-gate` 不该把部署失败算成 merge-gate 失败**（TASK-02）。`main` 上的 gate 变红是
+   因为它把 `staging-preview.yml` 的部署结果当成了代码质量结论。这是归属边界错误，
+   不是强制力问题。
+2. **`ci-gate` 不在 ruleset 的九项里**——这个事实成立，但它需要读 ruleset 才能证明，
+   不需要这组错误的对比。
 
 ### `c4d1790`（run 44333289543）— TEST_HARNESS_FAILURE，已修
 

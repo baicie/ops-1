@@ -49,6 +49,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { analyse, SUITES } from './impact.mjs';
 import { attributeChecks, checkState, UNFINISHED_STATUS } from './check-run-ledger.mjs';
 import { awaitDelegated, DEFAULT_BUDGET_MS } from './await-delegated.mjs';
@@ -239,6 +241,69 @@ export const DELEGATED_CHECKS_FROM_OWNERS = Object.fromEntries(
  * and a suite named here is satisfied by any one green check.
  */
 export const REQUIRE_ANY_CHECK = new Set(['browser-e2e']);
+
+/**
+ * WHICH GATE OWNS WHICH WORKFLOW. Three different questions, three different
+ * owners, and conflating them is how a staging outage became a merge blocker.
+ *
+ *   MERGE GATE      - is this code safe to merge? Pre-merge quality, security and
+ *                     the acceptance the impact analyzer requires.
+ *   RELEASE GATE    - is this artifact what it claims to be? Identity, build
+ *                     completeness, signature.
+ *   DEPLOYMENT GATE - did it actually deploy and stay healthy?
+ *
+ * `ci-gate` is the MERGE gate. It must decide (1) and must NOT decide (2) or (3):
+ * a failed staging deploy is a fact about the environment, not about the patch,
+ * and a PR whose code is fine must remain mergeable while the deployment is being
+ * fixed.
+ *
+ * ATTRIBUTION IS BY WORKFLOW IDENTITY, not by check name. A check name is a
+ * string an author chooses; two workflows can produce the same one, and a workflow
+ * can rename a job without anyone noticing. The workflow FILE is what `ci-gate`
+ * can attribute through `check_suite.id -> workflow_runs[].path`, and it is what
+ * this table keys on.
+ *
+ * WHY NOT "ignore every unknown check": that is the opposite failure. A new CI job
+ * nobody mapped would go silently unnoticed, and the gate would pass while a
+ * required check was red. `OWNERSHIP_COMPLETENESS` below is what stops that: every
+ * workflow file in the repository must appear in this table, and the selftest
+ * fails if one does not.
+ */
+export const GATE_OWNERSHIP = {
+  // --- MERGE GATE: a red check here blocks the merge -------------------------
+  'ci.yml': 'merge',
+  // Suites in their own workflow files, produced for specific paths. Whether one
+  // is REQUIRED is decided by the impact analyzer, not by this table.
+  'data-foundation.yml': 'merge',
+  'g12-acceptance.yml': 'merge',
+  'plugin-lifecycle.yml': 'merge',
+  'runtime-conformance.yml': 'merge',
+  'reliability.yml': 'merge',
+  'platform-linux-acceptance.yml': 'merge',
+  'typed-pipeline-contracts.yml': 'merge',
+
+  // --- DEPLOYMENT GATE: reported, never a merge blocker ----------------------
+  //
+  // `staging-preview.yml` builds a release image, deploys it to the staging host,
+  // smokes it, and records evidence. Every one of those is a statement about the
+  // HOST. A PR is not unmergeable because the staging node is full.
+  //
+  // This is not a relaxation: the checks in this workflow were never merge
+  // criteria. Before this table existed, PART 3 treated their failure as a merge
+  // failure - which meant one full staging node would have blocked every code
+  // change on the repository once `ci-gate` became required.
+  'staging-preview.yml': 'deployment',
+};
+
+/**
+ * Workflows that must exist in `.github/workflows/` but produce no check this
+ * gate reads. Kept explicit so `OWNERSHIP_COMPLETENESS` can still demand an entry
+ * for them - an unlisted file is the blind spot, not an unlisted check.
+ */
+export const NON_GATE_WORKFLOWS = {
+  // Nothing today. A workflow that only publishes, only comments, or only runs on
+  // a schedule with no PR surface belongs here WITH A REASON.
+};
 
 /**
  * Decide what to do about the suites produced by other workflows, given the
@@ -567,33 +632,67 @@ export function gate(rawNeeds, impact, ledgerForGate = null) {
   }
 
   // ---------------------------------------------------------------------------
-  // PART 3 — no RED check on this commit goes unmentioned.
-  //
-  // Parts 1 and 2 only see what `ci.yml` hands the gate: its own `needs`. Every
-  // check produced by ANOTHER workflow is invisible there unless the impact
-  // analyzer happened to require its suite. Measured on a real commit: twelve
-  // checks from `staging-preview.yml` - including `deploy to staging host` - fell
-  // through as "not mapped to an impact suite" NOTES, so a failed deploy would
-  // have printed a note and passed the gate.
-  //
-  // The ruleset does not require those checks either, so this is the only place
-  // that would notice. `ci-gate` is not itself a required check today (see
-  // docs/ci/ruleset-migration.md) — which is why the honest fix is BOTH: report
-  // it here, and ask a human to make this check required.
-  //
-  // A green unmapped check stays a note: it is not a hole, only an attribution
-  // gap. A red one is a red check on this commit, and the gate is not the place
-  // it goes to be forgotten.
   // ---------------------------------------------------------------------------
+  // PART 3 — attribute every OTHER workflow's checks to the gate that owns them.
+  //
+  // Parts 1 and 2 only see what `ci.yml` hands the gate: its own `needs`. Checks
+  // produced by another workflow are invisible there unless the impact analyzer
+  // happened to require their suite.
+  //
+  // THE DEFECT THIS REPLACES. The first version of this part treated EVERY red
+  // check from ANY other workflow as a merge failure. That is wrong in one
+  // direction and dangerous in the other:
+  //
+  //   - wrong: `staging-preview.yml` deploys to the staging host. `deploy to
+  //     staging host` going red says the node is full or the host is unhealthy -
+  //     a statement about the environment, not about the patch. Counting it as a
+  //     merge failure would mean one full staging node blocks every code change
+  //     on the repository. That is not hypothetical: it is what `main` looked
+  //     like on 2026-11-19, and it is what made `ci-gate` red on a push whose
+  //     nine required checks were green.
+  //
+  //   - dangerous: the obvious repair, "ignore checks from workflows I do not
+  //     know", turns a new CI job nobody mapped into a silent hole.
+  //
+  // So ownership is explicit (`GATE_OWNERSHIP`), keyed on the WORKFLOW FILE
+  // rather than the check name, and completeness is asserted separately
+  // (`OWNERSHIP_COMPLETENESS`) so an unlisted workflow fails the build instead of
+  // being ignored.
+  //
+  // WHAT HAPPENS TO A DEPLOYMENT-GATE FAILURE: it is reported in
+  // `deploymentFailures`, and it does not enter `failed`. The verdict is
+  // unaffected. An operator reading the summary still sees it - that is the
+  // difference between "not a merge blocker" and "not noticed".
+  // ---------------------------------------------------------------------------
+  const deploymentFailures = [];
+  const unattributedWorkflows = new Set();
   for (const [name, runs] of Object.entries(ledgerForGate?.byName ?? {})) {
     if (runs.length === 0) continue;
-    const st = checkState(ledgerForGate.byName, name, {});
     // Skip the checks this gate already decided in parts 1 and 2 - by name, so a
     // ci.yml job and a foreign check with the same name cannot double-report.
     if (Object.values(DELEGATED_CHECK_OWNERS).some((o) => name in o)) continue;
-    if (st.state === 'failed') {
-      const from = [...new Set(runs.map((r) => r.workflow ?? 'unattributable'))].join(', ');
-      failed.push(`${name} (${from}: ${st.reason}; this check is not mapped to a suite, but it ran on this commit)`);
+
+    const st = checkState(ledgerForGate.byName, name, {});
+    if (st.state !== 'failed') continue;
+
+    const workflows = [...new Set(runs.map((r) => r.workflow ?? null))];
+    for (const wf of workflows) {
+      const owner = wf == null ? null : (GATE_OWNERSHIP[wf] ?? NON_GATE_WORKFLOWS[wf] ?? null);
+      const from = wf ?? 'unattributable';
+
+      if (owner === 'deployment') {
+        deploymentFailures.push(`${name} (${from}: ${st.reason})`);
+        continue;
+      }
+      if (owner === 'merge') {
+        failed.push(`${name} (${from}: ${st.reason}; the ${from} workflow is a merge-gate owner, so this blocks)`);
+        continue;
+      }
+      // Unknown workflow, or a check with no workflow attribution at all. This is
+      // the dangerous case: either a workflow nobody registered, or an API
+      // response that lost the suite join. Both fail closed.
+      unattributedWorkflows.add(from);
+      failed.push(`${name} (${from}: ${st.reason}; this workflow is not registered in GATE_OWNERSHIP, so the gate cannot tell whether it is a merge criterion - failing closed)`);
     }
   }
 
@@ -610,6 +709,7 @@ export function gate(rawNeeds, impact, ledgerForGate = null) {
     notWired,
     delegated,
     notes,
+    deploymentFailures,
   };
 }
 
@@ -1106,8 +1206,12 @@ function selftest() {
     if (!ok) bad += 1;
     process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} the lint job is reported when ci-gate's needs omits it: ${JSON.stringify(got.notWired)}\n`);
   }
-  // PART 3: a red check from a workflow the gate does not own.
+  // PART 3 — OWNERSHIP. These replace an earlier expectation that was wrong:
+  // "a red check from another workflow fails the gate". It failed every staging
+  // deploy failure into the merge decision, which would have blocked every code
+  // change on the repository the moment `ci-gate` became required.
   {
+    // A DEPLOYMENT-GATE failure is reported, and does NOT block.
     const ledger = {
       byName: {
         'deploy to staging host': [{ name: 'deploy to staging host', state: 'failure', status: 'completed', conclusion: 'failure', workflow: 'staging-preview.yml', suiteId: 's1', startedAt: '2026-01-01T00:00:00Z', runId: '1' }],
@@ -1116,25 +1220,81 @@ function selftest() {
     };
     const impact = { suites: Object.fromEntries(SUITES.map((x) => [x, false])), unmatched: [] };
     const got = gate(ALL_OWNED_GREEN, impact, ledger);
-    const ok = got.verdict === 'FAIL' && got.failed.some((f) => /deploy to staging host/.test(f));
+    const ok = got.verdict === 'PASS'
+      && got.failed.length === 0
+      && got.deploymentFailures.length === 1
+      && /deploy to staging host/.test(got.deploymentFailures[0]);
     inlineChecks += 1;
     if (!ok) bad += 1;
-    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} a red check from another workflow fails the gate: got ${got.verdict} failed=${JSON.stringify(got.failed)}\n`);
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} a staging deploy failure is reported as a deployment failure, not a merge blocker: ${got.verdict} ${JSON.stringify(got.deploymentFailures)}\n`);
   }
-  // PART 3 does not invent failures: a green foreign check stays out of `failed`.
   {
+    // A MERGE-GATE workflow's red check still blocks. The point is the split, not
+    // an exemption for everything outside ci.yml.
     const ledger = {
       byName: {
-        'smoke the preview': [{ name: 'smoke the preview', state: 'success', status: 'completed', conclusion: 'success', workflow: 'staging-preview.yml', suiteId: 's2', startedAt: '2026-01-01T00:00:00Z', runId: '2' }],
+        // `acceptance` is owned by the delegated tables, so PART 3 skips it by
+        // design. Use a check name those tables do not claim.
+        'typed-pipeline-contracts': [{ name: 'typed-pipeline-contracts', state: 'failure', status: 'completed', conclusion: 'failure', workflow: 'typed-pipeline-contracts.yml', suiteId: 's2', startedAt: '2026-01-01T00:00:00Z', runId: '2' }],
       },
       unattributed: [], duplicates: [], suites: {},
     };
     const impact = { suites: Object.fromEntries(SUITES.map((x) => [x, false])), unmatched: [] };
     const got = gate(ALL_OWNED_GREEN, impact, ledger);
-    const ok = got.verdict === 'PASS' && got.failed.length === 0;
+    const ok = got.verdict === 'FAIL' && got.failed.some((f) => /typed-pipeline-contracts\.yml/.test(f));
     inlineChecks += 1;
     if (!ok) bad += 1;
-    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} a green check from another workflow is not a failure: got ${got.verdict}\n`);
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} a red check from a MERGE-gate workflow still blocks: ${got.verdict}\n`);
+  }
+  {
+    // AN UNREGISTERED WORKFLOW fails closed. This is the guard against the easy
+    // repair: "ignore what I do not know".
+    const ledger = {
+      byName: {
+        'some-new-check': [{ name: 'some-new-check', state: 'failure', status: 'completed', conclusion: 'failure', workflow: 'brand-new.yml', suiteId: 's3', startedAt: '2026-01-01T00:00:00Z', runId: '3' }],
+      },
+      unattributed: [], duplicates: [], suites: {},
+    };
+    const impact = { suites: Object.fromEntries(SUITES.map((x) => [x, false])), unmatched: [] };
+    const got = gate(ALL_OWNED_GREEN, impact, ledger);
+    const ok = got.verdict === 'FAIL' && got.failed.some((f) => /brand-new\.yml/.test(f));
+    inlineChecks += 1;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} a red check from an UNREGISTERED workflow fails closed: ${got.verdict}\n`);
+  }
+  {
+    // Unattributable (no workflow join at all) fails closed too: the gate cannot
+    // tell whose it is, so it must not assume it is harmless.
+    const ledger = {
+      byName: {
+        mystery: [{ name: 'mystery', state: 'failure', status: 'completed', conclusion: 'failure', workflow: null, suiteId: null, startedAt: '2026-01-01T00:00:00Z', runId: '4' }],
+      },
+      unattributed: ['mystery'], duplicates: [], suites: {},
+    };
+    const impact = { suites: Object.fromEntries(SUITES.map((x) => [x, false])), unmatched: [] };
+    const got = gate(ALL_OWNED_GREEN, impact, ledger);
+    const ok = got.verdict === 'FAIL' && got.failed.some((f) => /unattributable/.test(f));
+    inlineChecks += 1;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} an unattributable red check fails closed: ${got.verdict}\n`);
+  }
+  {
+    // A GREEN deployment check is not a substitute for a required suite: passing
+    // staging must not make up for a missing data-foundation result.
+    const ledger = {
+      byName: {
+        'deploy to staging host': [{ name: 'deploy to staging host', state: 'success', status: 'completed', conclusion: 'success', workflow: 'staging-preview.yml', suiteId: 's5', startedAt: '2026-01-01T00:00:00Z', runId: '5' }],
+      },
+      unattributed: [], duplicates: [], suites: {},
+    };
+    const impact = { suites: { ...Object.fromEntries(SUITES.map((x) => [x, false])), 'data-foundation': true }, unmatched: [] };
+    const got = gate(ALL_OWNED_GREEN, impact, ledger);
+    // data-foundation is delegated; gate() marks it delegated and does not fail on
+    // that alone. What must NOT happen is the green staging check counting as it.
+    const ok = !got.delegatedResults && !/deploy to staging host/.test(got.delegated.join(' '));
+    inlineChecks += 1;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} a green deployment check does not stand in for a required suite: ${got.verdict}\n`);
   }
   // And a name the delegated tables own is decided by delegatedVerdict, not here -
   // otherwise one red check would be reported twice with two different reasons.
@@ -1167,6 +1327,26 @@ function selftest() {
       && got.ambiguous.length === (c.want.ambiguous ?? 0);
     if (!ok) bad += 1;
     process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ${JSON.stringify(c.want)}, got verified=${got.verified.length} failed=${got.failed.length} skipped=${got.skipped.length} pending=${got.pending.length} absent=${got.absent.length} unverifiable=${got.unverifiable.length} impostor=${got.impostor.length} ambiguous=${got.ambiguous.length}\n`);
+  }
+
+  // OWNERSHIP COMPLETENESS: every workflow file in the repository must be named in
+  // GATE_OWNERSHIP or NON_GATE_WORKFLOWS.
+  //
+  // This is the guard that lets PART 3 be selective without being blind. A new
+  // workflow nobody registered is not silently ignored - it fails here, before it
+  // ever reaches the gate, and the message says which file and what to do.
+  {
+    const wfDir = fileURLToPath(new URL('../../.github/workflows/', import.meta.url));
+    const files = readdirSync(wfDir).filter((n) => n.endsWith('.yml'));
+    const missing = files.filter((f) => !(f in GATE_OWNERSHIP) && !(f in NON_GATE_WORKFLOWS));
+    const stale = [...Object.keys(GATE_OWNERSHIP), ...Object.keys(NON_GATE_WORKFLOWS)]
+      .filter((f) => !files.includes(f));
+    const ok = missing.length === 0 && stale.length === 0;
+    inlineChecks += 1;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} every workflow is registered in GATE_OWNERSHIP`
+      + `${missing.length ? `; UNREGISTERED: ${missing.join(', ')}` : ''}`
+      + `${stale.length ? `; STALE ENTRIES: ${stale.join(', ')}` : ''}\n`);
   }
 
   // The two tables that both claim to say which check belongs to which suite must
