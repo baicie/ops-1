@@ -77,3 +77,19 @@ describe('STATUS_MAP', () => {
     expect(statusForCode(null)).toBeUndefined();
   });
 });
+
+/**
+ * DELIBERATE FAILURE - gate acceptance evidence, not a test.
+ *
+ * This file exists on the branch `test/controlled-required-failure` only, to
+ * prove that a red required check actually blocks a merge (TASK-06 item 3 /
+ * TASK-12). It must never be merged: the assertion is false on purpose.
+ *
+ * The expected `web-unit` run and the merge rejection are recorded in
+ * `docs/ci/gate-acceptance-evidence.md` with their run ids.
+ */
+describe('CONTROLLED FAILURE (do not merge)', () => {
+  it('fails so that the web-unit required check goes red', () => {
+    expect(STATUS_MAP.READY.tone, 'this assertion is false by design').toBe('impossible-tone');
+  });
+});
