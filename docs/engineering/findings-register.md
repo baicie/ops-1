@@ -387,6 +387,31 @@ deployment 的实例再也不会被看到——`desired_action` 停在 `START`�
 而上一次绿的部署恰恰因为内容没变而整个跳过了发布（`already installed; leaving it`）。
 所以要声称「修好了 staging」需要一次真实的内容变更加一次真实部署——本轮无权执行。
 
+### B-14 「已安装」被当成「已部署」 FIXED（staging 未验证）
+
+四次「绿」的 staging 部署**什么都没发布**。日志：
+
+```
+opsweave.data-catalog@0.0.17455     already installed; leaving it
+opsweave.data-integration@0.0.17455 already installed; leaving it
+```
+
+`publish-data-plugins.sh` 只要 `plugin_packages` 里有这个版本，就 `continue` 跳过**整个**
+后续流程——包括部署。所以「装了但从没成功部署过」的版本会被永远跳过。
+
+这正是 staging 的状态：某次发布装了 `0.0.17455`，部署以 `INSTANCE_CAPACITY_EXCEEDED`
+失败，此后每次发布都说「已安装」。
+
+**这是那堵 4/4 墙的另一半**，与 ADR-027 独立：ADR-027 解释**第一次**部署为什么耗尽槽位；
+这一条解释**为什么再也没重试**。两者同时成立，staging 才会卡三周。
+
+修法：`continue` 只跳过安装。「已安装」是关于制品的事实（版本是内容哈希），与「是否在运行」
+无关。那条路径现在也调用 `opsctl deploy --wait`，它本身幂等：活跃→`VERSION_ALREADY_ACTIVE`，
+健康→202 不变，失败→重试。`set -euo pipefail` 让失败的部署失败整个 run——这才是重点，
+之前的行为把「部署失败」变成了连续三次的「一切正常」。
+
+**未验证**：该路径只在插件内容变化时触发，而本轮没有内容变化（正是它触发跳过的原因）。
+
 ### 因果闭环：为什么「点治理就退出登录」还没修好
 
 这轮把整条链查通了，而结论是：**代码已经对，线上仍是旧镜像。**
