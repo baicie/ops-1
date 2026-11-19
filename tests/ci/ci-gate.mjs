@@ -1069,6 +1069,21 @@ function selftest() {
     if (!ok) bad += 1;
     process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ${c.want}${c.because ? ` because ${c.because}` : ''}, got ${got.verdict} (failed=${got.failed.length} skipped=${got.skippedRequired.length} notWired=${got.notWired.length} delegated=${got.delegated.length})\n`);
   }
+  // EVERY job ci.yml owns must be individually fatal. `rust` used to be the only
+  // one with a counterfactual, so "does a red `web` fail the gate" was answered by
+  // reasoning about the loop rather than by running it - and the loop has been
+  // wrong before (a `find()` that read only the first job of a multi-job suite).
+  for (const jobId of Object.keys(JOB_TO_SUITE)) {
+    const needs = { ...ALL_OWNED_GREEN, [jobId]: 'failure' };
+    const impact = { suites: Object.fromEntries(SUITES.map((x) => [x, true])), unmatched: [] };
+    const got = gate(needs, impact);
+    const named = got.failed.some((f) => f.includes(jobId)) || got.skippedRequired.some((f) => f.includes(jobId));
+    const ok = got.verdict === 'FAIL' && named;
+    inlineChecks += 1;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} a red ${jobId} fails the gate and is named: ${got.verdict}\n`);
+  }
+
   // L0 lint must be a gate input, not a decorative job.
   {
     const needs = { ...ALL_OWNED_GREEN, lint: 'failure' };

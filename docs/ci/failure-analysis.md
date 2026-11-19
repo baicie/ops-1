@@ -181,3 +181,39 @@ print([r for r in d['shellCoverage'] if 'supervisor_backoff' in r['spec']])"
 | gate 判红但无强制力 | 1 | **未解决**（B-10） |
 | 未登记的覆盖缺口 | 0 | 一度误判为 1（`supervisor_backoff_sigterm`），实为 COVERED |
 | 基础设施 / flaky | 0 | 本次采样内为 0 |
+
+---
+
+## 8. §18 的十二项反例：逐项状态
+
+| 项 | 要求 | 状态 | 证据 |
+|---|---|---|---|
+| A | Rust 失败 → gate FAIL | **COVERED** | `ci-gate.mjs --selftest`：`rust failed`，加上本轮新增的 17 个 per-job 反例 |
+| B | Web 失败 → gate FAIL | **COVERED** | 同上——本轮之前**只有 `rust` 有反例**，`web` 从未被证明过 |
+| C | Contract 不兼容 → FAIL | **COVERED** | `contracts skipped` 反例；真实校验在 `contracts` job |
+| D | 缺数据库 → BLOCKED | **COVERED** | `OPSWEAVE_REQUIRE_TEST_DATABASE=1` 让 skip 变 panic |
+| E | 缺 Docker → BLOCKED | **COVERED** | 实测：`OPSWEAVE_REQUIRE_TEST_DOCKER=1` + 无 docker → `BLOCKED` 且 **rc=1** |
+| F | 高风险变更强制调度 | **COVERED** | `impact.mjs`；`apps/node/**` → `linux-runtime` |
+| G | 低风险跳过重型 | **COVERED** | `impact.mjs`；`docs/**` → 零 suite |
+| H | 未引用测试 → FAIL | **COVERED** | `check-spec-coverage.mjs`，0 unreferenced |
+| I | 依赖被取消 → gate 不能 PASS | **COVERED** | `rust cancelled` → FAIL |
+| J | 不可信部署输入 → 拒绝 | **COVERED** | `ok = status == 200 and bool(expected) and served == expected`，`EXPECTED_SHA` 空即失败 |
+| K | 发布竞态 | **COVERED** | `concurrency` + `deploy.lock` |
+| L | 回滚失败 → 明确报告 | **IMPLEMENTED_NOT_TESTED** | `deploy-staging.sh:1449` `die 1 "... rollback to $rollback_target also failed"` |
+
+**L 必须写清楚它不是 PASS。** `rollback_to_release` 的失败路径实现正确——它
+`die 1` 并明确说「两个都失败了」——但 `scripts/deploy-staging.sh` 在
+`tests/` 下**没有任何测试**。`p001c_rollback_*` 测的是 Kernel 层的
+`opsctl rollback`，不是主机部署脚本。
+
+这一项的诚实状态是：**读代码确认正确，从未被执行验证过**。为它写测试需要模拟整个主机
+部署（`docker compose` + health check + 记录文件），成本与 `staging-preview` 本身相当，
+而且只能在真实主机上跑。记为缺口，不记为覆盖。
+
+### 本轮修掉的一个测量错误
+
+E 项第一次测出 `rc=0`，我据此认为 `trap teardown EXIT` 覆盖了 `BLOCKED` 的退出码。
+实际是 `bash script | head -2` 返回了 `head` 的退出码。去掉管道后 `rc=1`。
+
+同一形状的错误本轮出现两次（另一处是文档里的「0 次命中」写在跑之前）。`$?` 与管道是
+一个反复的陷阱：`cmd | head` 的 `$?` 是 `head` 的。
