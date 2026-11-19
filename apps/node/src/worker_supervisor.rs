@@ -166,10 +166,20 @@ pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
 /// silently: the shift is capped at 4 (so `1 << failures` cannot overflow), the
 /// multiply is saturating, and the result is capped at 30 s.
 ///
-/// The failure this guards against is not a crash - it is a supervisor that stops
-/// backing off. A worker that fails instantly and is restarted instantly is a busy
-/// loop that fills the log and burns CPU on the node; the cap is what prevents it,
-/// and nothing was checking that the cap exists.
+/// WHICH CLAMP DOES WHAT - an earlier version of this comment had it backwards.
+///
+/// It said the 30 s cap is what stops an instantly-failing worker from becoming a
+/// busy loop. It is not: without the cap the curve tops out at 32 s, which is
+/// *slower* than 30, so removing it cannot produce a busy loop. What prevents the
+/// busy loop is the FLOOR - `backoff_seconds(0) == 2`, so a worker that fails
+/// instantly is never restarted instantly.
+///
+/// The cap is nearly inert as written, and that is worth stating rather than
+/// implying otherwise: the curve is 2, 4, 8, 16, 32, 32, ... so `.min(30)` changes
+/// exactly one step, 32 -> 30. It bounds recovery latency by two seconds. If the
+/// intent is a real ceiling, the shift clamp and the value clamp have to be chosen
+/// together; as they stand, `.min(4)` already does the work and `.min(30)` only
+/// shaves the first plateau.
 fn backoff_seconds(failures: u32) -> u64 {
     2u64.saturating_mul(1u64 << failures.min(4)).min(30)
 }
@@ -194,6 +204,50 @@ mod backoff_tests {
             30,
             "the cap applies at n = 4 (32 would be uncapped)"
         );
+    }
+
+    #[test]
+    fn the_floor_is_what_stops_a_busy_loop_not_the_cap() {
+        // The distinction this asserts is the one the doc comment used to get
+        // wrong. A busy loop needs restarts to be *instant*; the floor is what
+        // prevents that. The cap only shortens the plateau by two seconds, so a
+        // regression that removed it would still not produce a busy loop - this
+        // test states which mechanism is load-bearing so the next reader does not
+        // "harden" the wrong number.
+        assert_eq!(backoff_seconds(0), 2, "a first failure must wait 2 s");
+
+        // Removing the 30 s cap would change exactly one PLATEAU value in the curve,
+        // 32 -> 30, and nothing else: every input from 4 upward lands on it. Stated
+        // as distinct values rather than per-input, because "it changes one step of
+        // the doubling sequence" is the actual claim - the number of *inputs* that
+        // land on that step is unbounded and says nothing.
+        let uncapped = |failures: u32| 2u64 * (1u64 << failures.min(4));
+        let distinct = |f: &dyn Fn(u32) -> u64| {
+            let mut v: Vec<u64> = (0..64u32).map(f).collect();
+            v.dedup();
+            v
+        };
+        assert_eq!(
+            distinct(&uncapped),
+            vec![2, 4, 8, 16, 32],
+            "the curve without the 30 s cap is a clean doubling sequence"
+        );
+        assert_eq!(
+            distinct(&backoff_seconds),
+            vec![2, 4, 8, 16, 30],
+            "with the cap, exactly one plateau value moves (32 -> 30); if more move, \
+             the doc comment's account of which clamp matters is stale"
+        );
+        // ...and even uncapped, no step is fast enough to be a busy loop. `>=`, not
+        // `>`: at failures=0 the two curves are equal, and that equality is the
+        // point - the 2 s floor is the same number with or without the cap.
+        for failures in 0..64u32 {
+            assert!(
+                uncapped(failures) >= backoff_seconds(0),
+                "failures={failures}: an uncapped delay is still not instant, so the \
+                 cap cannot be what prevents the busy loop"
+            );
+        }
     }
 
     #[test]
