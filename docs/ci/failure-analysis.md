@@ -262,6 +262,43 @@ flaky 是同一输入不同结果，503 是同一输入根本没跑到断言。
 部署（`docker compose` + health check + 记录文件），成本与 `staging-preview` 本身相当，
 而且只能在真实主机上跑。记为缺口，不记为覆盖。
 
+### A–P 逐项：位置与反例
+
+任务书 TASK-03 要求 16 项，每项都要验证**实际 `gate()` 的最终 verdict**，不只是 helper 的返回值。
+
+| 项 | 要求 | 反例位置 | 断言的是 |
+|---|---|---|---|
+| A | rust FAILURE → FAIL | `ci-gate.mjs` selftest `a red rust fails the gate and is named` | verdict + 失败 job 被指名 |
+| B | web FAILURE → FAIL | 同上，per-job 循环生成 | 同上 |
+| C | lint FAILURE → FAIL | 同上 | 同上 |
+| D | g13b17-principal FAILURE → FAIL | 同上（per-job 循环覆盖全部 17 个 job） | 同上 |
+| E | 必需 Data Foundation FAILURE → FAIL | `DELEGATED_SELFTEST` `a red check is a failure` | `delegatedVerdict` 的 failed 桶 |
+| F | 必需 Plugin Lifecycle 缺失 → FAIL | `a suite with no check on this commit is ABSENT, not green` | absent 桶 → FAIL |
+| G | 必需 Suite CANCELLED → FAIL | `a cancelled check is a failure` | failed 桶 |
+| H | 必需 Suite TIMEOUT → FAIL | `AWAIT_SELFTEST` `a suite still running after the budget is pending, and pending fails` | pending 桶 **且** 镜像 `main()` 的规则得出 FAIL |
+| I | 外部 Staging Deploy FAILURE → **不**使 merge gate 失败 | `a staging deploy failure is reported as a deployment failure, not a merge blocker` | verdict PASS + `deploymentFailures` 非空 |
+| J | 外部 Staging Deploy SUCCESS 不能代替必需 suite | `a green deployment check does not stand in for a required suite` | 不进入 delegated |
+| K | 同名 Check 来自错误 Workflow 不能冒充 | `a green check from the WRONG workflow does not verify`（`impostor` 桶） | impostor 桶 → 不 verified |
+| L | PR Head SHA ≠ merge SHA，不得混淆 | `ci-gate.api-failure.test.mjs` `ci.yml reads check runs for the PR head, not the merge commit` | `CHECKS_SHA` 必须优先 `HEAD_SHA`，且它来自 `pull_request.head.sha` |
+| M | Rerun Attempt 只看最新有效执行 | `AWAIT_SELFTEST` 三条：fail→pass、pass→fail、in-flight | 两条方向相反的 rerun + 一条进行中 |
+| N | API 不可用不能假定成功 | `ci-gate.api-failure.test.mjs` 前两条 | **进程退出码 = 1** 与 `delegated-api-error`，并断言**不**报 `delegated-absent` |
+| O | 未知新增 CI Job 未登记 → 接线检查失败 | `every workflow is registered in GATE_OWNERSHIP` | 放一个未登记 workflow → FAIL 并指名 |
+| P | docs 改动不触发 L2，但 ci-gate 稳定产生 | `impact.mjs --files docs/*` 返回 `run: (none)`；`ci-gate` 是 `ci.yml` 的 job，`pull_request:` 无过滤 | 见下 |
+
+**P 的两半是分开验证的**，因为它们由不同的机制保证：
+
+```
+$ node tests/ci/impact.mjs --files docs/ci/baseline.md
+run:  (none)                       <- 零 suite，L2 合法跳过
+
+$ python3 -c "import yaml; d=yaml.safe_load(open('.github/workflows/ci.yml')); print(d[True]['pull_request'])"
+None                               <- ci.yml 无 paths 过滤，ci-gate 每个 PR 都产生
+```
+
+「docs 改动时 gate 仍然出现」不是靠 gate 自己保证的，是靠 `ci.yml` 的触发条件。
+所以 `check-impact-consistency.mjs` 里那条「九个必需 context 不得条件化」的断言，在
+迁移时**必须把 `ci-gate` 也加进去**——否则一次 `paths` 改动就能让它消失。
+
 ### 本轮修掉的一个测量错误
 
 E 项第一次测出 `rc=0`，我据此认为 `trap teardown EXIT` 覆盖了 `BLOCKED` 的退出码。

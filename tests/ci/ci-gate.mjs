@@ -897,6 +897,63 @@ const SELFTEST = [
  * an escape hatch. Each `suites` list is what the analyzer required; each `checks`
  * object is what the API returned for this commit.
  */
+// The delegated suites after the wait budget ran out. `pending` is only a FAIL
+// when the caller WAITED - `main()` decides that - so the verdict rule is in
+// `main()`, and these pin the bucket the rule reads.
+const AWAIT_SELFTEST = [
+  {
+    // H. A suite still running when the budget expires. `delegatedVerdict` puts it
+    // in `pending`; `main()` turns a non-empty `pending` into FAIL when it waited.
+    name: 'await: a suite still running after the budget is pending, and pending fails',
+    suites: ['data-foundation'],
+    checks: { 'golden-path': 'in_progress', 'legacy-regression': 'queued' },
+    want: { verified: 0, failed: 0, skipped: 0, pending: 1, absent: 0, unverifiable: 0 },
+    expectVerdict: 'FAIL',
+  },
+  {
+    // A completion that arrives with a non-success conclusion after a long wait is
+    // a failure, not a timeout. The distinction matters: timeout means "unknown",
+    // this means "no".
+    name: 'await: a suite that finishes red after waiting is a failure',
+    suites: ['data-foundation'],
+    checks: { 'golden-path': 'completed', 'legacy-regression': 'failure' },
+    want: { verified: 0, failed: 1, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
+    expectVerdict: 'FAIL',
+  },
+  {
+    // M. A rerun produces a SECOND check run for the same name. The latest
+    // completed attempt decides - that is what rerunning means - and the earlier
+    // red attempt must not keep the suite red.
+    name: 'await: a rerun that passed clears the earlier red attempt',
+    suites: ['linux-runtime'],
+    checks: { 'linux-runtime': 'success' },
+    attempts: { 'linux-runtime': ['failure', 'success'] },
+    want: { verified: 1, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
+    expectVerdict: 'PASS',
+  },
+  {
+    // And the reverse: green then red. The newest attempt is the answer.
+    name: 'await: a rerun that failed overrides the earlier green attempt',
+    suites: ['linux-runtime'],
+    checks: { 'linux-runtime': 'failure' },
+    attempts: { 'linux-runtime': ['success', 'failure'] },
+    want: { verified: 0, failed: 1, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
+    expectVerdict: 'FAIL',
+  },
+  {
+    // A re-run still IN FLIGHT: the old attempt is green, the new one has not
+    // finished. `checkState` answers from the latest COMPLETED attempt, so this is
+    // a pass - correct only because the caller decided not to wait. Pinned so the
+    // semantics are a decision rather than an accident.
+    name: 'await: an in-flight rerun does not erase the last completed answer',
+    suites: ['linux-runtime'],
+    checks: { 'linux-runtime': 'success' },
+    attempts: { 'linux-runtime': ['success', 'in_progress'] },
+    want: { verified: 1, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
+    expectVerdict: 'PASS',
+  },
+];
+
 const DELEGATED_SELFTEST = [
   {
     name: 'delegated: every check present and green verifies',
@@ -1311,6 +1368,28 @@ function selftest() {
     inlineChecks += 1;
     if (!ok) bad += 1;
     process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} PART 3 does not double-report a delegated check: ${JSON.stringify(got.failed)}\n`);
+  }
+
+  // AWAIT_SELFTEST: the same buckets, but each case also states the VERDICT its
+  // bucket produces. The brief is explicit that helper return values are not
+  // enough - these assert the decision, and the verdict rule itself lives in
+  // `main()`; `verdictFrom` below mirrors it so a case can check both.
+  for (const c of AWAIT_SELFTEST) {
+    const got = delegatedVerdict(fixtureLedger(c), c.suites);
+    const bucketsOk = got.verified.length === c.want.verified
+      && got.failed.length === c.want.failed
+      && got.skipped.length === c.want.skipped
+      && got.pending.length === c.want.pending
+      && got.absent.length === c.want.absent
+      && got.unverifiable.length === c.want.unverifiable;
+    // Mirror of main()'s rule for a caller that WAITED.
+    const verdict = (got.failed.length || got.skipped.length || got.absent.length
+      || got.impostor.length || got.ambiguous.length || got.pending.length) ? 'FAIL' : 'PASS';
+    const verdictOk = verdict === c.expectVerdict;
+    const ok = bucketsOk && verdictOk;
+    inlineChecks += 1;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: buckets=${bucketsOk} verdict=${verdict}(want ${c.expectVerdict})\n`);
   }
 
   for (const c of DELEGATED_SELFTEST) {
