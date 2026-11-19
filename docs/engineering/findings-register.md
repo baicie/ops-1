@@ -348,17 +348,24 @@ fi
 根本没执行，`INSTANCE_CAPACITY_EXCEEDED` 那条路径也就没被走到。
 
 **所以：这次成功证明的是「跳过逻辑有效」，不是「部署可用」。** 只要插件内容变一次，
-版本号就会变，部署会再次走到那个 4/4 容量断言。ADR-027 因此仍然完全成立，也仍然未实现。
+版本号就会变，部署会再次走到那个 4/4 容量断言。
 
 这一条写在这里，是因为它是最容易被误读成「修好了」的那类证据：绿 check、正确的时间戳、
 `healthy: true`。它只是没做任何事。
 
-### B-13 升级从不回收旧版本 FIXED（staging 未验证）
+### B-13 升级从不回收旧版本 **WITHDRAWN — 前提为假**
 
-**这是那两条 staging 4/4 失败的真正根因**，也是本轮唯一一个「找出并修掉底层产品缺陷」的条目。
+> **此条已撤回。** 下方「`deploy_plugin` 从不把上一版置为 `DRAINING`」是**错的**：
+> `activate` 从 #50（`67966aa`）起就会做，且带 15 秒宽限期。详见 B-15。
+>
+> 这一节保留原文，因为「一段看起来完全成立、其实前提为假的分析」正是最值得留下的东西——
+> 它每一行都自洽，唯一的错误是第一句。读者应当能看见它是怎么被写出来的。
 
-`plugin_deployments` 每个版本一行，而 `deploy_plugin` 从不把上一版置为 `DRAINING`。
-于是每次发布都留下旧 deployment 继续 `START` 自己的健康实例：
+~~**这是那两条 staging 4/4 失败的真正根因**~~，也是当时以为的「本轮唯一一个找出并修掉底层
+产品缺陷」的条目。
+
+~~`plugin_deployments` 每个版本一行，而 `deploy_plugin` 从不把上一版置为 `DRAINING`。
+于是每次发布都留下旧 deployment 继续 `START` 自己的健康实例：~~
 
 ```
 发布 A -> 1/4
@@ -368,24 +375,32 @@ fi
 再发布 -> INSTANCE_CAPACITY_EXCEEDED
 ```
 
-之前两个「容量修复」都打偏了：它们针对的是**幽灵**（`UNHEALTHY`/`UNREACHABLE` 且无容器），
-而这四行健康、有容器、被正确计数。报错是容量信息，因为容量**确实**被花掉了——花在没人
-要求继续运行的旧版本上。
+**上面这个推演是错的。** 真实情况（#152 的诊断实测）：占位的是
+`dev.opsweave.hello@0.0.1`、`opsweave.data-catalog@0.0.2`、
+`opsweave.data-catalog@0.0.3590`、`opsweave.data-integration@0.0.2` ——
+四个**从未被任何一次 activate 释放过**的旧 deployment，而不是「每次升级都累积一层」。
 
-实现时又暴露出**第二个缺陷**：`reconcile_once` 只规划活跃集合，所以变成 `DISABLED` 的
-deployment 的实例再也不会被看到——`desired_action` 停在 `START`，槽位继续被占。
-与幽灵缺陷同一个形状，只是高了一层。是这条 PR 自己的测试发现的。
+#### 这一节里唯一成立的部分
 
-**反事实（两条，都实际跑过）**：
+「之前两个容量修复都打偏了」是对的——它们针对的是**幽灵**（`UNHEALTHY`/`UNREACHABLE`
+且无容器），而那四行健康、有容器、被正确计数。
+
+**仍然成立的真实缺陷**：`reconcile_once` 只规划活跃集合，所以变成 `DISABLED` 的 deployment
+的实例再也不会被看到——`desired_action` 停在 `START`，槽位继续被占。与幽灵缺陷同一个形状，
+高一层。`git show 4baa4fb^` 里对这条语句的引用数是 0。#151 保留了它。
+
+反事实（现在仍然有效）：
 
 | 回退 | 结果 |
 |---|---|
-| 删掉 `drain_superseded_versions` 的 UPDATE | `left: "ACTIVE", right: "DRAINING"` |
-| 删掉 DISABLED -> STOP 那条语句 | `left: 2, right: 0`——槽位仍被占 |
+| 删掉 reconcile 里 DISABLED -> STOP 那条语句 | `left: 2, right: 0`——槽位仍被占 |
 
-**未验证的部分**：staging 只有在插件**内容**变化时才会走到这条路径（版本是内容哈希），
-而上一次绿的部署恰恰因为内容没变而整个跳过了发布（`already installed; leaving it`）。
-所以要声称「修好了 staging」需要一次真实的内容变更加一次真实部署——本轮无权执行。
+下面这条反事实**已失效**，因为被回退的那个函数本身已被删除：
+
+| ~~删掉 `drain_superseded_versions` 的 UPDATE~~ | ~~`left: "ACTIVE", right: "DRAINING"`~~ |
+
+**为什么当时认为「未验证」**：staging 只有在插件内容变化时才走这条路径（版本是内容哈希）。
+后来发现真正的原因不是内容，而是四个从未释放的旧 deployment——见 B-15 与本节末尾。
 
 ### B-14 「已安装」被当成「已部署」 FIXED（staging 未验证）
 
@@ -402,8 +417,7 @@ opsweave.data-integration@0.0.17455 already installed; leaving it
 这正是 staging 的状态：某次发布装了 `0.0.17455`，部署以 `INSTANCE_CAPACITY_EXCEEDED`
 失败，此后每次发布都说「已安装」。
 
-**这是那堵 4/4 墙的另一半**，与 ADR-027 独立：ADR-027 解释**第一次**部署为什么耗尽槽位；
-这一条解释**为什么再也没重试**。两者同时成立，staging 才会卡三周。
+**这是那堵 4/4 墙的一半**（另一半见下方 B-15：占位者是四个旧版本的 deployment）。
 
 修法：`continue` 只跳过安装。「已安装」是关于制品的事实（版本是内容哈希），与「是否在运行」
 无关。那条路径现在也调用 `opsctl deploy --wait`，它本身幂等：活跃→`VERSION_ALREADY_ACTIVE`，
@@ -427,29 +441,30 @@ Error: timed out waiting for deployment readiness
 之前四次「success」都在第一行 `continue` 掉了。现在它调用 `deploy --wait`，失败，
 整个 run 失败。**红比绿诚实。**
 
-#### 但它同时说明 ADR-027 帮不上这个场景
+#### 但它同时说明当时的 ADR-027 帮不上这个场景（该 ADR 已撤回，见 B-15）
 
 ADR-027 的排空发生在 `activate` 里。而这里的部署**从未成功到可以激活**——`deploy --wait`
 在 READY 之前就超时了，`activate` 根本没被调用。所以旧 deployment 不会进入 DRAINING。
 
-那 4 个占位实例属于**同一个 version 的 deployment**（`UNIQUE (plugin_id, version)` 意味着
-这个版本只有一行 deployment）。它们是反复 redeploy 留下的：每次 redeploy 把
-`generation+1` 并把实例重置为 `STARTING`，但**上一轮的容器/实例仍在占占位**——
-`reconcile_deployment` 只按 `slot < desired_replicas` 回收，而同 slot 的旧 attempt 不会被单独停止。
+> **这一段当时写的「四个占位实例属于同一个 version 的 deployment」也是错的。**
+> #152 的诊断实测给出了四个不同的 deployment：
+> `dev.opsweave.hello@0.0.1`、`opsweave.data-catalog@0.0.2`、
+> `opsweave.data-catalog@0.0.3590`、`opsweave.data-integration@0.0.2`。
+> 它们是**不同版本、不同插件**的旧 deployment，从未被任何一次 `activate` 释放。
+>
+> 而且「容器身份」这一层的推断也不成立：容器名是
+> `opsweave-{node}-{instance_id}`，redeploy 保留同一行 `instance_id`，
+> 所以复用是天然成立的——不需要任何新逻辑。
 
-所以完整因果链是三层的：
+所以真实因果链是**两层**，都已修：
 
 1. **`continue` 跳过部署**（B-14，已修）——让失败看起来像成功，问题被隐藏三周。
-2. **升级不回收旧版本**（B-13 / ADR-027，已修）——解释了跨版本的槽位泄漏，
-   但对当前这个「同版本反复重试」的场景不适用。
-3. **同版本的旧 attempt 不释放槽位**（新发现，未修）——这是当前 4/4 的直接原因。
+2. **`DISABLED` deployment 的实例从不停**（已修，保留在 #151）——所以即使有旧 deployment
+   被释放，它的实例仍占着槽位。
 
-第 3 层需要单独的修复：redeploy 时应当先停掉本 deployment 的现有实例（或确认它们已被停），
-再重置为 STARTING。目前 `UPDATE ... SET deployment_generation=$2, desired_action='START',
-state='STARTING'` 直接覆盖状态，但节点上的旧容器没有对应的终止路径。
-
-这一层**本轮未修**：它需要先决定「同一版本的重试是否应当复用容器」，而这与 ADR-026 的
-发布状态机是同一个问题（DEPLOYING 失败后，下一次是重试还是重建）。记为 NEEDS_DECISION。
+第 3、4 层的猜测（跨版本累积、同版本旧 attempt）**都不成立**。当前 4/4 的直接原因是：
+四个旧 deployment 从未被释放，因为 staging 的发布从未成功到可以 `activate`。
+这不是代码缺陷，是**需要一次显式的清理**——见本节末尾。
 
 ### B-15 ADR-027 的前提是错的 WITHDRAWN
 
@@ -581,6 +596,8 @@ bundle 组装成功（`staged opsweave.data-catalog@0.0.17455`），部署因
 | B-7 | Staging 发布事务性（Kernel 新 / Plugin 旧） | NOT_RUN | TASK-06，未开始 |
 | B-10 | `ci-gate` 不在 Ruleset 的 9 项必需检查里 | NEEDS_DECISION | 见 `docs/ci/ruleset-migration.md`；改 Ruleset 需授权 |
 | B-11 | 版本 hash 无长度/路径分帧 | VERIFIED | 见 ADR-025；边界平移可产生相同版本（已实测） |
+| B-16 | staging 上四个旧 deployment 占满节点 | BLOCKED | 需要授权执行 `opsctl uninstall`；见下方「占用者」一节 |
+| B-17 | ADR-026 的发布状态机 | NOT_RUN | TASK-06 主体；ADR-028 记录了它还缺什么 |
 
 ### B-1 为什么「不统计幽灵」不等于「修复」
 

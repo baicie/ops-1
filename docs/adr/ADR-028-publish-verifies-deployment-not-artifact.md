@@ -33,9 +33,11 @@ forever. Staging has been in exactly that state: a publish installed
 `0.0.17455`, the deploy failed with `INSTANCE_CAPACITY_EXCEEDED`, and every
 publish since has said "already installed" and moved on.
 
-This is the mechanism behind the four-instance wall, and it is independent of
-ADR-027. ADR-027 explains why the *first* deploy ran out of slots; this explains
-why it was never retried afterwards.
+This is one of the two mechanisms behind the four-instance wall, and it is
+independent of ADR-027 - which has since been **withdrawn**, because its own
+premise was false (the platform does drain the previous version at activation).
+What this ADR describes is real and was verified from the staging log; what
+ADR-027 described is not.
 
 ## What was fixed
 
@@ -84,8 +86,10 @@ change. What can be said:
 - the script parses (`bash -n`) and the change is confined to one branch;
 - `pipefail` is set, so a failing `opsctl deploy` fails the run rather than being
   swallowed by `| tail -2`;
-- the path it unblocks is the one ADR-027's tests measured (4/4 slots on
-  `staging-node`).
+- the occupants of those slots were later identified by the diagnostic added in
+  #152: `dev.opsweave.hello@0.0.1`, `opsweave.data-catalog@0.0.2`,
+  `opsweave.data-catalog@0.0.3590`, `opsweave.data-integration@0.0.2` - old
+  versions and a demo leftover, none of them released by an activation.
 
 Claiming it fixes staging needs a real content change and a real deploy. That is
 the first thing to do next round.
