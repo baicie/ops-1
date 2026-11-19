@@ -431,9 +431,11 @@ async fn create_deployment_inner(
     // version was superseded rather than deleted. The reconciler is what performs
     // the final transition, keeping one owner for status changes.
     //
-    // Scoped to `status IN (...)` so a re-deploy of the SAME version - handled
-    // above - cannot drain itself, and so a DISABLED row stays DISABLED.
-    drain_superseded_versions(&state.db, plugin_id, id).await?;
+    // NOT drained here. See `activate`: the previous version keeps its instances
+    // until the route actually moves, because deploy-then-activate is the whole
+    // blue/green contract and a deploy-time drain empties the route before the new
+    // version may serve. The acceptance suite asserts it directly:
+    // `10/10 requests left v1 while v2 was not activated`.
     sqlx::query(
         r#"
         INSERT INTO kernel.plugin_deployments
@@ -607,6 +609,27 @@ async fn activate_inner(
         .execute(&mut *tx)
         .await?;
     }
+    // RELEASE THE PREVIOUS VERSION HERE, NOT AT DEPLOY TIME. (ADR-027)
+    //
+    // The first version of this fix drained the old deployments inside
+    // `deploy_plugin`, and the acceptance suite caught it immediately:
+    //
+    //     FAIL  10/10 requests left v1 while v2 was not activated
+    //
+    // Blue/green means deploy-then-activate. While v2 is READY but not yet
+    // activated, `route_candidates` still resolves v1 - that is the whole point of
+    // the gap, and draining v1 at deploy time empties the route before the new
+    // version is allowed to serve.
+    //
+    // So the release belongs to the moment the route actually moves. Same
+    // transaction as the supersede above, so there is no window in which both
+    // versions think they are current.
+    //
+    // Scoped to this plugin and to deployments other than the one being
+    // activated. `drain_until` is in the past, so the next reconcile pass
+    // disables them and `reconcile_once_scoped` stops their instances - the two
+    // halves that ADR-027's tests pin separately.
+    drain_superseded_versions(&mut *tx, plugin_id, deployment.id).await?;
     sqlx::query(
         r#"
         INSERT INTO kernel.activation_revisions
@@ -1229,9 +1252,9 @@ pub async fn rollback(
 /// runs. A test that re-types the SQL proves only that the test agrees with
 /// itself, and the first version of this test did exactly that.
 async fn drain_superseded_versions(
-    db: &sqlx::PgPool,
+    executor: impl sqlx::PgExecutor<'_>,
     plugin_id: &str,
-    new_id: Uuid,
+    keep_id: Uuid,
 ) -> AppResult<()> {
     sqlx::query(
         r#"
@@ -1244,8 +1267,8 @@ async fn drain_superseded_versions(
         "#,
     )
     .bind(plugin_id)
-    .bind(new_id)
-    .execute(db)
+    .bind(keep_id)
+    .execute(executor)
     .await?;
     Ok(())
 }
