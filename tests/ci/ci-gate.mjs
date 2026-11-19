@@ -490,6 +490,31 @@ export function normaliseNeeds(raw) {
   return out;
 }
 
+/**
+ * The one place the delegated-suite verdict is computed.
+ *
+ * `main()` and the AWAIT_SELFTEST both call this. They used not to: `main()`
+ * carried the rule inline and the selftest carried a hand-written copy of it,
+ * so a change to one left the other asserting yesterday's gate. That is the
+ * defect TASK-14 names - "tests cannot copy the production formula and still be
+ * a test of the production formula" - and the copy was byte-for-byte identical,
+ * which is exactly what made it invisible.
+ *
+ * `waited` is the caller's decision, not a property of the result: `--no-wait`
+ * reads without judging, and a pending suite is only a FAIL when the gate was
+ * supposed to wait for it.
+ *
+ * @param {object} del result of `delegatedVerdict`
+ * @param {{waited: boolean}} opts
+ * @returns {'PASS'|'FAIL'}
+ */
+export function delegatedOutcomeVerdict(del, { waited }) {
+  const fatal = del.failed.length || del.skipped.length || del.absent.length
+    || del.impostor.length || del.ambiguous.length
+    || (waited && del.pending.length);
+  return fatal ? 'FAIL' : 'PASS';
+}
+
 export function gate(rawNeeds, impact, ledgerForGate = null) {
   const needs = normaliseNeeds(rawNeeds);
   const required = new Set(HARD_REQUIRED);
@@ -1395,9 +1420,10 @@ function selftest() {
       && got.pending.length === c.want.pending
       && got.absent.length === c.want.absent
       && got.unverifiable.length === c.want.unverifiable;
-    // Mirror of main()'s rule for a caller that WAITED.
-    const verdict = (got.failed.length || got.skipped.length || got.absent.length
-      || got.impostor.length || got.ambiguous.length || got.pending.length) ? 'FAIL' : 'PASS';
+    // The SAME function main() calls, not a copy of its formula. A test that
+    // restates the rule can only fail when the rule changes in one place, which
+    // is a test of the copy.
+    const verdict = delegatedOutcomeVerdict(got, { waited: true });
     const verdictOk = verdict === c.expectVerdict;
     const ok = bucketsOk && verdictOk;
     inlineChecks += 1;
@@ -1602,9 +1628,10 @@ async function main(argv) {
     // "probably fine"; it is a result that does not exist, and this gate does not
     // merge on those. `--no-wait` is the only way to read without judging, and it
     // says so in the summary.
-    if (del.failed.length || del.skipped.length || del.absent.length
-      || del.impostor.length || del.ambiguous.length
-      || (!noWait && del.pending.length)) verdict = 'FAIL';
+    // ONE rule, shared with the selftest below. `waited` is `!noWait`: the gate
+    // was told to wait, so a suite that never answered is a failure, not an
+    // unfinished read.
+    if (delegatedOutcomeVerdict(del, { waited: !noWait }) === 'FAIL') verdict = 'FAIL';
   }
 
   const out = { ...result, verdict };
