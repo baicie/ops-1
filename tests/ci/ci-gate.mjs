@@ -100,6 +100,11 @@ export const HARD_REQUIRED = [
  * Suites produced by ANOTHER workflow cannot be in this map - see `DELEGATED`.
  */
 export const JOB_TO_SUITE = {
+  // L0 static checks. Mapped to `spec-coverage`, which is itself a required
+  // context and is the suite that owns "the repository's own tooling is sound".
+  // An unmapped job is a note when green and a FAIL when red; mapping it makes
+  // the gate's own completeness check cover it.
+  lint: 'spec-coverage',
   rust: 'rust',
   web: 'web',
   'web-unit': 'web-unit',
@@ -1063,6 +1068,28 @@ function selftest() {
     inlineChecks += 1;
     if (!ok) bad += 1;
     process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ${c.want}${c.because ? ` because ${c.because}` : ''}, got ${got.verdict} (failed=${got.failed.length} skipped=${got.skippedRequired.length} notWired=${got.notWired.length} delegated=${got.delegated.length})\n`);
+  }
+  // L0 lint must be a gate input, not a decorative job.
+  {
+    const needs = { ...ALL_OWNED_GREEN, lint: 'failure' };
+    const impact = { suites: Object.fromEntries(SUITES.map((x) => [x, true])), unmatched: [] };
+    const got = gate(needs, impact);
+    const ok = got.verdict === 'FAIL' && got.failed.some((f) => /lint/.test(f));
+    inlineChecks += 1;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} a red lint job fails the gate: got ${got.verdict}\n`);
+  }
+  // And it must be wired: a job in JOB_TO_SUITE that ci-gate's needs omits is
+  // reported by PART 0, which is what makes adding a job here load-bearing.
+  {
+    const needs = { ...ALL_OWNED_GREEN };
+    delete needs.lint;
+    const impact = { suites: Object.fromEntries(SUITES.map((x) => [x, false])), unmatched: [] };
+    const got = gate(needs, impact);
+    const ok = got.verdict === 'FAIL' && got.notWired.some((n) => /lint/.test(n));
+    inlineChecks += 1;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} the lint job is reported when ci-gate's needs omits it: ${JSON.stringify(got.notWired)}\n`);
   }
   // PART 3: a red check from a workflow the gate does not own.
   {
