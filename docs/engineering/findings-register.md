@@ -492,6 +492,49 @@ FAIL  10/10 requests left v1 while v2 was not activated
 **教训**：写「没有任何东西做 X」的 ADR 之前，先 `grep` 一遍。两个真事实
 （报错文本、`deploy_plugin` 里没有排空）推出一个假结论。
 
+### 4/4 的占用者终于被指名了
+
+`46a667b`（2026-11-19）的部署日志，第一次给出了答案：
+
+```
+PENDING 0/0 ready (... 4 instances already scheduled on this node against a
+per-node limit of 4; occupied by dev.opsweave.hello@0.0.1,
+opsweave.data-catalog@0.0.2, opsweave.data-catalog@0.0.3590,
+opsweave.data-integration@0.0.2)
+```
+
+这一行是本轮最有价值的产出。它把三周的猜测变成四个具体事实：
+
+| 占用者 | 性质 |
+|---|---|
+| `dev.opsweave.hello@0.0.1` | 开发/演示残留，从未是真正的平台插件 |
+| `opsweave.data-catalog@0.0.2` | **旧版本**（当前是 `0.0.17455`） |
+| `opsweave.data-catalog@0.0.3590` | **另一个旧版本** |
+| `opsweave.data-integration@0.0.2` | **旧版本** |
+
+三点结论：
+
+1. **确实是旧版本占位**，和 ADR-027 描述的症状一致——但机制不是 ADR-027 说的那样。
+   `activate` 会排空上一版（15 秒宽限期），所以正常升级不会积累。
+   这四个是**从未被任何一次 `activate` 释放过**的：`dev.opsweave.hello` 是演示残留，
+   而 `0.0.2` / `0.0.3590` 早于排空机制或者从未激活成功。
+
+2. **`0/0 ready` 与占用者并存不矛盾**：当前要部署的 `0.0.17455` 一个实例都没有
+   （从未放置成功），而节点被四个别的 deployment 占满。
+
+3. **修法已经不是代码问题**：这四个 deployment 需要被显式停用。方式有两种，
+   都需要对 staging 的写权限，而本轮无权执行：
+   - 逐个 `opsctl uninstall`（会保留数据，标记 DISABLED）；
+   - 或提高 `OPSWEAVE_MAX_INSTANCES_PER_NODE`（治标，且这台机器的内存是 3.7 GiB）。
+
+   第一条是正确做法：`uninstall` 会把该 plugin 的所有 deployment 置为 DISABLED，
+   而 `reconcile_once` 现在会把 DISABLED deployment 的实例停掉（本轮 #151 保留的那一半修复）。
+
+**这是本轮唯一一个「诊断完成、修复在等授权」的条目。** 它需要一次显式的
+`opsctl uninstall dev.opsweave.hello opsweave.data-catalog opsweave.data-integration`
+加一次重新部署，而 brief §8.4 明确禁止「真实 Staging 部署」与「删除 Staging 数据」——
+`uninstall` 保留数据，但仍是对真实环境的状态变更。
+
 ### 因果闭环：为什么「点治理就退出登录」还没修好
 
 这轮把整条链查通了，而结论是：**代码已经对，线上仍是旧镜像。**
