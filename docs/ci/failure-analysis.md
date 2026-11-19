@@ -172,6 +172,33 @@ print([r for r in d['shellCoverage'] if 'supervisor_backoff' in r['spec']])"
 最近 100 次运行中**没有**出现 `apt` DNS / Docker daemon 不可用 / Runner lost communication
 的证据。不声称「已解决」，只能说「本次采样的 100 次里未出现」。
 
+### 但 2026-11-19 采到了一次，而且是干净的样本
+
+PR #157（只改 `tests/ci/ci-gate.mjs` 与本文档）的 `golden-path` 与 `legacy-regression`
+双双失败，原因完全相同：
+
+```
+E: Failed to fetch https://security.ubuntu.com/ubuntu/pool/main/p/postgresql-common/postgresql-client_16%2b257build1.1_all.deb
+   503  Service Unavailable [IP: 52.15.158.54 80]
+##[error]Process completed with exit code 100.
+```
+
+`security.ubuntu.com` 返回 503，`apt-get install` 因此失败。`ci-gate` 随后因这两项而红。
+
+**判定：`INFRASTRUCTURE_FAILURE`。** 依据有两条，都不是推测：
+
+1. 该 PR 没有触碰任何被这两个 job 执行的代码——只有测试与 Markdown。
+2. 错误是 `503 Service Unavailable` 来自 `security.ubuntu.com`，不是编译或断言失败。
+
+**这是任务书 §10 要求的区分的一个真实实例**：它与 `PRODUCT_FAILURE` 在 check 列表上
+长得一模一样（都是一个红叉），但处置完全不同——产品失败要修代码，镜像源 503 要重跑。
+
+处置：`gh api -X POST .../actions/runs/<id>/rerun-failed-jobs`。**只重跑失败的 job**，
+不是整个 workflow——后者会重新消耗 `default` 上已经通过的 19 项。
+
+**这不能写成「CI 不稳定」。** 一次 503 是一次外部服务故障，与「测试 flaky」是两件事：
+flaky 是同一输入不同结果，503 是同一输入根本没跑到断言。
+
 ## 7. 结论
 
 | 类别 | 次数 | 状态 |
