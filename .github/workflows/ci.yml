@@ -91,6 +91,33 @@ jobs:
           ' >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
+  # L0 - static and policy. Seconds, not minutes, and it runs before anything
+  # expensive so a YAML typo or a shell quoting bug fails fast.
+  #
+  # Both tools were available and neither was ever wired in. `actionlint` found a
+  # real latent bug on its first run: an unquoted
+  # `DATABASE_URL=...?sslmode=disable` that shellcheck reads as a brace expansion
+  # (SC2125), sitting in two steps of the required `platform-only` job.
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint (workflow YAML and embedded shell)
+        uses: raven-actions/actionlint@v2
+        with:
+          # Pinned: actionlint releases change which shellcheck rules they surface,
+          # so an unpinned version can turn this job red without a commit. Bump
+          # deliberately.
+          version: 1.7.7
+      - name: shellcheck at error severity
+        run: |
+          set -eu
+          # `error` only. The tree has zero at this level; warning-level findings
+          # are dominated by style and would need a suppression pass first - see
+          # docs/ci/architecture-proposal.md.
+          shellcheck --severity=error -x tests/acceptance/*.sh tests/ci/*.sh scripts/*.sh
+
   rust:
     # ALWAYS RUNS - `rust` is a required context. See the note on `web`.
     # ALWAYS RUNS, and does NOT list `scope` in `needs`.
@@ -873,7 +900,7 @@ jobs:
           export OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$ADMIN_PASSWORD"
           export OPSWEAVE_BIND=127.0.0.1:19081 \
                  OPSWEAVE_DATA_DIR=/tmp/p001/data \
-                 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/opsweave?sslmode=disable \
+                 DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave?sslmode=disable' \
                  OPSWEAVE_WEB_DIST=apps/platform-console/dist
           ./target/debug/opsweave-kernel > /tmp/p001/kernel.log 2>&1 &
           echo $! > /tmp/p001/kernel.pid
@@ -992,7 +1019,7 @@ jobs:
           export OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$ADMIN_PASSWORD"
           export OPSWEAVE_BIND=127.0.0.1:19082 \
                  OPSWEAVE_DATA_DIR=/tmp/p001full/data \
-                 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/opsweave?sslmode=disable \
+                 DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave?sslmode=disable' \
                  OPSWEAVE_WEB_DIST=/tmp/p001full/web \
                  OPSWEAVE_OPS_WEB_DIST=/tmp/p001full/ops-web
           ./target/debug/opsweave-kernel > /tmp/p001full/kernel.log 2>&1 &
@@ -1394,6 +1421,7 @@ jobs:
       actions: read
     needs:
       - scope
+      - lint
       - rust
       - web
       - web-unit
