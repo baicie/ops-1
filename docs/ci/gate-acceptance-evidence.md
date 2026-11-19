@@ -92,16 +92,47 @@ verdict: PASS
 **开跑时读的那份 ledger 快照**，等待循环只对 delegated suite 重读。所以 PART 3 的
 `deploymentFailures` 只能看到「gate 启动前就已结束」的部署失败。见第 4 项。
 
-## 3. 受控失败：一个必需 check 变红，合并被拒
+## 3. 受控失败：一个必需 check 变红，合并被拒 — **VERIFIED**
 
 | 项 | 值 |
 |---|---|
-| 方式 | 待定 |
-| 预期 | `mergeStateStatus: BLOCKED`，`gh pr merge` 失败 |
-| 结论 | 待做 |
+| 分支 | `test/controlled-required-failure` |
+| SHA | `5fb7c46d5d9957d5c6fcfe8df46e38ebe237e9e0` |
+| PR | #165（已关闭，未合入） |
+| 制造的失败 | `packages/ui/src/status-tone.test.ts` 里一条故意为假的断言 |
+| `web-unit` check run | `135737408618`，`completed/failure` |
+| `mergeStateStatus` | **`BLOCKED`** |
+| 合并结果 | **被拒** |
 
-**做法**：在一个临时分支上让 `web-unit` 真失败（不是跳过、不是改 timeout），
-尝试合入，记录 GitHub 的拒绝原文。这需要一次真实的反例，不能靠推断。
+### GitHub 的拒绝原文（REST，不是 `gh` 的转述）
+
+```json
+{"message":"Repository rule violations found\n\n9 of 9 required status checks have not succeeded: 1 failing.\n\n","status":"405"}
+```
+
+**这条消息的形状本身就是证据。** 它与「必需检查缺失或被跳过」时的消息**不同**：
+
+| 情形 | GitHub 的措辞 |
+|---|---|
+| check 缺失 / 被跳过 | `9 of 9 required status checks are expected` |
+| check **失败** | `9 of 9 required status checks have not succeeded: 1 failing` |
+
+第一种是「还没到齐」，第二种是「到齐了，有一个是红的」。**只有第二种证明这个 check 真的
+被读取并参与了判决**——第一种只能证明它在等。
+
+顺带记下两个操作事实，免得下次再踩：
+
+1. **Draft PR 合并会先撞上 `Pull Request is still a draft`（HTTP 405）**，走不到规则检查。
+   要拿规则拒绝必须先 `gh pr ready`。
+2. `gh pr merge` 只说 "the base branch policy prohibits the merge"；确切原因只有
+   `PUT /pulls/N/merge` 的响应体里有。
+
+### 这次还在 `web-unit` 红的情况下验证了一件事
+
+`ci-gate` 的 `needs` 里有 `web-unit`，所以它**没有运行**。一个非必需的汇总门禁被一个
+失败的必需 job 跳过，对合并没有影响（`web-unit` 自己已经拦住了），但它说明：
+**`ci-gate` 成为必需项之后，「自己被跳过」也必须是一个 FAIL，不能是「没跑就等于没意见」。**
+这条留给 TASK-12 第 5 项验证。
 
 ## 4. Staging 失败不阻止合并 — **VERIFIED**
 
