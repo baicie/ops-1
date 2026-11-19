@@ -168,32 +168,71 @@ check，且 `ci-gate` 在**同一 SHA** 上被判成功。样本不是造的—�
 观测缺口：一个只想知道「这次 main push 的部署为什么红」的读者，不能从 gate 的摘要里
 得到答案。记为 **VERIFIED_GAP**，未修。
 
-## 5. 取消与缺失：依赖被取消时 gate 不能 PASS
+## 5. 取消与缺失：依赖被取消时 gate 不能 PASS — **VERIFIED**
 
 | 项 | 值 |
 |---|---|
-| 方式 | 待定 |
-| 预期 | `ci-gate` FAIL，判决文本含 `delegated-…` |
-| 结论 | 待做 |
+| SHA | `5fb7c46d5d9957d5c6fcfe8df46e38ebe237e9e0`（第 3 项的失败分支） |
+| 制造方式 | `POST /actions/runs/44574279673/cancel`，在 `rust` 排队时 |
+| `rust` | **`completed/cancelled`** |
+| `web-unit` | `completed/failure` |
+| `ci-gate` check run | `135740305258` |
+| 判决 | **`FAIL`** |
 
-Selftest 里有 `rust cancelled` → FAIL 的反例，但那是本地函数级证明。
-**真实 GitHub 上取消一个运行中的 delegated suite，`ci-gate` 的行为没有观测过。**
+### 判决原文
 
-这是五项里唯一还没有真实样本的一项，也是 TASK-13（rerun 竞态）要回答的同一类问题。
+```
+verdict: FAIL
+  failed: rust (job rust: cancelled; ran on this commit although the change did not require it)
+  failed: web-unit (job web-unit: failure)
+  failed: spec-coverage (job spec-coverage: cancelled)
+  failed: spec-coverage (job artifact-budget: cancelled)
+  failed: web (job web: cancelled)
+  failed: platform-only (job platform-only: cancelled)
+  failed: platform-image-build (job platform-image-build: cancelled)
+```
+
+**`cancelled` 被当成失败，而且被逐条点名。** 这与 `skipped` 的处理是同一个桶
+（`ci-gate.mjs:564-568` 与 `RED_CONCLUSIONS`），但这次是真实 GitHub 产生的结论，
+不是 selftest 里的构造。
+
+### 一个操作事实
+
+对**排队中**的 run 发取消请求，它不会立刻变成 `cancelled`——这次它先转成了
+`in_progress` 才被取消。所以那次 `rust` 是先启动、再被取消的。样本仍然有效
+（`conclusion` = `cancelled`），但要记下这个时序，免得下次以为取消请求没生效。
+
+### 这一条同时回答了第 3 项留下的问题
+
+第 3 项里我写：「`ci-gate` 成为必需项之后，『自己被跳过』也必须是一个 FAIL」。
+这次观测到的是**不跳过**：`ci-gate` 有 `if: always()`，所以 `needs` 里出现失败或取消
+时它仍然运行并判决。这在真实数据上确认了那个 `if:` 是必要的，而不只是好看。
 
 ---
 
 ## 6. 结论
 
-| # | 项 | 状态 |
-|---|---|---|
-| 1 | 普通 PR 全绿、可合并 | **VERIFIED** |
-| 2 | L2 PR 上 gate 等待 delegated suite | **VERIFIED** |
-| 3 | 必需 check 受控失败 → 合并被拒 | 待做 |
-| 4 | Staging 失败不阻止合并 | **VERIFIED**（附一条观测缺口） |
-| 5 | 依赖被取消 → 不能 PASS | 待做 |
+| # | 项 | 状态 | 证据 |
+|---|---|---|---|
+| 1 | 普通 PR 全绿、可合并 | **VERIFIED** | `ci-gate` 135686444568，合并 `ca257fd` |
+| 2 | L2 PR 上 gate 等待 delegated suite | **VERIFIED** | `ci-gate` 135704357805，等待 773 s / 15 次读取 |
+| 3 | 必需 check 受控失败 → 合并被拒 | **VERIFIED** | `web-unit` 135737408618 红；`PUT /merge` → `9 of 9 ... have not succeeded: 1 failing` |
+| 4 | Staging 失败不阻止合并 | **VERIFIED** | main `ca257fd`，`ci-gate` 135717628317 PASS + `deploymentFailures` 非空 |
+| 5 | 依赖被取消 → 不能 PASS | **VERIFIED** | `rust` cancelled → `ci-gate` 135740305258 FAIL |
 
-**五项里三项 VERIFIED、两项未做。** Ruleset 从九项改成「仅 `ci-gate`」还需要第 3、5 两项。
+**五项全部 VERIFIED。** 这满足了「Ruleset 迁移前必须有真实证据」的要求。
 
-第 3 项的做法已经明确：在一个临时分支上让一个必需 job 真失败，尝试合并，记录 GitHub
-的拒绝原文。第 5 项需要一个真实被取消的 delegated suite。
+### 但这不等于「现在就该改 Ruleset」
+
+五条证据证明的是**门禁本身工作正常**。它们不覆盖：
+
+1. **成本。** `ci-gate` 成为必需项后，每个 PR 都要等到它读完所有 delegated suite。
+   实测 p95（`ruleset-migration.md`）意味着最坏的 PR 要等 34 分钟，而今天
+   `data-foundation.yml` 只在 paths 命中时才跑。这一点已经写进迁移方案。
+2. **`deploymentFailures` 的快照边界**（第 4 项）。已知、已记录、未修。
+3. **Ruleset 变更本身不可本地验证。** 改完之后如果 `ci-gate` 因为任何原因不再产生，
+   所有 PR 会永久卡在 `Expected`——这是唯一无法在改之前完全排除的风险，
+   也是为什么迁移方案要求先加、观察，再考虑删除旧九项。
+
+**建议的迁移顺序不变**：先加 `ci-gate` 作为第十项（保留原九项），观察若干个 PR，
+确认它稳定产生且不误判，再讨论是否缩减。直接「九项改一项」不符合本文件任何一条证据。
