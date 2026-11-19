@@ -70,7 +70,21 @@ enum Command {
     Deploy {
         plugin: String,
         version: String,
-        #[arg(long, default_value_t = 2)]
+        /// How many instances to run.
+        ///
+        /// Required, with no default. The default was 2, and it could not be
+        /// satisfied on the topology this repository actually deploys: staging
+        /// runs one `node` service (`deployments/staging/compose.yaml:141`) and
+        /// every deployment is created with `maxInstancesPerNode: 1`, so the
+        /// second replica is refused with
+        /// `INSTANCE_CAPACITY_EXCEEDED ... per-deployment limit of 1`.
+        ///
+        /// A default that is wrong for the only environment it runs in is worse
+        /// than no default: `publish-data-plugins.sh` never passed `--replicas`,
+        /// so every staging publish asked for two and got one - and the deploy
+        /// then waited for a READY that required both. Making it explicit costs
+        /// a flag and removes the guess.
+        #[arg(long)]
         replicas: i32,
         #[arg(long)]
         selector: Option<String>,
@@ -976,5 +990,39 @@ mod publish_state_machine_tests {
     fn an_unknown_status_fails_closed() {
         assert_eq!(next_step(Some("BRAND_NEW"), 3), NextStep::RefuseUnknown);
         assert_eq!(next_step(Some(""), 0), NextStep::RefuseUnknown);
+    }
+}
+
+#[cfg(test)]
+mod replica_policy_tests {
+    /// The topology this repository deploys is one node with
+    /// `maxInstancesPerNode: 1`, so the only satisfiable replica count there is 1.
+    ///
+    /// `deploy` used to default `--replicas` to 2 and `publish-data-plugins.sh`
+    /// never passed one, so every staging publish asked for a placement that the
+    /// scheduler must refuse. This test does not call the CLI (that needs a live
+    /// Kernel); it records the arithmetic that makes the old default wrong, so a
+    /// future default cannot be reintroduced without the reasoning coming with it.
+    #[test]
+    fn the_old_default_could_not_be_placed_on_the_topology_it_ran_in() {
+        const NODES: i32 = 1; // deployments/staging/compose.yaml:141
+        const MAX_PER_NODE_PER_DEPLOYMENT: i32 = 1; // main.rs, deploy request
+        let placeable = NODES * MAX_PER_NODE_PER_DEPLOYMENT;
+        assert_eq!(placeable, 1);
+        assert_ne!(
+            2, placeable,
+            "the removed default of 2 exceeds what one node can place for one deployment; \
+             the Kernel refuses slot 2 with INSTANCE_CAPACITY_EXCEEDED (per-deployment)"
+        );
+
+        // And `ready == desired_replicas` is what turns a deployment READY
+        // (`deployments.rs:1762`), so an unplaceable replica never resolves: the
+        // deployment sits below its target forever rather than converging.
+        let desired_under_old_default = 2;
+        let ready_after_placement = placeable;
+        assert_ne!(
+            ready_after_placement, desired_under_old_default,
+            "with 1 placeable instance and desired 2 the deployment can never report READY"
+        );
     }
 }
