@@ -247,8 +247,26 @@ for name in "${PLUGINS[@]}"; do
   plugin="opsweave.$name"
   installed="$(sudo docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
     "SELECT count(*) FROM kernel.plugin_packages WHERE plugin_id='$plugin' AND version='$version'")"
+  # AN INSTALLED PACKAGE IS NOT A DEPLOYED PLUGIN.
+  #
+  # This used to `continue` here, skipping the deploy as well as the install. The
+  # consequence is the state staging has been stuck in: a publish installed the
+  # package, the deploy failed (INSTANCE_CAPACITY_EXCEEDED), and every later
+  # publish of that version short-circuited on "already installed" - so the
+  # deploy was never retried and the plugin was never running.
+  #
+  # The version is a content hash, so "already installed" is a true statement
+  # about the artifact and says nothing about whether it is deployed. Install and
+  # deploy are separate steps with separate failure modes; only the install is
+  # idempotent-by-version.
   if [ "$installed" != "0" ]; then
-    say "$plugin@$version already installed; leaving it"
+    say "$plugin@$version already installed; re-checking its deployment"
+    # `deploy` is itself idempotent: an already-active version returns
+    # VERSION_ALREADY_ACTIVE, a healthy deployment returns 202 without changing
+    # anything, and a failed one is retried. The `|| true` is deliberately NOT
+    # here - a failed deploy must fail the run, which is the whole point.
+    sudo docker exec "$KERNEL_CONTAINER" /usr/local/bin/opsctl --url "$KERNEL_URL" \
+      deploy "$plugin" "$version" --wait 2>&1 | tail -2
     continue
   fi
   img="$REGISTRY/opsweave/$name@$(sudo docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/$name:$version" | cut -d@ -f2)"
