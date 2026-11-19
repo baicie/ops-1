@@ -112,18 +112,71 @@ touching `plugins/**`": `plugins/**` requires `runtime-conformance`,
 `tests/ci/impact.mjs`.) That is the price of not
 merging on "probably fine".
 
-**The 30-minute budget is BELOW the measured p95 of the slowest suite (34 min).**
-A healthy data-foundation run at p95 would time the gate out and fail the PR. That
-is the failure mode the budget was supposed to avoid.
+### 预算的实测复核（2026-11-19）
 
-Mitigations, in order of preference:
+这一节原先写的是「预算 30 分钟，低于 p95 34 分钟」，并称预算「不可配置」。
+两半都需要更正，而且**第一版还有第三个错误：把并行 workflow 的 p95 相加**。
 
-1. **Raise the budget above the p95, or reduce the suite's runtime.** The first is
-   one number; the second is TASK-24. The budget is currently **not adjustable**:
-   `ci.yml:1519` reads `${GATE_BUDGET_MS:-1800000}`, but `GATE_BUDGET_MS` is never
-   set in that step's `env:` block or anywhere else in the workflow, so the
-   default is the only value it can ever take. An earlier version of this document
-   called it "configurable" - it is not, until someone wires it.
+#### 等待从哪里开始
+
+`awaitDelegated` 的 `started = now()` 在**函数内部**，即等待开始于 gate 的 `Decide`
+步骤已经读出检查列表之后。**不包含 runner 排队时间**——排队发生在 job 启动之前，
+而 `updated_at - run_started_at` 也不含它。
+
+#### 是并行的，不是串行的
+
+`ci-gate.mjs` 里只有一个 `awaitDelegated(...)` 调用，`whatToAwait` 一次返回所有未完成的
+suite，循环里同时对每个 suite 轮询。所以：
+
+```
+等待时长 = max(所有未完成 suite 的剩余时间)，不是 sum(...)
+```
+
+**上一版把 `data-foundation` 34 min + `plugin-lifecycle` 21 min + `g12-acceptance`
+19 min 相加写成「最坏 74 分钟」，那是错的。** 并行执行下它们同时进行。
+
+#### 实测
+
+`ci-gate` job 本身（`started_at` → `completed_at`，10 个样本）：
+
+```
+min 11s   p50 606s   p95 1591s   max 1591s
+```
+
+最长那次（run 44513474911）的分解：
+
+```
+等待阶段   1564 s   （日志：「all delegated suites settled after 28 read(s), 1564s」）
+其余步骤     27 s   （checkout + 两次 ledger 读 + 判决）
+合计       1591 s
+```
+
+#### 三层的实际数值与关系
+
+| 项 | 值 | 来源 |
+|---|---|---|
+| `GATE_BUDGET_MS`（step env） | 2100 s（35 min） | `ci.yml` step `env:` |
+| run 块里的 fallback | ~~1800 s~~ → **已删除** | 见下 |
+| `ci-gate` job timeout | ~~2400 s~~ → **2700 s**（45 min） | `ci.yml` job |
+
+**两个真实缺陷，本轮修掉：**
+
+1. **fallback 与 env 不一致。** env 设 `2100000`，而 run 块写
+   `${GATE_BUDGET_MS:-1800000}`。env 一旦丢失（改 job、复制步骤、拼写错误），预算
+   静默降到 30 分钟——低于 p95 2040 s。改成 `${GATE_BUDGET_MS:?...}`：env 缺失是硬错误，
+   不是静默降级。
+2. **timeout 余量只有 240 s。** 2100 + 27 = 2127 s，job timeout 2400 s，余量 273 s
+   （约 11%）。一次慢 checkout 或 API 重试就会让 job 被自己的 timeout 杀掉，而
+   `cancelled` 比「超时并说明原因」更糟。提到 2700 s。
+
+必须成立的关系：
+
+```
+job timeout  >  GATE_BUDGET_MS + (checkout + ledger 读) + 余量
+2700 s       >  2100 s         +  ~30 s                 + 570 s
+```
+
+这条关系有测试断言（`await-delegated.test.mjs`），把 timeout 降回 30 分钟会让它变红。
 3. **`--no-wait`** exists for local use and for a deliberate re-read. It is never
    used in `ci.yml`: reading without waiting is what let a failing suite merge.
 

@@ -1406,7 +1406,15 @@ jobs:
   # wired, cancelled counted as pass).
   ci-gate:
     runs-on: ubuntu-24.04
-    # 40 minutes, not 10.
+    # 45 minutes: the wait budget (35) plus the rest of the step (~1) plus a
+    # quarter-hour of headroom. 40 was measured to leave only 240 s of slack
+    # against a 2100 s budget, which is not enough for a slow checkout or an API
+    # retry storm - and a job killed by its own timeout reports as `cancelled`,
+    # which is a worse failure than a timeout with a reason.
+    #
+    # The relationship that must hold:
+    #   job timeout  >  GATE_BUDGET_MS  +  (checkout + ledger reads)
+    # 2700 s     >  2100 s          +  ~60-120 s, with margin.
     #
     # The gate now WAITS for the suites other workflows produce instead of reading
     # whatever happened to exist when it started. The budget is 30 minutes
@@ -1414,7 +1422,7 @@ jobs:
     # 1530 s, plugin-lifecycle.yml 1174 s. A job timeout below the wait budget
     # would kill the gate mid-wait and report a cancelled check, which is a
     # different and less useful failure than a timeout with a reason.
-    timeout-minutes: 40
+    timeout-minutes: 45
     if: always()
     # `checks: read` is what lets this job stop taking the other workflows on
     # faith. It queries the check runs on THIS commit - by name, AND by the
@@ -1566,7 +1574,7 @@ jobs:
             --needs-json "$NEEDS" \
             --impact-json "$IMPACT" \
             --fetch \
-            --budget-ms "${GATE_BUDGET_MS:-1800000}" > /tmp/gate.txt 2>&1 || GATE_RC=$?
+            --budget-ms "${GATE_BUDGET_MS:?GATE_BUDGET_MS must be set by the step env; a fallback here silently changes the budget}" > /tmp/gate.txt 2>&1 || GATE_RC=$?
           cat /tmp/gate.txt
           # Deliberately not `| tee`: under `set -e` a `ci-gate` exit of 1 ends the
           # step before the summary is written, and a red gate is exactly when the
