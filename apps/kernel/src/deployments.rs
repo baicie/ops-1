@@ -395,6 +395,47 @@ async fn create_deployment_inner(
         }
     }
     let id = Uuid::new_v4();
+    // -------------------------------------------------------------------------
+    // RELEASE THE OLD VERSION BEFORE PLACING THE NEW ONE. (ADR-027)
+    //
+    // `plugin_deployments` has ONE ROW PER VERSION, and nothing used to disable
+    // the previous version's row. So each publish left the old deployment
+    // `START`-ing its own healthy instance and asked for a slot beside it:
+    //
+    //     publish 0.0.17453 -> deployment A, 1 instance, node 1/4
+    //     publish 0.0.17454 -> deployment B, 1 instance, node 2/4  (A still up)
+    //     publish 0.0.17455 -> deployment C, 1 instance, node 3/4  (A, B still up)
+    //     publish 0.0.17456 -> deployment D, 1 instance, node 4/4
+    //     publish next      -> INSTANCE_CAPACITY_EXCEEDED
+    //
+    // Measured twice on staging (runs 44016184862 and 44029228405): the publish
+    // step failed with `4 instances already scheduled on this node against a
+    // per-node limit of 4`, after the Kernel had already been replaced. That is
+    // ADR-026's "Kernel new / Plugin old" state, and its cause was here: the
+    // platform kept every version it had ever deployed running.
+    //
+    // Two fixes were aimed at this and neither could help, because both were
+    // about GHOST instances: `is_ghost_instance` / the capacity predicates exclude
+    // `UNHEALTHY`/`UNREACHABLE` rows with no container, and `must_rebuild`
+    // re-creates such a row. These four rows are healthy and hold containers;
+    // they are counted correctly. The message looks like a capacity bug because it
+    // IS a capacity message - the capacity is being spent on old versions.
+    //
+    // DRAINING is the existing mechanism: `reconcile_once` disables a DRAINING
+    // deployment once `drain_until` has passed, and the instances it owns stop
+    // asking for slots. `drain_until = now()` means the next reconcile pass
+    // releases them, which is the same pass that places the new version.
+    //
+    // Deliberately NOT `DISABLED` here: a DRAINING row is still observable, so an
+    // operator (and the publish journal ADR-026 proposes) can see that this
+    // version was superseded rather than deleted. The reconciler is what performs
+    // the final transition, keeping one owner for status changes.
+    //
+    // NOT drained here. See `activate`: the previous version keeps its instances
+    // until the route actually moves, because deploy-then-activate is the whole
+    // blue/green contract and a deploy-time drain empties the route before the new
+    // version may serve. The acceptance suite asserts it directly:
+    // `10/10 requests left v1 while v2 was not activated`.
     sqlx::query(
         r#"
         INSERT INTO kernel.plugin_deployments
@@ -568,6 +609,27 @@ async fn activate_inner(
         .execute(&mut *tx)
         .await?;
     }
+    // RELEASE THE PREVIOUS VERSION HERE, NOT AT DEPLOY TIME. (ADR-027)
+    //
+    // The first version of this fix drained the old deployments inside
+    // `deploy_plugin`, and the acceptance suite caught it immediately:
+    //
+    //     FAIL  10/10 requests left v1 while v2 was not activated
+    //
+    // Blue/green means deploy-then-activate. While v2 is READY but not yet
+    // activated, `route_candidates` still resolves v1 - that is the whole point of
+    // the gap, and draining v1 at deploy time empties the route before the new
+    // version is allowed to serve.
+    //
+    // So the release belongs to the moment the route actually moves. Same
+    // transaction as the supersede above, so there is no window in which both
+    // versions think they are current.
+    //
+    // Scoped to this plugin and to deployments other than the one being
+    // activated. `drain_until` is in the past, so the next reconcile pass
+    // disables them and `reconcile_once_scoped` stops their instances - the two
+    // halves that ADR-027's tests pin separately.
+    drain_superseded_versions(&mut *tx, plugin_id, deployment.id).await?;
     sqlx::query(
         r#"
         INSERT INTO kernel.activation_revisions
@@ -1174,6 +1236,43 @@ pub async fn rollback(
     }
 }
 
+/// Release every live deployment of `plugin_id` except `new_id`. (ADR-027)
+///
+/// `plugin_deployments` holds ONE ROW PER VERSION, and nothing used to disable the
+/// previous version's row. So each publish left the old deployment `START`-ing its
+/// own healthy instance and asked for a slot beside it; a node with four slots was
+/// full after four publishes and the fifth was refused with
+/// `INSTANCE_CAPACITY_EXCEEDED`.
+///
+/// Measured on staging twice (runs 44016184862 and 44029228405) - the second time
+/// with the ghost-rebuild fix already merged, which is why both earlier fixes were
+/// aimed at the wrong defect: those rows are healthy and hold containers.
+///
+/// Extracted into a function so the test can call THE SAME statement the handler
+/// runs. A test that re-types the SQL proves only that the test agrees with
+/// itself, and the first version of this test did exactly that.
+async fn drain_superseded_versions(
+    executor: impl sqlx::PgExecutor<'_>,
+    plugin_id: &str,
+    keep_id: Uuid,
+) -> AppResult<()> {
+    sqlx::query(
+        r#"
+        UPDATE kernel.plugin_deployments
+        SET status='DRAINING', status_reason='Superseded by a new version',
+            drain_until=now() - interval '1 second', updated_at=now()
+        WHERE plugin_id=$1
+          AND id <> $2
+          AND status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+        "#,
+    )
+    .bind(plugin_id)
+    .bind(keep_id)
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
 pub async fn fetch_deployment(state: &AppState, id: Uuid) -> AppResult<DeploymentRow> {
     sqlx::query_as::<_, DeploymentRow>("SELECT * FROM kernel.plugin_deployments WHERE id=$1")
         .bind(id)
@@ -1326,6 +1425,34 @@ async fn reconcile_once_scoped(
     .await?;
     sqlx::query(
         "UPDATE kernel.plugin_deployments SET status='DISABLED', status_reason='Drain window elapsed', updated_at=now() WHERE status='DRAINING' AND drain_until IS NOT NULL AND drain_until < now()",
+    )
+    .execute(&state.db)
+    .await?;
+    // A deployment that is no longer active must not keep asking for slots.
+    //
+    // The loop below only plans the ACTIVE set, so an instance whose deployment
+    // just became DISABLED was never looked at again - its `desired_action` stayed
+    // `START` forever and it held its node slot with nothing running on it. Found
+    // by ADR-027's own test: after the drain, `SELECT count(*) ... desired_action
+    // ='START'` was still 2 while both deployments read DISABLED.
+    //
+    // The same shape as the ghost defect, one level up: a row describing work that
+    // will never happen, still counted. Stopping it here rather than in the
+    // per-deployment loop is what makes DISABLED mean "released" for every status
+    // that reaches it - drain, uninstall, or an operator setting desired_replicas
+    // to zero.
+    //
+    // `state` is left alone: the node reports what it actually did with the
+    // container, and overwriting that here would be the kernel claiming knowledge
+    // it does not have.
+    sqlx::query(
+        r#"
+        UPDATE kernel.plugin_instances i SET desired_action='STOP', updated_at=now()
+        FROM kernel.plugin_deployments d
+        WHERE i.deployment_id = d.id
+          AND d.status = 'DISABLED'
+          AND i.desired_action <> 'STOP'
+        "#,
     )
     .execute(&state.db)
     .await?;
@@ -2921,6 +3048,236 @@ mod tests {
             assert_eq!(
                 count, 1,
                 "a rebuilt instance is a live attempt and holds its slot"
+            );
+        }
+
+        /// ADR-027: a new version must release the previous one's instances.
+        ///
+        /// The statement under test is the one `deploy_plugin` runs before
+        /// inserting a new deployment row. It is asserted here rather than through
+        /// the HTTP handler because the handler needs a signed-in user and a real
+        /// package with a backend manifest; the defect lives entirely in this
+        /// UPDATE.
+        ///
+        /// The staging shape, reproduced: three superseded versions still holding
+        /// healthy instances, then a fourth publish. Before the fix all four rows
+        /// stayed live and the node ran out of slots.
+        #[tokio::test]
+        async fn a_new_version_drains_the_previous_ones() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let node_id = node(&pool).await;
+            let plugin = format!("test.upgrade.{}", Uuid::new_v4());
+
+            // Three already-deployed versions, each ACTIVE with a live instance -
+            // the state three publishes leave behind today.
+            let mut old = Vec::new();
+            // `UNIQUE (plugin_id, version)` is what makes this repository's shape
+            // possible: it forbids inserting the SAME version twice and permits
+            // any number of DIFFERENT versions, each its own row with its own
+            // instances. Each iteration therefore gets a distinct version string -
+            // the first version of this test did not, and it failed on that
+            // constraint rather than on an assertion.
+            for version in ["0.0.1", "0.0.2", "0.0.3"] {
+                let (deployment_id, _) = deployment_with_one(
+                    &pool,
+                    node_id,
+                    &Uuid::new_v4().to_string(),
+                    "READY",
+                    Some("c1"),
+                    None,
+                )
+                .await;
+                sqlx::query(
+                    "UPDATE kernel.plugin_deployments SET plugin_id=$2, version=$3 WHERE id=$1",
+                )
+                .bind(deployment_id)
+                .bind(&plugin)
+                .bind(version)
+                .execute(&pool)
+                .await
+                .unwrap();
+                old.push(deployment_id);
+            }
+
+            // The new version's row, created the way the handler creates it.
+            let new_id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 SELECT $1,$2,package_id,'9.9.9',1,1,'{}'::jsonb,'{}'::jsonb,'PENDING',now(),now()
+                 FROM kernel.plugin_deployments WHERE id=$3",
+            )
+            .bind(new_id)
+            .bind(&plugin)
+            .bind(old[0])
+            .execute(&pool)
+            .await
+            .unwrap();
+
+            // THE SAME FUNCTION `deploy_plugin` calls. Not a copy of its SQL:
+            // a test that re-types the statement proves only that the test agrees
+            // with itself, and the first version of this one did exactly that.
+            super::super::drain_superseded_versions(&pool, &plugin, new_id)
+                .await
+                .expect("drain runs");
+
+            for (index, deployment_id) in old.iter().enumerate() {
+                let status: String =
+                    sqlx::query_scalar("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
+                        .bind(deployment_id)
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                assert_eq!(
+                    status, "DRAINING",
+                    "superseded version #{index} must be released, not left running"
+                );
+            }
+            let new_status: String =
+                sqlx::query_scalar("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
+                    .bind(new_id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                new_status, "PENDING",
+                "the new version is not drained by its own arrival"
+            );
+
+            // And a DISABLED row is left alone: it is already released, and
+            // re-draining it would move it backwards in the state machine.
+            sqlx::query("UPDATE kernel.plugin_deployments SET status='DISABLED' WHERE id=$1")
+                .bind(old[2])
+                .execute(&pool)
+                .await
+                .unwrap();
+            super::super::drain_superseded_versions(&pool, &plugin, new_id)
+                .await
+                .expect("drain runs again");
+            let still_disabled: String =
+                sqlx::query_scalar("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
+                    .bind(old[2])
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                still_disabled, "DISABLED",
+                "a released version must not be re-drained"
+            );
+        }
+
+        /// The whole point of draining: the node gets its slots back.
+        ///
+        /// `a_new_version_drains_the_previous_ones` proves the status transition.
+        /// This proves the CONSEQUENCE - that a reconcile pass after a publish
+        /// frees the capacity the old versions were holding, which is what the
+        /// staging failure was actually about (`4 instances already scheduled ...
+        /// against a per-node limit of 4`).
+        ///
+        /// The two together are the counterfactual for ADR-027: without the drain
+        /// the statuses stay ACTIVE, the instances keep `desired_action='START'`,
+        /// and the count below never falls.
+        #[tokio::test]
+        async fn draining_a_superseded_version_frees_its_node_slots() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let node_id = node(&pool).await;
+            let plugin = format!("test.freeslots.{}", Uuid::new_v4());
+
+            let mut deployments = Vec::new();
+            for version in ["0.0.1", "0.0.2"] {
+                let (deployment_id, _) = deployment_with_one(
+                    &pool,
+                    node_id,
+                    &Uuid::new_v4().to_string(),
+                    "READY",
+                    Some("c1"),
+                    None,
+                )
+                .await;
+                sqlx::query(
+                    "UPDATE kernel.plugin_deployments SET plugin_id=$2, version=$3 WHERE id=$1",
+                )
+                .bind(deployment_id)
+                .bind(&plugin)
+                .bind(version)
+                .execute(&pool)
+                .await
+                .unwrap();
+                deployments.push(deployment_id);
+            }
+
+            let occupied = || {
+                let pool = pool.clone();
+                let plugin = plugin.clone();
+                async move {
+                    sqlx::query_scalar::<_, i64>(
+                        "SELECT count(*)::bigint FROM kernel.plugin_instances i
+                         JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+                         WHERE d.plugin_id=$1 AND i.desired_action='START'",
+                    )
+                    .bind(&plugin)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+                }
+            };
+            assert_eq!(occupied().await, 2, "two live versions hold two slots");
+
+            // A third version is published: the handler drains the first two.
+            let new_id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 SELECT $1,$2,package_id,'0.0.3',0,1,'{}'::jsonb,'{}'::jsonb,'PENDING',now(),now()
+                 FROM kernel.plugin_deployments WHERE id=$3",
+            )
+            .bind(new_id)
+            .bind(&plugin)
+            .bind(deployments[0])
+            .execute(&pool)
+            .await
+            .unwrap();
+            super::super::drain_superseded_versions(&pool, &plugin, new_id)
+                .await
+                .expect("drain runs");
+
+            // `drain_until` is in the past, so ONE reconcile pass disables them -
+            // and `reconcile_once_scoped` skips deployments that are no longer in
+            // the active set, so the instances keep `START` until their deployment
+            // row is actually DISABLED. That is the transition under test.
+            let state = crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool.clone(),
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            };
+            super::super::reconcile_once_scoped(&state, Some(new_id))
+                .await
+                .expect("reconcile runs");
+
+            for deployment_id in &deployments {
+                let status: String =
+                    sqlx::query_scalar("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
+                        .bind(deployment_id)
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                assert_eq!(
+                    status, "DISABLED",
+                    "one reconcile pass must finish the drain it was asked to start"
+                );
+            }
+            assert_eq!(
+                occupied().await,
+                0,
+                "a superseded version's instances must stop asking for slots"
             );
         }
 
