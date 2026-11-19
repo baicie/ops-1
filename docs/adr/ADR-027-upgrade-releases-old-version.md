@@ -1,162 +1,98 @@
 # ADR-027: A plugin upgrade must release the old version's instances
 
-**Status: ACCEPTED — implemented in PR #148 for decisions 1 and 3. Decisions 2
-and 4 remain open, and the staging verification is still outstanding.**
+**Status: WITHDRAWN — the premise was false. One genuine defect found while
+investigating it was extracted and kept (see "What survived").**
 
-Found 2026-11-17 while investigating why the staging publish chain has never
-succeeded. It changes what TASK-16 (plugin lifecycle) and TASK-01/11 (capacity)
-are actually about.
+> **Correction, 2026-11-19.** This ADR claimed that "nothing disables the previous
+> version's deployment". That is wrong, and I did not check before writing it.
+> `activate` has released the previous deployment since #50 (commit `67966aa`):
+>
+> ```sql
+> UPDATE kernel.plugin_deployments
+> SET status='DRAINING', status_reason='Superseded by activation revision',
+>     drain_until=now()+interval '15 seconds'
+> WHERE id=$1 AND status IN ('ACTIVE','READY')
+> ```
+>
+> A 15-second grace period, so the old version keeps serving while the route
+> moves. The platform already did what this ADR proposed to add.
 
-## What was implemented
+## What actually happened
 
-`deploy_plugin` now calls `drain_superseded_versions` before inserting the new
-row: every other live deployment of the plugin becomes `DRAINING` with
-`drain_until` in the past, so one reconcile pass disables it.
+The ADR was written from the shape of a failure — `4 instances already scheduled
+on this node against a per-node limit of 4` — plus a reading of `deploy_plugin`
+that did not mention draining. Both were true statements that added up to a false
+conclusion. `grep -n 'Superseded by activation revision'` would have settled it in
+one command, and I did not run it until after two PRs and a broken acceptance run.
 
-Implementing it exposed a **second** defect, which the ADR had not predicted:
-`reconcile_once` only plans the active set, so a deployment that became
-`DISABLED` never had its instances stopped — `desired_action` stayed `START` and
-the slot stayed held. The same shape as the ghost defect, one level up. Fixed in
-the same PR, with its own counterfactual.
-
-Still open:
-
-- **Decision 2** (is a brief downtime acceptable?) — the implementation takes
-  stop-then-start, so the answer is currently "yes, seconds". That is a product
-  decision this ADR asked for and did not receive.
-- **Decision 4** (what `uninstall` does to history) — unchanged; it already
-  disables by `plugin_id`, which is now consistent with upgrade.
-- **`placement.rollout`** — not implemented. One behaviour, the one that works on
-  a single node.
-- **Staging verification** — the fix is exercised only when a plugin's content
-  changes, and the last green deploy skipped the publish entirely for that reason.
-
-## The defect
-
-`deploy_plugin` looks up the deployment by **`(plugin_id, version)`**:
-
-```rust
-"SELECT * FROM kernel.plugin_deployments WHERE plugin_id=$1 AND version=$2"
-```
-
-`plugin_deployments` has one row **per version**. Nothing in `deploy_plugin`
-disables the previous version's row. So each publish leaves the old deployment
-`START`-ing its own instances, and the new one asks for a slot beside them.
-
-The measured consequence, on a node whose limit is 4:
+PR #148 then added a second drain with `drain_until` in the past. The consequence
+was immediate and is the clearest evidence in this whole round:
 
 ```
-publish 0.0.17453  -> deployment A, 1 instance, node at 1/4
-publish 0.0.17454  -> deployment B, 1 instance, node at 2/4   (A still running)
-publish 0.0.17454  -> deployment C, 1 instance, node at 3/4   (A, B still running)
-publish 0.0.17455  -> deployment D, 1 instance, node at 4/4
-publish 0.0.17456  -> INSTANCE_CAPACITY_EXCEEDED
+FAIL  10/10 requests left v1 while v2 was not activated
 ```
 
-That is exactly the staging log:
+Blue/green is deploy-then-activate. A drain with no grace period stops the old
+instances before the route has moved, so every publish became downtime. My "fix"
+for that moved the duplicate into `activate`, beside the real write. PR #151
+removes it; `activate` is back to one write.
 
-```
-PENDING 0/0 ready (No eligible healthy node matches the placement selector
-[INSTANCE_CAPACITY_EXCEEDED] node staging-node:
-4 instances already scheduled on this node against a per-node limit of 4)
-```
+## What survived
 
-This is not a capacity configuration problem, and it is not a ghost problem. Four
-publishes left four live deployments, each with a healthy instance, all belonging
-to plugins that are no longer the active version. **The platform keeps every
-version it has ever deployed running.**
+One defect was real, and it was hiding underneath the false premise:
 
-## Why the earlier fixes could not help
+**A `DISABLED` deployment's instances were never stopped.** `reconcile_once` plans
+only the active set, so an instance whose deployment had just been disabled was
+never looked at again — `desired_action` stayed `START` and it held a node slot
+with nothing running on it. `git show 4baa4fb^:...` has zero references to that
+statement, so this was genuinely missing.
 
-- `is_ghost_instance` / the capacity predicates (#135–#137) exclude
-  `UNHEALTHY`/`UNREACHABLE` rows with no container. These four rows are healthy
-  and have containers. Correctly counted.
-- `must_rebuild` (this round) re-creates a ghost. There is no ghost to re-create.
-  Confirmed by rerunning after the merge (`bc19140`, run 44029228405): identical
-  `4 instances already scheduled`.
+Same shape as the ghost defect this round started with, one level up: a row
+describing work that will never happen, still counted. It is kept, with a test
+(`a_drained_version_frees_its_node_slots_after_the_grace_period`) that asserts
+both halves — still serving inside the grace window, released after it.
 
-Both fixes are right, and both were aimed at a different defect. The reason the
-staging failure kept looking like a capacity bug is that its **message** is a
-capacity message; the cause is lifecycle.
+## What the staging failure actually is
 
-## What a correct upgrade looks like
+Not cross-version leakage. Each version's `activate` already released the
+previous one, so a normal upgrade never accumulates deployments.
 
-An upgrade is not "deploy another version". It is a transition:
+Those four instances belong to deployments that were **never activated at all**.
+On staging the publish has never reached `ACTIVATED`: `deploy --wait` times out
+first. So no `activate` runs, so no drain runs, so the instances that an earlier,
+failed attempt left behind stay.
 
-```
-ACTIVE(v_old)  --deploy(v_new)-->  DRAINING(v_old)  -->  DISABLED(v_old)
-                                   PREPARING(v_new) -->  ACTIVE(v_new)
-```
+That is a different problem from the one this ADR described, and it is the one
+that matters:
 
-The old version's instances must be released **before** the new ones are placed,
-or the node needs room for both. Both orderings are defensible:
+- Is a retry of the same version supposed to reuse its containers or rebuild
+  them? (Container identity is `opsweave-{node}-{instance_id}`, so reusing is the
+  natural answer — but the instance is reset to `STARTING` and the node has no
+  path to terminate the previous attempt's container.)
+- And what does `DEPLOYING → failed` mean for the next run — retry, or recreate?
 
-| Strategy | Needs 2x capacity? | Downtime | Use when |
-|---|---|---|---|
-| **Stop-then-start** | No | Yes, briefly | one node, tight capacity (staging today) |
-| **Start-then-stop** (surge) | Yes | No | multi-node, capacity available |
+Both belong to ADR-026's publish state machine, which is where they are recorded.
+This ADR does not answer them and should not have been written as if it did.
 
-The platform currently does neither — it starts without stopping, which is the
-surge strategy without the capacity for it.
+## Decisions, restated honestly
 
-## Proposed fix, in order
+1. ~~Should an upgrade release the old version?~~ **Already does.** Not a
+   decision.
+2. ~~Is a brief downtime acceptable?~~ **Moot.** The existing implementation
+   gives 15 seconds of overlap; that was already the answer.
+3. `placement.rollout` (stop-then-start vs surge) — still unimplemented, still an
+   open design question, but not blocking anything.
+4. What `uninstall` does to history — unchanged and unrelated.
 
-1. **Release before place.** When `deploy_plugin` targets a version different
-   from the plugin's current deployment, mark every other non-`DISABLED`
-   deployment of that `plugin_id` as `DRAINING` with `drain_until = now()`, so the
-   reconciler stops their instances and their slots free in the same pass.
-2. **Make the strategy explicit.** A `placement.rollout` field:
-   `"stop-then-start"` (default on a single node) or `"surge"`. The default must
-   be the one that works on the smallest installation; surge is an opt-in that
-   requires the operator to have the capacity.
-3. **Order within one pass.** The reconciler currently plans deployments in
-   `ORDER BY created_at`, so the OLD deployment is reconciled first and re-asserts
-   its instance before the new one is considered. Without a drain step, ordering
-   alone can never free a slot.
-4. **Assert it.** A real-PostgreSQL test with a node limit of 2, three successive
-   publishes, asserting: after each, exactly one deployment is `START`; the node
-   is at 1/2; and the previously-active version is `DISABLED`.
+## The lesson worth keeping
 
-## Why this is an ADR and not a patch
+Two PRs, one acceptance failure and one duplicated SQL statement came from
+reading two true facts and concluding a third. The specific check that would have
+caught it takes one command and should be the first thing done when writing an
+ADR that says "nothing does X":
 
-It changes the meaning of `deploy` from "create or retry this version" to "make
-this version the one that runs", which is a user-visible semantic. It interacts
-with `uninstall` (which already disables by `plugin_id` — the same query belongs
-in `deploy`), with `activation_revisions` (which already has an ACTIVE/SUPERSEDED
-model for the plugin-level pointer), and with ADR-026's publish state machine
-(`ACTIVATED` should mean "the old version is gone", not "a new row exists").
-
-Doing it as a patch would produce a second, differently-shaped notion of "the
-current version" beside the one `activation_revisions` already keeps.
-
-## Decisions needed
-
-1. **Default strategy: stop-then-start or surge?** The proposal is stop-then-start,
-   because a single-node installation is the common case and the one that breaks.
-2. **Is a brief downtime acceptable for an upgrade?** Stop-then-start means the
-   plugin is unavailable between the old instance stopping and the new one becoming
-   READY. On this platform that is seconds, but it is not zero.
-3. **Should `deploy` refuse when the target version equals the active one?** It
-   already returns `409 VERSION_ALREADY_ACTIVE`. Keep it.
-4. **What should `uninstall` do to history?** It disables all deployments of the
-   plugin. That is now consistent with upgrade; confirm the audit record is what
-   you want (`status='DISABLED'`, rows retained).
-
-## Evidence
-
-Every claim above is from a real run, not a reading of the code.
-
-```
-staging-preview run 44016184862  (main c3edae4)   deploy step failed, 4/4
-staging-preview run 44029228405  (main bc19140)   deploy step failed, 4/4  <- must_rebuild merged
+```bash
+grep -rn 'DRAINING\|drain_until' apps/kernel/src/
 ```
 
-Both times the publish got as far as `staged ... bundle=sha256:...`, so image
-push, bundle assembly and signing all work. The single failure point is placement,
-and placement is full because every earlier version is still running.
-
-The staging database cannot be inspected directly from here: the SSH credentials
-exist only as CI secrets and the local key is refused
-(`Permission denied (publickey)`). The four-row count is therefore inferred from
-the error message — which names the exact query — plus the code path above, not
-from a `SELECT`.
+Recorded in the findings register as B-15 alongside the two mistakes.

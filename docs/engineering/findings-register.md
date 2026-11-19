@@ -451,6 +451,47 @@ state='STARTING'` 直接覆盖状态，但节点上的旧容器没有对应的�
 这一层**本轮未修**：它需要先决定「同一版本的重试是否应当复用容器」，而这与 ADR-026 的
 发布状态机是同一个问题（DEPLOYING 失败后，下一次是重试还是重建）。记为 NEEDS_DECISION。
 
+### B-15 ADR-027 的前提是错的 WITHDRAWN
+
+这是本轮最严重的一次错误，记在最前面。
+
+**错误**：ADR-027 断言「没有任何东西会停用上一版 deployment」。我没有查证就写了。
+
+**事实**：`activate` 从 #50（commit `67966aa`）起就会做这件事，还带 15 秒宽限期：
+
+```sql
+status='DRAINING', status_reason='Superseded by activation revision',
+drain_until=now()+interval '15 seconds'
+WHERE id=$1 AND status IN ('ACTIVE','READY')
+```
+
+一条 `grep -rn 'DRAINING\|drain_until' apps/kernel/src/` 就能查清。我直到发出两个 PR、
+弄坏一次 acceptance 之后才跑它。
+
+**代价**：#148 加了一个 `drain_until` 在过去的重复语句。acceptance 一行抓到：
+
+```
+FAIL  10/10 requests left v1 while v2 was not activated
+```
+
+蓝绿部署是 deploy-then-activate。没有宽限期的排空会在路由切换前停掉旧实例，
+于是每次发布都变成停机。我为这个错误做的「修复」是把重复语句搬进 `activate`，
+和真正的实现并排。#151 把它删掉。
+
+**幸存下来的真实缺陷**：`DISABLED` deployment 的实例从不停。`reconcile_once` 只规划活跃集合，
+所以刚被禁用的 deployment 的实例再也不会被看到——`desired_action` 停在 `START`，占着槽位
+却没有东西在跑。`git show 4baa4fb^` 里对这条语句的引用数是 **0**，所以它确实是缺失的。
+与幽灵缺陷同一形状，高一层。保留，带测试。
+
+**staging 失败的真相**：不是跨版本泄漏——每个版本的 `activate` 本来就会释放上一版。
+那 4 个实例属于**从未被激活过**的 deployment：staging 的发布从未走到 `ACTIVATED`，
+`deploy --wait` 先超时了。所以没有 `activate`，没有排空，早先失败尝试留下的实例就一直留着。
+
+这是另一个问题，属于 ADR-026 的发布状态机（同版本重试是复用容器还是重建）。
+
+**教训**：写「没有任何东西做 X」的 ADR 之前，先 `grep` 一遍。两个真事实
+（报错文本、`deploy_plugin` 里没有排空）推出一个假结论。
+
 ### 因果闭环：为什么「点治理就退出登录」还没修好
 
 这轮把整条链查通了，而结论是：**代码已经对，线上仍是旧镜像。**
