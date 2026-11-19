@@ -1,136 +1,189 @@
-# Workflow 执行矩阵（Phase 0）
+# Workflow 清单
 
-全部 10 个 workflow，逐 job。数据来自 `e3b3ce5` 时点的实际文件与最近一次运行的 job 耗时。
+**采集时间 2026-11-19，基线 `ec7ff1f`。9 个文件，35 个 job。**
 
-「必需」一列指该 job 的 check 名是否在 Ruleset `26958761` 的 required 列表中。
+上一版本文件基于 `e3b3ce5`，列了 10 个 workflow 并包含 `typed-pipeline-runtime.yml`。
+那个文件已从仓库移除；本文件不再引用它。任务书的清单同样包含它（历史观察），这一点在
+`baseline.md` §4 已注明。
 
-## ci.yml
+---
 
-触发：全部 `pull_request`，`push: main`。无路径过滤。
+## ci.yml — 18 个 job
 
-| Job | 必需 | 秒 | 主要命令 |
+**触发**：`pull_request:`（无过滤）、`push:`
+
+**权限**：workflow 级 `contents: read`；`ci-gate` 额外要 `checks: read` 与 `actions: read`。
+
+| job | check | 性质 | 依赖 |
 |---|---|---|---|
-| `rust` | **是** | 189 | `cargo fmt --check`、`cargo clippy --locked --workspace --all-targets -- -D warnings`、`cargo test --locked --workspace`（带 postgres service，`OPSWEAVE_REQUIRE_TEST_DATABASE=1`） |
-| `web` | **是** | 48 | `pnpm install --frozen-lockfile` + 每个 workspace `typecheck` + 两个 app `build` |
-| `web-unit` | **是** | 15 | 每个 workspace `test`（vitest） |
-| `zabbix-plugin` | 否 | 22 | `npm ci --prefix plugins/zabbix-source/backend` + `node --test` |
-| `b2-plugin-identity` | 否 | 33 | `sync-plugin-identity.mjs --check` + `npm ci` ×2 + `b2_plugin_identity_attack` |
-| `g13a-roundtrip` | 否 | 103 | `cargo build -p opsweave-kernel` + `g13a_evidence_roundtrip.mjs` |
-| `g13a1-gateway` | 否 | 244 | 构建 kernel+node+opsctl + keygen + `npm ci` + gateway E2E |
-| `g13b14-claim` | 否 | 171 | `pnpm install` + 两个 app build + claim 测试 |
-| `g13b16-effect` | 否 | 111 | `cargo build -p opsweave-kernel` + `g13_b16_effect.sh` |
-| `g13b17-principal` | 否 | 117 | `cargo build -p opsweave-kernel` + `g13_b17_principal.sh` |
-| `artifact-budget` | 否 | 11 | `check-tracked-png-budget.mjs` |
-| `spec-coverage` | **是** | 14 | `check-spec-coverage.mjs` |
-| `contracts` | **是** | 15 | `validate_contracts.py` |
-| `platform-only` | **是** | 239 | 11 步，`--no-default-features` 构建与测试边界 |
-| `platform-image-build` | **是** | 345 | 4 步镜像构建 |
+| `scope` | `scope` | 决定哪些重型 job 跑 | — |
+| `rust` | **`rust`** | 必需 | 无（#146 起无 `if:` 也无 `needs`） |
+| `web` | **`web`** | 必需 | 无 |
+| `web-unit` | **`web-unit`** | 必需 | 无 |
+| `contracts` | **`contracts`** | 必需 | — |
+| `spec-coverage` | **`spec-coverage`** | 必需 | — |
+| `platform-only` | **`platform-only`** | 必需 | — |
+| `platform-image-build` | **`platform-image-build`** | 必需 | 无 |
+| `runtime-image-build` | `runtime-image-build` | gate-only | `scope` |
+| `zabbix-plugin` | `zabbix-plugin` | gate-only | — |
+| `b2-plugin-identity` | `b2-plugin-identity` | gate-only | — |
+| `g13a-roundtrip` | `g13a-roundtrip` | gate-only | `scope` |
+| `g13a1-gateway` | `g13a1-gateway` | gate-only | `scope` |
+| `g13b14-claim` | `g13b14-claim` | gate-only | `scope` |
+| `g13b16-effect` | `g13b16-effect` | gate-only | `scope` |
+| `g13b17-principal` | `g13b17-principal` | gate-only | `scope` |
+| `artifact-budget` | `artifact-budget` | gate-only | — |
+| `ci-gate` | `ci-gate` | **汇总门禁，本身非必需** | 17 个 job，全部 |
 
-合计约 **1735 秒**（job 串并行混合；实际墙钟 304–1456 s）。
+**关键事实**：`ci-gate` 读取全部 17 个 job 的结果，并用 check-run API 按
+`check_suite.id ↔ workflow_runs[].check_suite_id` 归属其它 workflow 的产物。它有
+35 分钟的有界等待（`GATE_BUDGET_MS`，最近才真正接线），超时即 FAIL。
 
-## platform-linux-acceptance.yml
+**但 `ci-gate` 不在 ruleset 的九项里。** 所以它判红时合并仍可进行——见
+`architecture-proposal.md` §2。
 
-触发：全部 `pull_request`，`push: main`，`workflow_dispatch`。无路径过滤。
+## data-foundation.yml — 2 个 job
 
-| Job | 必需 | 秒 | 内容 |
-|---|---|---|---|
-| `linux-runtime` | **是** | ~400-900 | 16 步：记录环境、构建 platform-only 镜像、检查 state 目录可写、安装平台、断言无 node 重启循环、`container_ownership` 与 `migration_identity`/`migration_durability` 测试 |
+**触发**：`workflow_dispatch:`、`push:`（带 paths）、`pull_request:`（带 paths）
 
-**这个 job 对所有 PR 无条件运行**，包括只改文档的 PR。
-
-## reliability.yml
-
-触发：全部 `pull_request`，`push: main`。无路径过滤。
-
-| Job | 必需 | 秒 |
+| job | check | 性质 |
 |---|---|---|
-| `quality-faults` | **是** | 131 |
+| `golden-path` | `golden-path` | gate-only，42 步 harness |
+| `legacy-regression` | `legacy-regression` | gate-only |
 
-`./tests/reliability/run.sh --all`。同样对所有 PR 无条件运行。
+`golden-path` 执行 `tests/ci/data_foundation_ci.sh`，45 个 `run_step`，间接调用 **39** 个
+`tests/acceptance/*.sh`。含 4 个 Playwright spec（`RUN_BROWSER_SMOKE=1`）。
 
-## typed-pipeline-contracts.yml
+`legacy-regression` 跑 `e2e_platform.sh`，其中包含蓝绿断言
+（`10/10 requests left v1 while v2 was not activated`）——ADR-027 第一版就是被这条抓住的。
 
-触发：`pull_request` 路径 2 条（`contracts/**`、`tests/contract/**`）。
+## g12-acceptance.yml — 1 个 job
 
-| Job | 必需 | 秒 | 脚本 |
-|---|---|---|---|
-| `contracts` | **是（同名冲突）** | ~47 | `validate_typed_pipeline.py` |
+**触发**：`workflow_dispatch:`、`pull_request:`、`push:`
 
-**check 名 `contracts` 与 ci.yml 的 `contracts` 相同，但跑的是不同脚本。**
+| job | check |
+|---|---|
+| `acceptance` | `acceptance`（gate-only） |
 
-## data-foundation.yml
+跑 `tests/ci/g12_acceptance_ci.sh`，含 Gateway/capability/evidence 验收与 Playwright。
 
-触发：`pull_request` 路径 11 条，`workflow_dispatch`。
+## platform-linux-acceptance.yml — 1 个 job
 
-| Job | 必需 | 秒 | 内容 |
-|---|---|---|---|
-| `golden-path` | 否 | **1051** | `RUN_BROWSER_SMOKE=1 tests/ci/data_foundation_ci.sh` |
-| `legacy-regression` | 否 | 367 | maven + registry + `RESET=1 BUILD=0 scripts/demo_up.sh` |
+**触发**：`pull_request:`（无过滤）、`push:`、`workflow_dispatch:`
 
-## typed-pipeline-runtime.yml
+| job | check |
+|---|---|
+| `linux-runtime` | **`linux-runtime`**（必需） |
 
-触发：`pull_request` 路径 15 条，`workflow_dispatch`。
+**这是九个必需 check 里唯一不在 `ci.yml` 的两个之一**（另一个是 `quality-faults`）。
+`ci.yml` 的 `platform-only` job 里有一道守卫，断言这个 workflow 的 `pull_request` 不得带
+`paths:`——否则某些 PR 上这项必需检查永不出现，合并永远卡在 `Expected`。
 
-| Job | 必需 | 秒 | 内容 |
-|---|---|---|---|
-| `runtime-golden-path` | 否 | **1502** | `cargo fmt/clippy/test`（**无 `--locked`**）+ `tests/ci/data_foundation_ci.sh`（无 `RUN_BROWSER_SMOKE`） |
+## plugin-lifecycle.yml — 1 个 job
 
-## plugin-lifecycle.yml
+**触发**：`workflow_dispatch:`、`push:`（paths）、`pull_request:`（paths）
 
-触发：`pull_request` 路径 19 条，`push: main`，`workflow_dispatch`。
+| job | check |
+|---|---|
+| `lifecycle` | **`full TypeScript lifecycle`**（gate-only） |
 
-| Job | 必需 | 秒 |
+注意 **check 名与 job id 不同**：`lifecycle` 声明了 `name: full TypeScript lifecycle`。
+`ci-gate` 的 `DELEGATED_CHECK_OWNERS` 记录的是这个名字。
+
+运行 `p001c13_lifecycle.sh`、`p001c13_negatives.sh`、`p001c_multilang_lifecycle.sh`——
+真实 OCI：build → sign → install → deploy → upgrade → rollback → uninstall。
+
+## reliability.yml — 1 个 job
+
+**触发**：`pull_request:`（无过滤）、`push:`
+
+| job | check |
+|---|---|
+| `quality-faults` | **`quality-faults`**（必需） |
+
+## runtime-conformance.yml — 1 个 job
+
+**触发**：`workflow_dispatch:`、`push:`（paths）、`pull_request:`（paths）
+
+| job | check |
+|---|---|
+| `conformance` | `conformance`（gate-only） |
+
+TypeScript / Go / Java 三种语言的同一个协议黑盒测试。**这是唯一能支撑「全语言 PASS」
+这一说法的入口**——三种语言都在同一次 job 里跑。
+
+## staging-preview.yml — 9 个 job
+
+**触发**：`push:`（带 paths）、`schedule:`（`17 3 * * *` UTC）、`workflow_dispatch:`
+
+| job | check | 依赖 |
 |---|---|---|
-| `lifecycle`（显示名 `full TypeScript lifecycle`） | 否 | ~1000 |
+| `plan` | `plan the run tier` | — |
+| `build` | `build image` | — |
+| `deploy` | `deploy to staging host` | plan, build |
+| `smoke` | `smoke the preview` | deploy |
+| `seeded_studio` | `seeded-data studio [known-flaky]` | deploy |
+| `seeded_visual_layout` | `seeded-data visual layout [known-flaky]` | deploy |
+| `seeded_visual` | `seeded-data visual [known-flaky]` | deploy |
+| `record` | `record the acceptance evidence` | — |
+| `report` | `report to pull request` | — |
 
-## runtime-conformance.yml
+**这 9 个 check 没有一个在 ruleset 里，也没有一个在 `ci-gate` 的 `needs` 里**——它们只被
+`ci-gate` 的 PART 3（「任何红色 check 都不能只作 note」）看到。`deploy to staging host` 的
+持续失败正是由此进入 gate 判决的。
 
-触发：`pull_request` 路径 8 条，`push: main`，`workflow_dispatch`。
+三个 `[known-flaky]` job **只在 `full` tier 里运行**，并且运行步骤带
+`continue-on-error: true`（`:519`、`:1526`、`:1594`）。
 
-| Job | 必需 | 秒 |
-|---|---|---|
-| `conformance` | 否 | ~265 |
+文件自己的说明（`:52-58`）比我的转述重要，直接引：
 
-## g12-acceptance.yml
+```
+# The three seeded-data suites are labelled `[known-flaky]` and their run steps
+# are `continue-on-error`. An audit of the last twenty staging runs found every
+# one of them `skipped`: the `full` tier is reachable only through
+# `workflow_dispatch`, and nobody dispatches it nightly. So the label has never
+# been earned or disproven by a single data point, and "flaky" is a guess
+# written into a job name.
+```
 
-触发：`pull_request` 路径 29 条，`workflow_dispatch`。
+**所以这三个 suite 在常规 push 触发的部署里根本没跑**——它们 `skipped`，不是「跑了但
+被 `continue-on-error` 放过」。我在本文件上一版里写成了后者，那是错的。
 
-| Job | 必需 | 秒 |
-|---|---|---|
-| `acceptance` | 否 | 未单独测量 |
+`continue-on-error` 的代价仍然是真实的，只是范围更窄：在 **`full` tier**（nightly 或手动
+dispatch）里，这三个 browser suite 的真实失败不会让 workflow 变红。`:1497` / `:1565`
+让 `record` 步骤读「suite 自己的 outcome 而不是 job 的」，所以结果被**记录**下来了，
+只是不阻断。这一点在 `architecture-proposal.md` §4 展开。
 
-## staging-preview.yml
+## typed-pipeline-contracts.yml — 1 个 job
 
-触发：`push: main`，`push: feat/0.0.5-staging-preview`，`workflow_dispatch`（含 `sha`、`skip_image_transfer` 输入）。
+**触发**：`push:`、`pull_request:`
 
-**无 `pull_request` 触发。**
+| job | check |
+|---|---|
+| `typed-pipeline-contracts` | `typed-pipeline-contracts`（gate-only） |
 
-| Job | 秒 | 内容 |
-|---|---|---|
-| `plan` | — | 决定运行层级 |
-| `build` | — | 构建镜像 |
-| `deploy` | — | SSH 部署到 staging 主机 |
-| `smoke` | — | `/livez`、`/readyz`、`/api/v1/version`、浏览器冒烟 |
-| `seeded_studio`（`[known-flaky]`） | — | 种子数据 studio 验证 |
-| `seeded_visual_layout`（`[known-flaky]`） | — | 种子数据视觉布局 |
-| `seeded_visual`（`[known-flaky]`） | — | 种子数据视觉 |
-| `record` | — | 记录验收证据 |
-| `report` | — | 回报 PR |
+## 交叉引用矩阵
 
-权限：`contents: read`、`packages: write`、`pull-requests: write`（workflow 级）。
+哪个 workflow 会执行哪个重型脚本：
 
-## 观察
+| 脚本 | 被几个 workflow 调用 |
+|---|---|
+| `tests/ci/data_foundation_ci.sh` | **1**（`data-foundation.yml`） |
+| `tests/ci/g12_acceptance_ci.sh` | **1**（`g12-acceptance.yml`） |
+| `tests/ci/p001c13_lifecycle.sh` | **1**（`plugin-lifecycle.yml`） |
+| `scripts/build-plugins.sh` | **2** 次真正执行，且用**不同的 registry**：`data-foundation.yml` 设 `OPSWEAVE_REGISTRY=localhost:5002`；`plugin-lifecycle.yml` 用 `OPSWEAVE_TEST_REGISTRY_PORT`（5015 / 5016 两个不同端口）。`ci.yml` 只是注释里提到它，不执行 |
 
-1. **5 个 workflow 产出的 check 不是必需门禁**：`data-foundation`、`typed-pipeline-runtime`、
-   `plugin-lifecycle`、`runtime-conformance`、`g12-acceptance`。它们失败时 PR 仍可合入。
-2. **3 个必需门禁对所有 PR 无条件运行**（`platform-linux-acceptance`、`reliability` 加上
-   `ci.yml` 的全部 15 个 job），即使只改了 `docs/`。
-3. `data_foundation_ci.sh` 被执行两次，合计约 2553 秒。
-4. `typed-pipeline-runtime.yml` 的三条 cargo 命令缺 `--locked`。
+**任务书担心的「三个 workflow 重复跑 `data_foundation_ci.sh`」在当前代码上不成立**——
+只有一个。
 
-## 未测量项
+`build-plugins.sh` 的两处调用**不是冗余**，而且理由是硬的：它们指向不同的 registry 端口
+（5002 vs 5015/5016）。`plugin-lifecycle.yml:123` 明说这个隔离是为了避免撞上
+data-foundation 的 5002 registry：
 
-- `staging-preview.yml` 各 job 的分项耗时（需要一次带 artifact 的运行）。
-- `g12-acceptance.yml` 的 job 耗时（采样窗口内没有该 workflow 的运行）。
-- 排队时间与执行时间的区分：`gh run view` 的 `createdAt` 到 `startedAt` 之差可测，
-  本次未逐 run 采集。上表的 job 秒数为 `completedAt - startedAt`，已排除排队。
+```
+# data-foundation's 5002 registry when both run on one host.
+OPSWEAVE_TEST_REGISTRY_PORT: "5015"
+```
+
+合并它们会直接制造端口冲突。**这一条是「看起来重复、实际不同」的典型**，也是本文件存在的
+理由之一。

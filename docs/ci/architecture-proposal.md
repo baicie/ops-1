@@ -1,172 +1,199 @@
-# CI 架构提案与迁移计划（Phase 0）
+# CI/CD 架构提案
 
-本文件是提案，不是已完成的变更。规则集（Ruleset）的修改不在本轮执行范围内，
-需要人工审批。
+**基线 `ec7ff1f`（2026-11-19）。本文件给结论，证据在 `baseline.md` /
+`coverage-matrix.md` / `failure-analysis.md` / `workflow-inventory.md`。**
 
-## 目标分层
+不重复那些文件已有的表格。这里只写：哪里坏了、为什么、以及建议怎么改。
+
+---
+
+## 1. 一句话结论
+
+**这套 CI 的测试覆盖是好的，门禁的真实强制力是坏的。**
+
+35 个 job 里 9 个被 ruleset 强制，其余 17 个只由 `ci-gate` 判决，而 `ci-gate` **本身不是
+必需检查**。所以「插件生命周期」「多语言一致性」「分布式恢复」「安全负例」这些最贵的验收，
+实际上**没有任何东西强制它们**——它们红了，合并照常。
+
+这不是配置疏忽，是一个自我强化的结构：`ci-gate` 越准确（比如 #146 之后它会因 staging 部署
+失败而判红），它被忽略得越多，因为红是常态。
+
+## 2. 门禁结构：现状与断层
 
 ```
-L0  Static & Policy      每个 PR，< 1 分钟
-L1  Core CI              每个 PR，5-10 分钟
-L2  Impact-Based         按变更触发，10-30 分钟
-L3  Full Verification    nightly / release / 手动
+                    ┌─────────────────────────────┐
+   pull_request ───▶│ 9 个 ruleset 必需 check      │─── 真正阻止合并
+                    │ rust web web-unit contracts  │
+                    │ spec-coverage platform-only  │
+                    │ platform-image-build         │
+                    │ quality-faults linux-runtime │
+                    └─────────────────────────────┘
+
+                    ┌─────────────────────────────┐
+                    │ 17 个其它 check              │
+                    │ golden-path acceptance       │
+                    │ full TypeScript lifecycle    │
+                    │ conformance zabbix-plugin    │
+                    │ g13* b2-* artifact-budget    │
+                    │ runtime-image-build          │
+                    │ deploy to staging host ...   │
+                    └──────────────┬──────────────┘
+                                   │ 全部读入
+                                   ▼
+                    ┌─────────────────────────────┐
+                    │ ci-gate                      │─── 判 FAIL
+                    │ （不是必需 check）           │─── 但合并照常进行
+                    └─────────────────────────────┘
 ```
 
-### L0 — Static & Policy
+**实测证据，这是整份提案的支点：**
 
-| 检查 | 现状 | 目标 |
-|---|---|---|
-| `artifact-budget` | `ci.yml` | 保持 |
-| `spec-coverage` | `ci.yml` | 保持（fail-closed 机制不得削弱） |
-| `contracts`（schema） | `ci.yml` | 保持 |
-| actionlint | **无** | 新增 |
-| shellcheck | 分散在 `run_step.sh` 等 | 收拢为一个 job |
-| 影响分析器自测 | **无** | 已由 `impact.test.mjs` 提供，待接入 |
+```bash
+$ gh api "repos/baicie/ops-1/commits/9b4e4e145b0825e5e76f304cadd82c5e3dd9238b/check-runs?per_page=100" \
+    --jq '.check_runs[]|select(.name=="ci-gate")|"\(.name): \(.conclusion)"'
+ci-gate: failure
+$ gh pr view 149 --json state,mergedAt,mergeCommit --jq '"state=\(.state) merged=\(.mergedAt) commit=\(.mergeCommit.oid[0:7])"'
+state=MERGED merged=2026-11-19T04:13:23Z commit=9b4e4e1
+```
 
-### L1 — Core CI
+`ci-gate` 判 `failure`，同一棵树的 PR **合入了**。`ci-gate` 做对了它该做的每件事——
+它读到了 `deploy to staging host` 的失败并如实报告——只是它的结论没有强制力。
 
-| 检查 | 现状 | 目标 |
-|---|---|---|
-| `rust` | `ci.yml`（含 DB 断言） | 保持 |
-| `web` / `web-unit` | `ci.yml` | 保持 |
-| `platform-only` | `ci.yml` | 保持 |
-| `platform-image-build` | `ci.yml` | 保持 |
-| `quality-faults` | `reliability.yml` | 见下方「门禁归属」 |
-| `linux-runtime` | `platform-linux-acceptance.yml` | 见下方「门禁归属」 |
+这就是「测试覆盖好、门禁强制力坏」的一句话版本。
 
-### L2 — Impact-Based
+### 建议（需要人工授权，不得自行执行）
 
-由 `tests/ci/impact.mjs` 决定。当前已有的 suite 全部保留，只是改为**按需触发**而非
-「能跑就跑」。
+把 `ci-gate` 加入 ruleset 的必需 check 列表。这是一行改动，已在
+`ruleset-migration.md` 里写明完整方案与回滚。
 
-关键要求：**高风险模块变更必须触发对应验收。** 已由 `impact.test.mjs` 的反例覆盖
-（kernel gateway → g12-acceptance + data-foundation；node → linux-runtime；
-contracts → runtime-conformance）。
+**代价必须一起接受**：`ci-gate` 现在会等 delegated suite 完成（有界，35 分钟）。所以
+一个 PR 的最坏等待时间从「九项里最慢的」变成「它要求的所有 suite 里最慢的」，实测
+`data-foundation` p95 是 34 分钟。这是用时间换真实性。
 
-### L3 — Nightly / Release
+**如果不接受这个代价**，替代方案是把 `golden-path`、`acceptance`、
+`full TypeScript lifecycle`、`conformance` 加进 ruleset——但那样会在路径不匹配的 PR 上
+制造永久 Pending（它们的 workflow 都带 `paths` 过滤），比现状更糟。两者相权，`ci-gate`
+是唯一自洽的选择。
 
-尚未建立。见「未完成」。
+## 3. 测试重复：任务书担心的重复不存在，真正的问题是别的
 
-## 门禁归属（本轮的关键决策）
+任务书列了「三个 workflow 重复执行 `cargo fmt` / `cargo clippy` / `cargo test` /
+`data_foundation_ci.sh`」。逐项核实（`workflow-inventory.md` 末尾有矩阵）：
 
-现状：9 个必需检查分布在 3 个 workflow。
-
-| 检查 | 产出 workflow |
+| 任务书的判断 | 实测 |
 |---|---|
-| rust, web, web-unit, contracts, spec-coverage, platform-only, platform-image-build | `ci.yml` |
-| linux-runtime | `platform-linux-acceptance.yml` |
-| quality-faults | `reliability.yml` |
+| `data_foundation_ci.sh` 在三个 workflow 跑 | **只有一个**（`data-foundation.yml`） |
+| `cargo test` 重复 | `rust` job 跑 `--workspace`；`platform-only` 跑两种 feature set。**这是三个不同的编译配置，不是重复** |
+| `build-plugins.sh` 重复 | 两处，但 registry 端口不同（5002 vs 5015/5016），合并会直接撞端口 |
 
-`ci-gate` 只能看见 `ci.yml` 内的 job。**它明确声明这一点**，把另外两个标为
-`delegated`，而不是假装覆盖。
+**真正的重复不在任务书列的地方。** 它在这里：
 
-三个可选方案：
+`ci.yml` 的 18 个 job 里，`rust`、`web`、`web-unit`、`contracts`、`platform-only`、
+`platform-image-build` 各自独立 `pnpm install` / `cargo build`。`Swatinem/rust-cache` 与
+pnpm store 缓存缓解了网络成本，但**编译本身仍然各做各的**。`ci.yml` 的 p50 是 1462s，
+其中并行度已经很高，真正的改进空间在 suite 自身的运行时长（`data-foundation` 34 分钟），
+不在 job 编排。
 
-| 方案 | 优点 | 缺点 |
-|---|---|---|
-| **A. 保持现状 + delegated 声明**（本轮采用） | 零风险；Ruleset 不用改；gate 诚实 | gate 不是唯一门禁，Ruleset 仍需单独强制两项 |
-| B. 把两个 job 移进 `ci.yml` | gate 单一权威 | `linux-runtime` 429 行，`ci.yml` 会超过 2000 行；check 名不变但归属变了 |
-| C. `workflow_run` 聚合 | 目录干净 | **无法检测「某 workflow 被 path filter 跳过」**，事件不会触发；brief 明确禁止 |
+**建议：不合并这些 job。** 它们是不同 feature set / 不同断言面，合并会牺牲隔离换来的
+诊断能力。若要省时间，应该优化 `data_foundation_ci.sh` 的 45 步本身——那是 TASK-24 的范围，
+本轮不做。
 
-**选 A 的理由**：B 的收益是「单一权威」，代价是 `ci.yml` 膨胀成巨型文件，与 brief
-「复杂逻辑放脚本」的要求冲突；C 有 brief 明令禁止的语义缺陷。
+## 4. 发布可信度：三个独立缺陷
 
-A 的代价是 Ruleset 仍需保留 `linux-runtime` 与 `quality-faults` 两项——但这正是**当前
-状态**，所以 A 是零风险迁移。
+### 4.1 发布链从不 `activate`（B-18）
 
-## 迁移阶段
+```
+bundle → install → deploy --wait
+```
 
-### 阶段 A（本轮已做）
+没有 `activate`。而 `route_candidates` 要求 `r.status = 'ACTIVE'`。所以这个脚本装好并部署
+的插件**永远不会被 Gateway 路由**——即使实例健康、容量充足。
 
-- 新增 `ci-gate` job，**不是必需检查**。
-- 保留全部 9 个旧必需检查，一个字不改。
-- 在真实 PR 上观察 `ci-gate` 的判决。
+这是「点治理就退出登录」的第二个根因，与容量问题独立且更根本。
 
-### 阶段 B（需要人工）
+### 4.2 三个 browser suite 在常规部署里 `skipped`
 
-在至少 3 个真实 PR 上同时运行新旧体系，比对：
+`staging-preview.yml:52-58` 自己写明：三个 seeded-data suite 只在 `full` tier 运行，
+而 `full` tier 只能通过 `workflow_dispatch` 到达，**没人 nightly dispatch**。所以它们在
+常规 push 部署里是 `skipped`，名字里的 `[known-flaky]` 从未被任何数据点证实或推翻。
 
-| 维度 | 判据 |
+### 4.3 `verify_only` 手动运行不发布
+
+`if: inputs.verify_only != true` 跳过发布。nightly（`schedule`）不受影响——`schedule`
+没有 inputs，`verify_only` 取默认 `false`。但一次**手动**的 verify-only 运行无法发现插件
+回归。
+
+## 5. 供应链与权限：现状是健康的
+
+| 项 | 状态 |
 |---|---|
-| 检查覆盖 | `ci-gate` 的 `required` 集合 ⊇ Ruleset 的 9 项（除 delegated） |
-| 失败一致性 | 任一必需检查红时，`ci-gate` 必须红 |
-| 跳过策略 | 没有 `ci-gate` 绿而某必需检查 skipped 的情况 |
-| 总耗时 | `ci-gate` 自身 < 1 分钟 |
+| workflow 级权限 | `contents: read` 为默认；`ci-gate` 额外 `checks: read` + `actions: read`，只读 |
+| PR 是否接触部署密钥 | **否**：`STAGING_*` secrets 只在 `staging-preview.yml` 的 deploy job 里 |
+| Action 固定方式 | 见 §5.1 |
+| 制品 digest | 部署用 `docker manifest inspect` 取 digest（`deploy-staging.sh`），但**发布脚本只核对本地 `RepoDigests`**（B-19） |
+| SBOM / provenance | 未见；`build` job 只推镜像 |
 
-### 阶段 C（需要人工批准）
+### 5.1 Action 版本固定的实测
 
-提交 Ruleset 变更方案：
+```bash
+$ grep -rhoE 'uses: [^ ]+' .github/workflows/ | sed 's/uses: //' | sort | uniq -c | sort -rn
+  32 actions/checkout@v4
+  21 actions/setup-node@v4
+  15 pnpm/action-setup@v4
+  14 dtolnay/rust-toolchain@stable
+  14 actions/upload-artifact@v4
+  13 Swatinem/rust-cache@v2
+   3 actions/setup-java@v4
+   3 actions/setup-go@v5
+   2 actions/setup-python@v5
+   1 docker/setup-buildx-action@v3
+   1 docker/login-action@v3
+   1 docker/build-push-action@v6
+   1 actions/download-artifact@v4
+```
 
-**新增**：`ci-gate`
+13 个不同的 action，**全部按可变 tag 固定**（`@v4`、`@v5`、`@stable`），没有一个用完整
+commit SHA。`dtolnay/rust-toolchain@stable` 尤其要提：`@stable` 是**移动目标**，它指向的
+toolchain 会随上游变化，所以同一个 SHA 的仓库在不同时间可能用不同的 Rust 版本编译。
 
-**保留**：全部 9 项
+**这是未做的加固项，不是已完成的。** 按 SHA 固定需要为 13 个 action × 各自仓库解析一次
+commit，并且此后由 Dependabot 或人工更新——工作量真实，收益是「上游 tag 被重指」这一类
+供应链攻击不再可能。本轮不做，列在这里而不是写成「已加固」。
 
-**移除**：无
+## 6. L0–L3 分层：现状与建议
 
-即 Ruleset 变成 10 项。`ci-gate` 是**附加**保护，不替代任何现有检查。
+任务书要求四层。现状是**两层半**：
 
-### 阶段 D（需要人工执行）
-
-`gh api` 修改 Ruleset 需要管理员权限，本轮不执行。
-
-### 阶段 E（需要人工验证）
-
-- 一个普通 PR：`ci-gate` 绿，可合并。
-- 一个高风险 PR（改 `apps/kernel/src/gateway.rs`）：`ci-gate` 列出 delegated 项，绿，可合并。
-- 一个故意注入 `cargo fmt` 错误的 PR：`ci-gate` 红，不可合并。
-
-## 回退方案
-
-`ci-gate` 不在 Ruleset 中时，删除 `ci.yml` 里的该 job 即可，无副作用。
-
-一旦加入 Ruleset：从 Ruleset 移除 `ci-gate` 即可回退，其它 9 项不受影响。
-
-## 未完成项
-
-| 项 | 状态 | 原因 |
+| 层 | 现状 | 缺口 |
 |---|---|---|
-| Nightly workflow | 未建立 | 需要先确定哪些 L3 套件在 nightly 有意义 |
-| Release Gate | 未建立 | 依赖 staging 链重构，本轮未动 |
-| `staging-preview.yml` 重构 | **未动** | 涉及真实主机与密钥，brief 要求人工批准 |
-| Ruleset 修改 | **未做** | brief 明令禁止。方案见阶段 C |
-| actionlint / shellcheck 接入 CI | 未做 | 本机 actionlint 干净；shellcheck 有 2 条既有 SC2125 警告，清零是独立改动 |
-| Rust 编译缓存 | **已做** | `Swatinem/rust-cache@v2` + `shared-key`，14 处安装点共用（接入后 `contracts` 新增一处） |
-| pnpm / Docker / Playwright 缓存 | 未做 | pnpm store 已有 `cache: pnpm`；Docker 只影响 staging 与 image-build，本轮未测 |
-| SBOM / Provenance | 未做 | 需要 release 链先存在 |
-| `contracts` 同名冲突 | **已修** | 见下节；改名的是 `typed-pipeline-contracts`，Ruleset 要的 `contracts` 一个字没动 |
-| 三个 `[known-flaky]` 套件从未运行 | **已定位，已加数据源** | 见 `coverage-matrix.md`；每日全量 certification 产生失败率 |
-| `contracts` job 的 bundle 校验从未执行 | **已修** | CI 现在先构建真实签名 bundle 再验证，附 8 个反例 |
+| L0 静态与策略 | `spec-coverage`（必需）、`artifact-budget`（gate-only）、`contracts`（必需） | 无 actionlint、无 shellcheck、无 workflow 安全扫描 |
+| L1 核心 CI | `rust`、`web`、`web-unit`、`platform-only`、`platform-image-build`（全部必需） | — |
+| L2 影响驱动验收 | `scope` 决定 `g13*` 与 `runtime-image-build`；但 `data-foundation`、`g12-acceptance`、`plugin-lifecycle`、`runtime-conformance` 由**各自 workflow 的 paths 过滤**决定，不经过 `scope` | 两套判定机制并存，`check-impact-consistency.mjs` 在比对它们（52 个 warning） |
+| L3 全量 | 无 nightly 全量 workflow | `staging-preview` 有 `schedule`，但它部署，不是纯验证 |
 
-## `contracts` 同名冲突：实际怎么修的
+**建议（按性价比排序）**：
 
-先前这里写的是「改名会让 Ruleset 里的 `contracts` 永久 Pending」。**那个判断是错的。**
+1. **把 `ci-gate` 变成必需** —— 一行 ruleset 改动，让 17 个 check 的判决生效。最高杠杆。
+2. **补 actionlint / shellcheck 到 L0** —— 便宜，能抓 YAML 与 Shell 的真错。
+3. **把 `check-impact-consistency.mjs` 的 52 个 warning 分类** —— 它们现在是噪音，
+   降噪之后才能当门禁用。
+4. **新增纯验证的 nightly** —— 复用现有 suite，只在 `schedule` 触发，不部署。
 
-两个 workflow 各自报告一个叫 `contracts` 的 check：
+不做的：不为「四层」而拆文件。当前 9 个 workflow 的划分是按**触发条件与运行时长**分的，
+这是对的划分依据；强行收敛成 6 个会牺牲诊断能力。
 
-| Workflow | 脚本 | 改名后 |
-|---|---|---|
-| `ci.yml` | `validate_contracts.py` | 保持 `contracts`（Ruleset 要的就是它） |
-| `typed-pipeline-contracts.yml` | `validate_typed_pipeline.py` | `typed-pipeline-contracts` |
+## 7. 本轮的边界
 
-Ruleset 要求的名字是 `contracts`，而它由 `ci.yml` 提供——那个 job 从未改名。改的是**另一个**
-workflow 的 job 名，Ruleset 根本没有引用过它。所以不存在 Pending。
+- **不修改 ruleset**（任务书 §12.6 / §13 禁止）。
+- **不触发真实 staging 部署**。
+- **不删除任何旧 workflow**：`typed-pipeline-runtime.yml` 已经在上一轮被移除，本轮不再动。
+- 本轮实际改动：文档修正、`GATE_BUDGET_MS` 接线与预算修正、以及若干测试。
 
-实测：改名前同一 PR 上 `contracts` 出现三次（两个 workflow × 两个事件），改名后
-`contracts` 一次、`typed-pipeline-contracts` 一次。新 check 可见但不阻塞合并；把它提升为
-必需是人来决定的事（阶段 C）。
+## 8. 复现
 
-## `contracts` 同名冲突的迁移建议
-
-现状：`ci.yml` 与 `typed-pipeline-contracts.yml` 都产出 `contracts`。
-
-风险：合并时无法知道是哪一个通过的。
-
-建议（需要人工）：
-
-1. 把 `typed-pipeline-contracts.yml` 的 job 名改为 `typed-pipeline-contracts`。
-2. Ruleset 保留 `contracts`（schema 校验），**新增** `typed-pipeline-contracts`。
-3. 观察一个 PR，确认两者都出现。
-4. 之后可考虑把两者合并为一个 job，但那会改变语义，需要单独决定。
-
-本轮不改：改名会让 Ruleset 里的 `contracts` 在新 workflow 上永久 Pending，直到
-Ruleset 同步更新——而在没有人工批准的情况下不能动 Ruleset。
+```bash
+gh api repos/baicie/ops-1/rulesets/26958761 --jq '.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context'
+node tests/ci/check-spec-coverage.mjs
+node tests/ci/check-impact-consistency.mjs
+grep -rhoE 'uses: [^ ]+' .github/workflows/ | sort | uniq -c | sort -rn
+```
