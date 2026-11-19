@@ -1546,7 +1546,7 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         max_instances_per_node: state.config.max_instances_per_node as usize,
     };
     let mut missing = 0_i32;
-    let mut placement_rejection: Option<(String, PlacementRejection)> = None;
+    let mut placement_rejection: Option<(String, PlacementRejection, Uuid)> = None;
 
     for slot in 0..deployment.desired_replicas {
         let current = by_slot.get(&slot).cloned();
@@ -1578,10 +1578,10 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
                     Err(rejection) => {
                         let furthest = placement_rejection
                             .as_ref()
-                            .map(|(_, best)| rejection.progress() > best.progress())
+                            .map(|(_, best, _)| rejection.progress() > best.progress())
                             .unwrap_or(true);
                         if furthest {
-                            placement_rejection = Some((node.name.clone(), rejection));
+                            placement_rejection = Some((node.name.clone(), rejection, node.id));
                         }
                         false
                     }
@@ -1740,13 +1740,29 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
     let (status, reason) = if deployment.desired_replicas == 0 {
         ("DISABLED", Some("Desired replicas is zero".to_string()))
     } else if missing == deployment.desired_replicas {
-        (
-            "PENDING",
-            Some(match placement_rejection.as_ref() {
-                Some((node_name, rejection)) => placement_failure_reason(node_name, rejection),
-                None => PLACEMENT_FAILURE.to_string(),
-            }),
-        )
+        // Name the occupants of the node that refused us.
+        //
+        // "4 instances already scheduled against a per-node limit of 4" is a true
+        // message that sent four staging deploys and a week of investigation at
+        // the wrong target, because it does not say WHOSE instances they are. A
+        // capacity rejection is the one place where the numbers alone are never
+        // enough: the operator's next action depends entirely on whether the
+        // occupants are this plugin's own stale attempts, another plugin that
+        // should be moved, or a limit that should be raised.
+        let occupied = match placement_rejection.as_ref() {
+            Some((node_name, rejection, node_id)) => {
+                let mut line = placement_failure_reason(node_name, rejection);
+                if rejection.code() == "INSTANCE_CAPACITY_EXCEEDED" {
+                    let occupants = capacity_occupants(&state.db, *node_id).await;
+                    if !occupants.is_empty() {
+                        line.push_str(&format!("; occupied by {}", occupants.join(", ")));
+                    }
+                }
+                Some(line)
+            }
+            None => Some(PLACEMENT_FAILURE.to_string()),
+        };
+        ("PENDING", occupied)
     } else if ready == deployment.desired_replicas {
         if is_effective {
             ("ACTIVE", None)
@@ -2110,13 +2126,13 @@ async fn diagnose_placement(
     reserved: &HashMap<Uuid, (i64, i64)>,
     used_nodes: &HashMap<Uuid, usize>,
     global_counts: &HashMap<Uuid, usize>,
-) -> anyhow::Result<Option<(String, PlacementRejection)>> {
+) -> anyhow::Result<Option<(String, PlacementRejection, Uuid)>> {
     let nodes = sqlx::query_as::<_, NodeRow>(
         "SELECT * FROM kernel.nodes WHERE revoked_at IS NULL ORDER BY name",
     )
     .fetch_all(&state.db)
     .await?;
-    let mut furthest: Option<(String, PlacementRejection)> = None;
+    let mut furthest: Option<(String, PlacementRejection, Uuid)> = None;
     for node in &nodes {
         let usage = NodeUsage::of(node, reserved, used_nodes, global_counts);
         let Err(rejection) = evaluate_node(node, usage, placement) else {
@@ -2124,13 +2140,51 @@ async fn diagnose_placement(
         };
         let further = furthest
             .as_ref()
-            .map(|(_, best)| rejection.progress() > best.progress())
+            .map(|(_, best, _)| rejection.progress() > best.progress())
             .unwrap_or(true);
         if further {
-            furthest = Some((node.name.clone(), rejection));
+            furthest = Some((node.name.clone(), rejection, node.id));
         }
     }
     Ok(furthest)
+}
+
+/// Who is actually holding the node's slots, for the capacity rejection message.
+///
+/// TASK-21 lists "a container that does not exist but occupies capacity" and
+/// "registry pull failure confused with node capacity failure" as the diagnostics
+/// that matter. The message an operator sees today is:
+///
+///     4 instances already scheduled on this node against a per-node limit of 4
+///
+/// which names the numbers and not the occupants - so the only way to answer
+/// "occupied by WHOM" is to open psql on the staging host. Measured on
+/// 2026-11-19: the deploy failed four times with that message and the four
+/// occupants were never identified, from the log or the API.
+///
+/// This returns `plugin@version`, one per live instance, ordered so the output is
+/// stable across runs. Cheap: it runs only on the rejection path, once per
+/// reconcile pass at most.
+///
+/// The status filter is the same one the capacity aggregates use. It has to be:
+/// a diagnostic that disagrees with the decision it explains is worse than none.
+async fn capacity_occupants(db: &sqlx::PgPool, node_id: Uuid) -> Vec<String> {
+    sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT DISTINCT d.plugin_id || '@' || d.version
+        FROM kernel.plugin_instances i
+        JOIN kernel.plugin_deployments d ON d.id = i.deployment_id
+        WHERE i.node_id = $1
+          AND i.desired_action = 'START'
+          AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+          AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)
+        ORDER BY 1
+        "#,
+    )
+    .bind(node_id)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default()
 }
 
 fn placement_failure_reason(node_name: &str, rejection: &PlacementRejection) -> String {
@@ -3001,6 +3055,84 @@ mod tests {
             assert_eq!(
                 count, 1,
                 "a rebuilt instance is a live attempt and holds its slot"
+            );
+        }
+
+        /// A capacity rejection must name its occupants.
+        ///
+        /// The message that sent this round at the wrong target four times:
+        ///
+        ///     4 instances already scheduled on this node against a per-node
+        ///     limit of 4
+        ///
+        /// Every number is correct and the operator still cannot act, because the
+        /// next step depends on WHOSE instances they are: this plugin's own stale
+        /// attempts (retry after cleaning), another plugin (move it, or raise the
+        /// limit), or a genuinely undersized node (resize).
+        ///
+        /// The occupant query must use the SAME status filter as the capacity
+        /// aggregates it explains - a diagnostic that disagrees with the decision
+        /// is worse than none.
+        #[tokio::test]
+        async fn a_capacity_rejection_names_who_is_occupying_the_node() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let node_id = node(&pool).await;
+            let a = format!("test.occupant.a.{}", Uuid::new_v4());
+            let b = format!("test.occupant.b.{}", Uuid::new_v4());
+
+            for (plugin, version) in [(&a, "1.0.0"), (&b, "2.0.0")] {
+                let (deployment_id, _) = deployment_with_one(
+                    &pool,
+                    node_id,
+                    &Uuid::new_v4().to_string(),
+                    "READY",
+                    Some("c1"),
+                    None,
+                )
+                .await;
+                sqlx::query(
+                    "UPDATE kernel.plugin_deployments SET plugin_id=$2, version=$3 WHERE id=$1",
+                )
+                .bind(deployment_id)
+                .bind(plugin)
+                .bind(version)
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+
+            // Ask about this node only, so the shared database cannot contribute.
+            let occupants: Vec<String> = sqlx::query_scalar(
+                r#"
+                SELECT DISTINCT d.plugin_id || '@' || d.version
+                FROM kernel.plugin_instances i
+                JOIN kernel.plugin_deployments d ON d.id = i.deployment_id
+                WHERE i.node_id = $1
+                  AND i.desired_action = 'START'
+                  AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+                  AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)
+                ORDER BY 1
+                "#,
+            )
+            .bind(node_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+
+            assert!(
+                occupants.contains(&format!("{a}@1.0.0")),
+                "the occupant list must name the first plugin: {occupants:?}"
+            );
+            assert!(
+                occupants.contains(&format!("{b}@2.0.0")),
+                "and the second: {occupants:?}"
+            );
+            assert_eq!(
+                occupants.len(),
+                2,
+                "and only what is actually there: {occupants:?}"
             );
         }
 
