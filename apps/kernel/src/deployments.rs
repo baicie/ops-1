@@ -3513,4 +3513,283 @@ mod tests {
             assert_eq!(ab_cpu, 2 * 500);
         }
     }
+
+    /// One node, two replicas, `maxInstancesPerNode: 1` - the exact request
+    /// `publish-data-plugins.sh` used to make with the removed `--replicas 2`
+    /// default - driven through the real `reconcile_once` against PostgreSQL.
+    ///
+    /// The unit tests above prove `evaluate_node` refuses slot 2. This proves what
+    /// that refusal *becomes*: the deployment must never report READY, because
+    /// `ready == desired_replicas` is the only path to READY
+    /// (`deployments.rs:1762`). A rule that refuses a placement is harmless if the
+    /// status still converges; the failure this test guards against is a
+    /// deployment that sits at PREPARING forever while a publish waits on it.
+    #[cfg(test)]
+    mod single_node_replica_policy {
+        use crate::state::{AppState, RateLimiter};
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use std::sync::Arc;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options)
+                .await
+                .expect("cannot connect to the test database");
+            crate::db::migrate(&pool)
+                .await
+                .expect("the test database rejected the migrations");
+            Some(pool)
+        }
+
+        fn state(pool: &PgPool) -> AppState {
+            AppState {
+                config: Arc::new(crate::config::Config::from_env()),
+                db: pool.clone(),
+                http: reqwest::Client::new(),
+                cursor_secret: Arc::new(vec![0u8; 32]),
+                rate_limiter: Arc::new(RateLimiter::default()),
+            }
+        }
+
+        struct Fixture {
+            deployment: Uuid,
+            snapshot: serde_json::Value,
+        }
+
+        /// A single READY node with headroom, one package, one deployment asking
+        /// for `replicas` instances at `maxInstancesPerNode`.
+        async fn fixture(pool: &PgPool, replicas: i32, max_per_node: i32) -> Fixture {
+            let tag = Uuid::new_v4().simple().to_string();
+            let plugin = format!("test.rep.{tag}");
+            let publisher = format!("pub-{tag}");
+            let node = Uuid::new_v4();
+            let package = Uuid::new_v4();
+            let deployment = Uuid::new_v4();
+            let snapshot = serde_json::json!({
+                "cpuCores": 8,
+                "memoryTotalBytes": 16i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0,
+            });
+
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+
+            // `last_seen_at = now()` matters: `reconcile_once` marks a node
+            // UNREACHABLE before planning, and a stale row would make this test
+            // fail on node health rather than on the replica limit.
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at,
+                    data_endpoint, resource_snapshot)
+                 VALUES ($1,$2,'x','tok',1,'linux','amd64','{}'::jsonb,'[]'::jsonb,
+                         'READY',now(),now(),'http://127.0.0.1:1',$3)",
+            )
+            .bind(node)
+            .bind(format!("rep-node-{tag}"))
+            .bind(&snapshot)
+            .execute(pool)
+            .await
+            .expect("node");
+
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            .bind(package)
+            .bind(&plugin)
+            .bind(&publisher)
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .execute(pool)
+            .await
+            .expect("package");
+
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 VALUES ($1,$2,$3,'1.0.0',$4,1,$5,
+                         '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'PENDING',now(),now())",
+            )
+            .bind(deployment)
+            .bind(&plugin)
+            .bind(package)
+            .bind(replicas)
+            .bind(serde_json::json!({ "nodeSelector": {}, "maxInstancesPerNode": max_per_node }))
+            .execute(pool)
+            .await
+            .expect("deployment");
+
+            let _ = node;
+            Fixture {
+                deployment,
+                snapshot,
+            }
+        }
+
+        async fn status_of(pool: &PgPool, deployment: Uuid) -> (String, Option<String>, i64) {
+            let (status, reason) = sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(deployment)
+            .fetch_one(pool)
+            .await
+            .expect("deployment row");
+            let instances: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances WHERE deployment_id=$1",
+            )
+            .bind(deployment)
+            .fetch_one(pool)
+            .await
+            .expect("instance count");
+            (status, reason, instances)
+        }
+
+        /// The counterfactual this whole task exists for: on one node, a
+        /// two-replica deployment cannot converge, and the reason names the limit
+        /// rather than leaving an operator to guess.
+        #[tokio::test]
+        async fn two_replicas_on_one_node_never_reach_ready() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let f = fixture(&pool, 2, 1).await;
+            let state = state(&pool);
+
+            // Two reconcile passes: a single pass could leave PENDING for reasons
+            // that have nothing to do with capacity, and the claim is "never".
+            for _ in 0..2 {
+                crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                    .await
+                    .expect("reconcile");
+            }
+
+            let (status, reason, instances) = status_of(&pool, f.deployment).await;
+            assert_ne!(
+                status, "READY",
+                "one node with maxInstancesPerNode=1 cannot satisfy 2 replicas"
+            );
+            assert_ne!(status, "ACTIVE", "nor can it be activated");
+            // PREPARING, not PENDING - measured, and the distinction is the
+            // interesting part. PENDING is reserved for "not one replica could be
+            // placed" (`missing == desired_replicas`, deployments.rs:1744) and
+            // carries the placement rejection with its occupants. Here slot 0 DID
+            // land, so `missing` is 1 against a desired 2, and the status falls
+            // through to the `starting > 0` branch: the deployment reports
+            // PREPARING forever with a half-populated replica set.
+            //
+            // That is worse for an operator than PENDING would be: "1/2 ready"
+            // reads like progress, and there is no rejection message anywhere,
+            // because the refusal happened in the planner for slot 1 and nothing
+            // writes it to `status_reason`. The publish then waits its full 300 s
+            // and reports a timeout.
+            assert_eq!(
+                status, "PREPARING",
+                "a half-placed deployment reports PREPARING, not PENDING: {reason:?}"
+            );
+            // MEASURED, and not what I expected: BOTH slots exist.
+            //
+            // I predicted the planner would refuse slot 1 and never create it. It
+            // creates it, because `global_instance_counts` and `used_nodes` both
+            // exclude an instance that is UNHEALTHY/UNREACHABLE with no container
+            // (`is_ghost_instance`, deployments.rs:1491 and 1529). A freshly
+            // planned instance is STARTING, and once the node stops reporting it
+            // becomes UNREACHABLE with no container - at which point it stops
+            // counting toward `max_instances_per_deployment` (1) and the next pass
+            // happily plans slot 1 onto the same node.
+            //
+            // So the per-deployment limit does not bound the number of slots a
+            // single deployment can accumulate on one node; it only bounds how
+            // many are non-ghost at once. On a single-node host that is how a
+            // deployment ends up with more instance rows than the topology can
+            // ever run.
+            assert_eq!(
+                instances, 2,
+                "both slots get rows; the ghost-exclusion rule is what lets the second \
+                 one through (see the comment above)"
+            );
+            // The observability gap, asserted rather than described: nothing tells
+            // the operator that the second replica was refused for capacity.
+            let reason_text = reason.unwrap_or_default();
+            assert!(
+                !reason_text.contains("INSTANCE_CAPACITY_EXCEEDED"),
+                "if this now carries the rejection, the gap this test documents has been \
+                 fixed and the assertion should say so: {reason_text}"
+            );
+            assert!(
+                reason_text.contains("/2"),
+                "it reports a replica ratio against the target it cannot meet: {reason_text}"
+            );
+            assert!(
+                reason_text.contains("0/2"),
+                "and the ratio is 0/2 here: the slots exist but nothing is READY, because \
+                 the node never accepted them: {reason_text}"
+            );
+
+            // The node had ample CPU and memory the whole time. Without this the
+            // test would pass on a resource rejection and prove the wrong rule.
+            assert_eq!(f.snapshot["cpuCores"], 8);
+
+            sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+                .bind(f.deployment)
+                .execute(&pool)
+                .await
+                .ok();
+        }
+
+        /// The same topology with an explicit single replica converges. This is
+        /// the control: without it, "two does not converge" could be a statement
+        /// about a broken fixture.
+        #[tokio::test]
+        async fn one_replica_on_one_node_is_placed() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let f = fixture(&pool, 1, 1).await;
+            let state = state(&pool);
+
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+
+            let (_, reason, instances) = status_of(&pool, f.deployment).await;
+            assert_eq!(
+                instances, 1,
+                "the one placeable slot must be created; reason: {reason:?}"
+            );
+
+            sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+                .bind(f.deployment)
+                .execute(&pool)
+                .await
+                .ok();
+        }
+    }
 }
