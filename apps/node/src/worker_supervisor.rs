@@ -159,7 +159,64 @@ pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
     })
 }
 
+/// The delay before restarting a worker that has failed `failures` times.
+///
+/// Extracted from `backoff` so the curve can be asserted without sleeping. It had
+/// no test at all, and it contains three arithmetic steps that can each go wrong
+/// silently: the shift is capped at 4 (so `1 << failures` cannot overflow), the
+/// multiply is saturating, and the result is capped at 30 s.
+///
+/// The failure this guards against is not a crash - it is a supervisor that stops
+/// backing off. A worker that fails instantly and is restarted instantly is a busy
+/// loop that fills the log and burns CPU on the node; the cap is what prevents it,
+/// and nothing was checking that the cap exists.
+fn backoff_seconds(failures: u32) -> u64 {
+    2u64.saturating_mul(1u64 << failures.min(4)).min(30)
+}
+
 async fn backoff(failures: u32) {
-    let seconds = 2u64.saturating_mul(1u64 << failures.min(4));
-    tokio::time::sleep(Duration::from_secs(seconds.min(30))).await;
+    tokio::time::sleep(Duration::from_secs(backoff_seconds(failures))).await;
+}
+
+#[cfg(test)]
+mod backoff_tests {
+    use super::backoff_seconds;
+
+    #[test]
+    fn the_delay_doubles_until_it_is_capped() {
+        // 2 * 2^n for n = 0..=4, then flat.
+        assert_eq!(backoff_seconds(0), 2);
+        assert_eq!(backoff_seconds(1), 4);
+        assert_eq!(backoff_seconds(2), 8);
+        assert_eq!(backoff_seconds(3), 16);
+        assert_eq!(
+            backoff_seconds(4),
+            30,
+            "the cap applies at n = 4 (32 would be uncapped)"
+        );
+    }
+
+    #[test]
+    fn the_delay_never_exceeds_the_cap() {
+        // The cap is what stops an instantly-failing worker from becoming a busy
+        // loop. Assert it for a range that includes the shift's own clamp.
+        for failures in 0..64u32 {
+            let seconds = backoff_seconds(failures);
+            assert!(
+                seconds <= 30,
+                "failures={failures} produced {seconds}s, above the 30s cap"
+            );
+            assert!(
+                seconds >= 2,
+                "failures={failures} produced {seconds}s, below the floor"
+            );
+        }
+    }
+
+    #[test]
+    fn a_large_failure_count_does_not_overflow() {
+        // `1u64 << failures` would overflow at 64; `.min(4)` is what prevents it.
+        // This asserts the clamp is present rather than trusting it by inspection.
+        assert_eq!(backoff_seconds(u32::MAX), 30);
+    }
 }
