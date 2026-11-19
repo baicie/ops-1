@@ -412,6 +412,45 @@ opsweave.data-integration@0.0.17455 already installed; leaving it
 
 **未验证**：该路径只在插件内容变化时触发，而本轮没有内容变化（正是它触发跳过的原因）。
 
+### 第一次诚实的失败，和它揭示的第三层
+
+`9b4e4e1`（2026-11-19）的 `deploy to staging host` 是 **failure**——而这正是修好之后
+应有的结果：
+
+```
+opsweave.data-catalog@0.0.17455 already installed; re-checking its deployment
+  PENDING 0/0 ready ([INSTANCE_CAPACITY_EXCEEDED] node staging-node:
+  4 instances already scheduled on this node against a per-node limit of 4)
+Error: timed out waiting for deployment readiness
+```
+
+之前四次「success」都在第一行 `continue` 掉了。现在它调用 `deploy --wait`，失败，
+整个 run 失败。**红比绿诚实。**
+
+#### 但它同时说明 ADR-027 帮不上这个场景
+
+ADR-027 的排空发生在 `activate` 里。而这里的部署**从未成功到可以激活**——`deploy --wait`
+在 READY 之前就超时了，`activate` 根本没被调用。所以旧 deployment 不会进入 DRAINING。
+
+那 4 个占位实例属于**同一个 version 的 deployment**（`UNIQUE (plugin_id, version)` 意味着
+这个版本只有一行 deployment）。它们是反复 redeploy 留下的：每次 redeploy 把
+`generation+1` 并把实例重置为 `STARTING`，但**上一轮的容器/实例仍在占占位**——
+`reconcile_deployment` 只按 `slot < desired_replicas` 回收，而同 slot 的旧 attempt 不会被单独停止。
+
+所以完整因果链是三层的：
+
+1. **`continue` 跳过部署**（B-14，已修）——让失败看起来像成功，问题被隐藏三周。
+2. **升级不回收旧版本**（B-13 / ADR-027，已修）——解释了跨版本的槽位泄漏，
+   但对当前这个「同版本反复重试」的场景不适用。
+3. **同版本的旧 attempt 不释放槽位**（新发现，未修）——这是当前 4/4 的直接原因。
+
+第 3 层需要单独的修复：redeploy 时应当先停掉本 deployment 的现有实例（或确认它们已被停），
+再重置为 STARTING。目前 `UPDATE ... SET deployment_generation=$2, desired_action='START',
+state='STARTING'` 直接覆盖状态，但节点上的旧容器没有对应的终止路径。
+
+这一层**本轮未修**：它需要先决定「同一版本的重试是否应当复用容器」，而这与 ADR-026 的
+发布状态机是同一个问题（DEPLOYING 失败后，下一次是重试还是重建）。记为 NEEDS_DECISION。
+
 ### 因果闭环：为什么「点治理就退出登录」还没修好
 
 这轮把整条链查通了，而结论是：**代码已经对，线上仍是旧镜像。**
