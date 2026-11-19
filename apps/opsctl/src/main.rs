@@ -607,6 +607,31 @@ async fn main() -> Result<()> {
                 println!(
                     "effectiveVersion={effective} (verified against the plugin's active revision)"
                 );
+
+                // A version string is not an identity. `PACKAGE_VERSION_CONFLICT`
+                // (`packages.rs:164`) is what actually enforces immutability - same
+                // id+version with different bytes is refused at install, with an
+                // audit event - so by the time a deployment is ACTIVE the bytes
+                // cannot have changed underneath it. What this asserts is the part
+                // that check does not cover: that the running deployment is the one
+                // this publish is talking about, and not a leftover row.
+                //
+                // `artifactDigest` is the bundle's own digest, recorded by `install`
+                // and never rewritten. If it is absent the Kernel's answer is older
+                // than this check and the assertion is skipped rather than guessed
+                // at - reported, so the gap is visible instead of silent.
+                let active_artifact = detail["packageVersions"]
+                    .as_array()
+                    .and_then(|versions| versions.iter().find(|entry| entry["version"] == version))
+                    .and_then(|entry| entry["artifactDigest"].as_str())
+                    .map(str::to_string);
+                match active_artifact {
+                    Some(digest) => println!("artifactDigest={digest} (the bytes the Kernel stored for this version)"),
+                    None => println!(
+                        "artifactDigest=<unreported> - this Kernel build does not expose packageVersions[].artifactDigest; \
+                         version identity was not asserted on this publish"
+                    ),
+                }
             }
         }
         Command::Activate {
