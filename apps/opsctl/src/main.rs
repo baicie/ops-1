@@ -76,6 +76,17 @@ enum Command {
         selector: Option<String>,
         #[arg(long)]
         wait: bool,
+        /// After the deployment is READY, activate it and verify the route moved.
+        ///
+        /// Without this, `deploy` finishes at READY - a statement about containers,
+        /// not about routing. The gateway selects `r.status = 'ACTIVE'`, so a
+        /// deployment that is READY but never activated serves nothing while the
+        /// version still answers `deploy` with success. `rollback` already closes
+        /// this gap (wait, activate, read the effective version back); `deploy` did
+        /// not, which is why the staging publish chain could install and deploy a
+        /// plugin and leave the previous version serving.
+        #[arg(long)]
+        activate: bool,
     },
     /// Activate a READY deployment after policy and dependency checks.
     Activate {
@@ -427,8 +438,20 @@ async fn main() -> Result<()> {
             replicas,
             selector,
             wait,
+            activate,
         } => {
             let api = Api::new()?;
+            // Read the revision BEFORE the deployment request: the compare-and-swap
+            // that `activate` performs is against the revision that was current when
+            // this caller decided to publish. Reading it afterwards would set the
+            // expectation to whatever this deploy just changed, which is no check at
+            // all.
+            let revision_before = if activate {
+                let detail = api.get(&format!("/api/v1/plugins/{plugin}")).await?;
+                detail["activeRevision"]["generation"].as_i64().unwrap_or(0)
+            } else {
+                0
+            };
             let mut node_selector = serde_json::Map::new();
             if let Some(selector) = selector {
                 for pair in selector.split(',') {
@@ -437,26 +460,139 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            let result = api
-                .post(
-                    &format!("/api/v1/plugins/{plugin}/deployments"),
-                    json!({
-                        "version": version,
-                        "desiredReplicas": replicas,
-                        "nodeSelector": node_selector,
-                        "maxInstancesPerNode": 1
-                    }),
-                )
+            // A deployment that is already the active version is a 409, and until now
+            // that 409 was fatal: `Api::handle` bails on every non-2xx, so a second
+            // publish of the same content-hash version failed the whole run. The
+            // script called that idempotent. It was not.
+            //
+            // ALREADY_ACTIVE is not "nothing to do" though - it is "the route should
+            // already point at this version", which is a claim to verify rather than
+            // assume. So it is turned into the same post-condition check the happy
+            // path runs, below.
+            //
+            // The decision is made from the state the Kernel reports BEFORE the call,
+            // through `next_step`. Reading first and then asking means the 409 is a
+            // backstop for a race rather than the only thing standing between a
+            // publish and a silent no-op.
+            let observed = api
+                .get(&format!("/api/v1/plugins/{plugin}/deployments"))
                 .await?;
-            println!(
-                "deployment {} status={} {}/{} ready",
-                result["id"].as_str().unwrap_or(""),
-                result["status"].as_str().unwrap_or(""),
-                result["readyInstances"],
-                result["totalInstances"]
-            );
-            if wait {
+            let existing = observed.as_array().and_then(|items| {
+                items
+                    .iter()
+                    .find(|item| item["version"] == version)
+                    .map(|item| {
+                        (
+                            item["status"].as_str(),
+                            item["readyInstances"].as_i64().unwrap_or(0),
+                        )
+                    })
+            });
+            let (observed_status, observed_ready) = match existing {
+                Some((status, ready)) => (status, ready),
+                None => (None, 0),
+            };
+            let step = next_step(observed_status, observed_ready);
+            // The refusals below apply only to `--activate`, which is the unattended
+            // publish path. A plain `deploy --wait` is an operator command with its
+            // own history: the Kernel has always accepted a DISABLED/FAILED row and
+            // turned it back into PENDING (`deployments.rs`, the redeploy branch), and
+            // `p001c_rollback_states.sh` depends on that. Refusing it here would be a
+            // regression dressed as a safety check.
+            if activate {
+                match step {
+                    NextStep::RefuseDisabled => bail!(
+                        "{plugin}@{version} is {} - a stopped deployment is not redeployed by a \
+                         publish; run `opsctl enable` or `opsctl uninstall` deliberately",
+                        observed_status.unwrap_or("DISABLED")
+                    ),
+                    NextStep::RefuseFailed => bail!(
+                        "{plugin}@{version} is {} with no READY replica; a publish will not retry \
+                         it unattended",
+                        observed_status.unwrap_or("FAILED")
+                    ),
+                    NextStep::RefuseUnknown => bail!(
+                        "{plugin}@{version} is in an unrecognised state {:?}; refusing rather than \
+                         guessing what to do next",
+                        observed_status
+                    ),
+                    NextStep::Deploy
+                    | NextStep::WaitThenActivate
+                    | NextStep::Activate
+                    | NextStep::VerifyOnly => {}
+                }
+            }
+            let mut already_active = activate && step == NextStep::VerifyOnly;
+            let result = if already_active {
+                println!("{plugin}@{version} is already the active version");
+                Value::Null
+            } else {
+                match api
+                    .post(
+                        &format!("/api/v1/plugins/{plugin}/deployments"),
+                        json!({
+                            "version": version,
+                            "desiredReplicas": replicas,
+                            "nodeSelector": node_selector,
+                            "maxInstancesPerNode": 1
+                        }),
+                    )
+                    .await
+                {
+                    Ok(body) => body,
+                    Err(error) if error.to_string().contains("VERSION_ALREADY_ACTIVE") => {
+                        already_active = true;
+                        println!("{plugin}@{version} is already the active version");
+                        Value::Null
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+            if !already_active {
+                println!(
+                    "deployment {} status={} {}/{} ready",
+                    result["id"].as_str().unwrap_or(""),
+                    result["status"].as_str().unwrap_or(""),
+                    result["readyInstances"],
+                    result["totalInstances"]
+                );
+            }
+            // READY is a statement about containers. The gateway routes on
+            // `r.status = 'ACTIVE'`, so without the activation below a successful
+            // `deploy --wait` can leave the previous version serving indefinitely.
+            if wait || activate {
                 wait_for_ready(&api, &plugin, &version, 300).await?;
+            }
+            if activate {
+                if !already_active {
+                    let activated = api
+                        .post(
+                            &format!("/api/v1/plugins/{plugin}/activations"),
+                            json!({ "version": version, "expectedRevision": revision_before }),
+                        )
+                        .await?;
+                    println!(
+                        "activated {plugin}@{version} revision={} status={}",
+                        activated["generation"].as_i64().unwrap_or(0),
+                        activated["status"].as_str().unwrap_or("")
+                    );
+                }
+                // Read the route back. `activate` returning 200 says the Kernel
+                // accepted the request; this says the route actually moved, and it is
+                // the same assertion `rollback` makes. A publish is not "done" because
+                // a CLI exited 0 - it is done when the version the gateway serves is
+                // the one that was published.
+                let detail = api.get(&format!("/api/v1/plugins/{plugin}")).await?;
+                let effective = detail["activeVersion"].as_str().unwrap_or("");
+                if effective != version {
+                    bail!(
+                        "{plugin}@{version} was activated but the active version is {effective}; \
+                         the gateway is not serving what this publish built"
+                    );
+                }
+                println!(
+                    "effectiveVersion={effective} (verified against the plugin's active revision)"
+                );
             }
         }
         Command::Activate {
@@ -696,5 +832,149 @@ async fn wait_for_ready(
             bail!("timed out waiting for deployment readiness");
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+/// What `deploy --activate` should do, given the state the Kernel reports.
+///
+/// This is the decision table TASK-02 asks for, extracted from the command so it
+/// can be asserted without an HTTP server. The command still performs the I/O;
+/// this only says which step is next.
+///
+/// The states are the ones the schema actually has (`plugin_deployments.status`),
+/// not an aspirational set: a publish chain that invents states the Kernel cannot
+/// report is a diagram, not a state machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NextStep {
+    /// No deployment row for this version: create one, then wait, then activate.
+    Deploy,
+    /// A row exists and is on its way; wait for it, then activate.
+    WaitThenActivate,
+    /// READY but not routed: activate, then verify the effective version.
+    Activate,
+    /// The Kernel says this version is already active. Verify the route rather
+    /// than trusting the 409's message.
+    VerifyOnly,
+    /// The version was deliberately stopped. Redeploying is an operator decision,
+    /// so this is refused rather than guessed at.
+    RefuseDisabled,
+    /// Failed with no READY replica. A retry is allowed but the caller has to ask
+    /// for it - an unattended publish that loops on a permanent failure hides it.
+    RefuseFailed,
+    /// DRAINING, or a state this table does not know. Anything unrecognised is
+    /// refused rather than treated as "probably fine": a new Kernel status must be
+    /// added here deliberately.
+    RefuseUnknown,
+}
+
+/// Decide the next step from the deployment status the Kernel reports for this
+/// version, and whether a row exists at all.
+///
+/// `ready` is the replica count, because FAILED with a live replica is a different
+/// animal from FAILED with none: the first is a partial outage that a wait can
+/// still resolve, the second cannot resolve itself.
+fn next_step(status: Option<&str>, ready_instances: i64) -> NextStep {
+    match status {
+        None => NextStep::Deploy,
+        Some("PENDING" | "PREPARING" | "DEPLOYING") => NextStep::WaitThenActivate,
+        Some("READY") => NextStep::Activate,
+        Some("ACTIVE") => NextStep::VerifyOnly,
+        Some("DEGRADED") => {
+            // A DEGRADED deployment still has a replica serving, so activating it
+            // would move traffic onto a partially working version. It is treated
+            // like a wait: the caller's timeout decides whether it recovers.
+            if ready_instances > 0 {
+                NextStep::WaitThenActivate
+            } else {
+                NextStep::RefuseFailed
+            }
+        }
+        Some("FAILED") => {
+            if ready_instances > 0 {
+                NextStep::WaitThenActivate
+            } else {
+                NextStep::RefuseFailed
+            }
+        }
+        Some("DISABLED" | "DRAINING" | "UNINSTALLED") => NextStep::RefuseDisabled,
+        Some(_) => NextStep::RefuseUnknown,
+    }
+}
+
+#[cfg(test)]
+mod publish_state_machine_tests {
+    use super::{next_step, NextStep};
+
+    /// The twelve-plus combinations TASK-02 asks for. Each row is a state the
+    /// Kernel can actually be in, and the step that must follow from it.
+    #[test]
+    fn every_reported_state_has_a_decided_next_step() {
+        let cases: &[(Option<&str>, i64, NextStep)] = &[
+            // --- absent ---------------------------------------------------------
+            (None, 0, NextStep::Deploy),
+            // --- on its way -----------------------------------------------------
+            (Some("PENDING"), 0, NextStep::WaitThenActivate),
+            (Some("PREPARING"), 0, NextStep::WaitThenActivate),
+            (Some("DEPLOYING"), 1, NextStep::WaitThenActivate),
+            // --- ready, not routed ----------------------------------------------
+            (Some("READY"), 2, NextStep::Activate),
+            // --- already routed -------------------------------------------------
+            (Some("ACTIVE"), 2, NextStep::VerifyOnly),
+            // --- degraded: a replica is serving, so wait rather than route ------
+            (Some("DEGRADED"), 1, NextStep::WaitThenActivate),
+            (Some("DEGRADED"), 0, NextStep::RefuseFailed),
+            // --- failed: only recoverable while something is still serving ------
+            (Some("FAILED"), 2, NextStep::WaitThenActivate),
+            (Some("FAILED"), 0, NextStep::RefuseFailed),
+            // --- deliberately stopped -------------------------------------------
+            (Some("DISABLED"), 2, NextStep::RefuseDisabled),
+            (Some("DRAINING"), 2, NextStep::RefuseDisabled),
+            (Some("UNINSTALLED"), 0, NextStep::RefuseDisabled),
+            // --- a state this table has never seen ------------------------------
+            (Some("SOMETHING_NEW"), 1, NextStep::RefuseUnknown),
+        ];
+        for &(status, ready, expected) in cases {
+            assert_eq!(
+                next_step(status, ready),
+                expected,
+                "status={status:?} ready={ready} must lead to {expected:?}"
+            );
+        }
+        assert_eq!(
+            cases.len(),
+            14,
+            "the table is the deliverable; 12 is the floor"
+        );
+    }
+
+    /// The counterfactual that matters most for the staging incident: a READY
+    /// deployment must NOT be treated as finished. `Deploy`/`WaitThenActivate`
+    /// stop at containers; only `Activate` moves the route.
+    #[test]
+    fn ready_is_not_active_and_the_table_says_so() {
+        assert_eq!(next_step(Some("READY"), 2), NextStep::Activate);
+        assert_ne!(next_step(Some("READY"), 2), NextStep::VerifyOnly);
+        assert_ne!(next_step(Some("READY"), 2), NextStep::WaitThenActivate);
+    }
+
+    /// DISABLED is an operator decision, not a failure to retry. A publish chain
+    /// that redeployed it would resurrect something someone stopped on purpose.
+    #[test]
+    fn disabled_is_refused_rather_than_silently_redeployed() {
+        assert_eq!(next_step(Some("DISABLED"), 2), NextStep::RefuseDisabled);
+        assert_ne!(
+            next_step(Some("DISABLED"), 2),
+            NextStep::Deploy,
+            "DISABLED must not fall through to the create-a-deployment branch"
+        );
+    }
+
+    /// An unknown status is refused. The dangerous alternative - treating anything
+    /// unrecognised as ready to deploy - means a new Kernel status silently changes
+    /// what the publish chain does without anyone editing this table.
+    #[test]
+    fn an_unknown_status_fails_closed() {
+        assert_eq!(next_step(Some("BRAND_NEW"), 3), NextStep::RefuseUnknown);
+        assert_eq!(next_step(Some(""), 0), NextStep::RefuseUnknown);
     }
 }

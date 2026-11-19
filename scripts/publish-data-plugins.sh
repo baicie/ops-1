@@ -261,12 +261,18 @@ for name in "${PLUGINS[@]}"; do
   # idempotent-by-version.
   if [ "$installed" != "0" ]; then
     say "$plugin@$version already installed; re-checking its deployment"
-    # `deploy` is itself idempotent: an already-active version returns
-    # VERSION_ALREADY_ACTIVE, a healthy deployment returns 202 without changing
-    # anything, and a failed one is retried. The `|| true` is deliberately NOT
-    # here - a failed deploy must fail the run, which is the whole point.
+    # `--activate`, not `--wait`. READY is a statement about containers; the
+    # gateway routes on `r.status = 'ACTIVE'`, so a publish that stops at READY
+    # leaves the previous version serving while every command in the chain exits
+    # 0. That is what this script did, and it is why staging could install and
+    # deploy a plugin and still answer from the old one.
+    #
+    # `--activate` waits for READY, activates, then reads the plugin's active
+    # version back and fails if it is not the one just published. The `|| true`
+    # is deliberately NOT here - a failed deploy must fail the run, which is the
+    # whole point.
     sudo docker exec "$KERNEL_CONTAINER" /usr/local/bin/opsctl --url "$KERNEL_URL" \
-      deploy "$plugin" "$version" --wait 2>&1 | tail -2
+      deploy "$plugin" "$version" --wait --activate 2>&1 | tail -3
     continue
   fi
   img="$REGISTRY/opsweave/$name@$(sudo docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/$name:$version" | cut -d@ -f2)"
@@ -294,7 +300,7 @@ for name in "${PLUGINS[@]}"; do
   sudo docker exec "$KERNEL_CONTAINER" /usr/local/bin/opsctl --url "$KERNEL_URL" \
     install "/tmp/$name.plugin.zip" 2>&1 | tail -1
   sudo docker exec "$KERNEL_CONTAINER" /usr/local/bin/opsctl --url "$KERNEL_URL" \
-    deploy "$plugin" "$version" --wait 2>&1 | tail -2
+    deploy "$plugin" "$version" --wait --activate 2>&1 | tail -3
 
   # The fast path; the EXIT trap covers every other way out of this loop.
   if sudo docker exec "$KERNEL_CONTAINER" rm -f /tmp/publisher.key; then
