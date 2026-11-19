@@ -675,6 +675,65 @@ for (const workflow of Object.keys({ ...SUITE_WORKFLOW, 'ci.yml': null })) {
     perFile.set(file, readWorkflow(file));
   }
 
+  // THE FUTURE TENTH CONTEXT.
+  //
+  // `ci-gate` is not a required context today, and this block does not pretend it
+  // is. What it does is assert the three properties it MUST have *before* it can
+  // be made one, so the migration cannot be applied to a gate that would
+  // immediately break merges:
+  //
+  //   1. `ci.yml` has an unfiltered `pull_request:` trigger. A `paths` filter here
+  //      means the gate is not created for the excluded PRs, and a required check
+  //      that never appears is a permanent "Expected" - the exact failure the
+  //      nine-context check above exists to prevent for the other nine.
+  //   2. the `ci-gate` job declares no `if:` - `if: always()` is allowed because
+  //      it is a condition on the DEPENDENCIES' state, not on the change, but any
+  //      condition that can evaluate false for a real PR is not.
+  //   3. its job id, and therefore its check name, is exactly `ci-gate`.
+  //
+  // When the ruleset gains `ci-gate`, move it into REQUIRED_CONTEXTS and this
+  // block keeps passing - it is a superset, not an alternative.
+  {
+    const file = 'ci.yml';
+    const text = readWorkflow(file);
+    if (text === null) {
+      errors += 1;
+      process.stdout.write('ERROR ci-gate: ci.yml does not exist\n');
+    } else {
+      const paths = pullRequestPaths(text);
+      if (paths === null) {
+        errors += 1;
+        process.stdout.write('ERROR ci-gate: ci.yml has no pull_request trigger, so the gate never appears on a PR\n');
+      } else if (paths.length > 0) {
+        errors += 1;
+        process.stdout.write(`ERROR ci-gate: ci.yml filters pull_request by paths (${paths.join(', ')}); the gate would be absent for non-matching PRs\n`);
+      }
+      const jobs = parseJobs(text);
+      const job = jobs.get('ci-gate');
+      if (!job) {
+        errors += 1;
+        process.stdout.write('ERROR ci-gate: no job with that id in ci.yml; the context would disappear (rename?)\n');
+      } else {
+        if (job.name !== null) {
+          errors += 1;
+          process.stdout.write(`ERROR ci-gate: job declares name: ${job.name}, so it reports that instead of ci-gate\n`);
+        }
+        // `if: always()` is the ONLY acceptable condition: it exists so the gate
+        // still runs when a dependency failed, which is when it is most needed.
+        // Everything else can skip the gate for a real PR.
+        // Accept both spellings GitHub allows: `if: always()` and
+        // `if: ${{ always() }}`. The bare form is what ci.yml actually uses - the
+        // first version of this guard only accepted the wrapped one and reported
+        // the correct configuration as an error.
+        const condition = (job.if ?? '').trim().replace(/^\$\{\{\s*/, '').replace(/\s*\}\}$/, '');
+        if (job.if !== null && condition !== 'always()') {
+          errors += 1;
+          process.stdout.write(`ERROR ci-gate: job has \`if: ${job.if}\`; only \`if: always()\` is allowed (it must run when deps fail, and must never skip for a real change)\n`);
+        }
+      }
+    }
+  }
+
   for (const context of REQUIRED_CONTEXTS) {
     const file = CONTEXT_FILE[context];
     const text = perFile.get(file);

@@ -1627,6 +1627,10 @@ jobs:
           # rejected them as NOT_REFERENCED, correctly.
           node --test tests/ci/check-run-ledger.test.mjs
           node --test tests/ci/await-delegated.test.mjs
+          # Drives the PROCESS, not a helper: what it asserts is `main()`'s exit
+          # code, because that is the only thing CI reads. A fixture-level test
+          # would pass even if main() returned 0 on an API error.
+          node --test tests/ci/ci-gate.api-failure.test.mjs
           # A test file that asserts nothing is not a passing test file.
           #
           # `node --test` exits 0 for an empty file, a comment-only file, and a
