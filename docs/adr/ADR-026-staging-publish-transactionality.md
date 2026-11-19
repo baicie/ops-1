@@ -27,45 +27,82 @@ Node   New
 Plugin Old / Partially Installed
 ```
 
-and nothing records that this happened. The deploy job fails, the previous
-successful run is still the one the staging URL was last verified on, and the
-running platform is a mix that no run ever tested.
+and the deploy job fails. Two things ARE recorded, and an earlier draft of this
+ADR said otherwise:
+
+  - the job log prints the publish script's per-plugin lines (`pushed`, `staged`,
+    `PENDING ...`, the `Install`/`deploy` output) - it is piped to the log, not to
+    `/dev/null`;
+  - `Collect host status` (`if: always()`) writes `host-status.json` from
+    `deploy-staging.sh --status --json` and `Upload deploy evidence` archives it,
+    so the host's own view of what it is running survives a failed run.
+
+What is NOT recorded is the **per-plugin publish state** as a machine-readable
+fact: which of build/push/bundle/install/deploy each plugin reached. The log has
+it as prose and the host has its own deployment record; neither says "plugin 2
+was installed but never deployed". That is the gap.
 
 ### Why the plugin step cannot simply move first
 
 Publishing a bundle requires the new Kernel: `opsctl` registers the publisher and
 installs against the Kernel's own API. Publishing before the deploy would install
-against the old Kernel, then the deploy would replace it, and the installed
-bundle's `plugin_deployments` rows would reference a Kernel that no longer exists.
+against the old Kernel, and then the deploy replaces that Kernel's database - the
+`plugin_deployments` rows written by the install would be gone with it, so the
+work would have to be redone against the new Kernel. (The rows would not
+"reference a Kernel that no longer exists": the database is replaced, not
+versioned alongside it, so the rows are lost rather than dangling.)
 
 So the order is forced. What is missing is not sequencing; it is **the ability to
 say what state the publish reached, and to resume from it.**
 
 ### What a partial publish looks like today
 
-`publish-data-plugins.sh` does, per plugin, inside one loop:
+`publish-data-plugins.sh` does, per plugin, across three separate loops over
+`PLUGINS=(data-catalog data-integration)` - images, version, then publish - and
+the publish one is:
 
 ```
-build image -> push -> verify manifest -> resolve digest
--> assemble bundle -> sign -> install -> deploy --wait
+bundle -> install -> deploy --wait
 ```
+
+**It never calls `activate`.** `grep -c activate scripts/publish-data-plugins.sh`
+returns 0. That is a defect in its own right and is recorded separately (B-18):
+`route_candidates` requires `r.status = 'ACTIVE'` on an
+`kernel.activation_revisions` row, so a plugin that is installed and deployed by
+this script is never routed to, however healthy its instances are.
 
 A failure at "sign" for the second plugin leaves:
 - plugin 1: installed and deployed (a new version, live)
 - plugin 2: an image pushed to the registry, no bundle, not installed
 - the OCI registry holding a tag nothing references
 
-Re-running the script is *mostly* safe — the version is content-addressed, so an
-already-pushed image is re-pushed to the same tag and the install is idempotent.
-But "mostly" is the problem: nothing asserts it, and a re-run after a partial
-publish has never been exercised.
+Re-running the script is *mostly* safe, but "mostly" is the problem and the
+reasons differ per step:
+
+  - push: re-pushed to the same tag. Idempotent by construction (content hash).
+  - install: skipped entirely since #149, by an existence check - so a **failed
+    deploy is now retried** rather than skipped with the install. Before #149 the
+    whole loop iteration was skipped, which is what hid the staging failure for
+    four runs.
+  - deploy: **not idempotent in the way this ADR first claimed.** `opsctl` treats
+    any non-2xx as a hard error (`apps/opsctl/src/main.rs:196-197`), and the
+    kernel returns `409 VERSION_ALREADY_ACTIVE` for a version that is already
+    active (`apps/kernel/src/deployments.rs:345`). So re-deploying the active
+    version does not "return success unchanged" - it fails the run. Documented
+    real output: `Error: API 409 Conflict returned VERSION_ALREADY_ACTIVE`.
+
+A re-run after a partial publish has never been exercised end to end.
 
 ## What is proposed
 
 ### 1. A published state machine, recorded in the journal
 
-Per plugin, in the run's own record (not the database — the database is one of the
-things being replaced):
+Per plugin, in the run's own record. (An earlier draft justified this with "the
+database is one of the things being replaced" - that is wrong: `deploy-staging.sh`
+replaces `kernel` and `node` only, and PostgreSQL is a dependency service, not an
+application service. The real reason to keep the journal out of the database is
+that the database is a thing the journal describes, and a record that lives
+inside its own subject cannot report the subject being unavailable.)
 
 ```
 PREPARED           inputs hashed, version computed
@@ -79,15 +116,23 @@ FAILED             with the step name and the error
 ROLLED_BACK        the previous package is the ACTIVE one again
 ```
 
-The journal is a JSON file in the workflow's artifact, appended per step, so a
-re-run can read the last reached state and resume from it rather than from the
-top.
+The journal is a JSON file in the workflow's artifact, appended per step. Decision
+2 below proposes that it be a **record, not a resume cursor** - so this section
+should not promise resumption. It says what state was reached; the next run
+starts from the top and relies on the steps being idempotent, which
+`publish-data-plugins.sh` now is for install and deploy (#149) but is not yet
+proven to be for a partially-signed bundle.
 
 ### 2. The deploy job's success condition must be the plugin state
 
 TASK-06 is explicit: *不允许 Kernel Health 通过就宣称整个平台发布完成*.
 
-Today the job succeeds if the last step exits 0. The proposal: the final step
+Today the job's own conclusion is that of its last step (plus any step marked
+`continue-on-error`, of which this job has none for the publish). Because the
+publish step runs under `set -euo pipefail` and pipes the script's output through
+`tail -30`, the script's non-zero exit does fail the step - the gap is not the
+exit code but what the code *means*: it cannot distinguish "no plugin needed
+publishing" from "every plugin published and is READY". The proposal: the final step
 reads the journal and fails unless **every** plugin is `READY` or `ACTIVATED`,
 naming the plugin and the state it stopped at. Kernel health is a precondition,
 not the answer.
@@ -122,9 +167,16 @@ TASK-06 requires it, and it is the part that makes this more than a document.
 tests/acceptance/publish_resume.sh
 ```
 
-Drives `publish-data-plugins.sh` against a **local** Kernel (the harness
-`tests/acceptance/` already boots one), with `docker` and `opsctl` pointed at that
-instance, injecting a failure at each step in turn:
+Drives `publish-data-plugins.sh` against a **local** Kernel with `docker` and
+`opsctl` pointed at that instance, injecting a failure at each step in turn.
+
+The harness does not already exist for this, which an earlier draft implied: the
+`tests/acceptance/` scripts that boot a platform are `.sh` files that each own a
+full bring-up and teardown (`e2e_platform.sh`, `pipeline_orphan_worker.sh`, ...),
+not a reusable "boot one Kernel and hand it back" fixture. Extracting one is part
+of this task's cost, not a free dependency.
+
+The failure-injection points:
 
 | Injected at | Expected journalled state | Re-run from there |
 |---|---|---|
