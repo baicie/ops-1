@@ -181,6 +181,46 @@ test('ci.yml passes the gate a budget at least as large as the default', async (
   const configuredMs = Number(m[1]);
   assert.ok(configuredMs >= DEFAULT_BUDGET_MS,
     `ci.yml default ${configuredMs}ms must not be below the module default ${DEFAULT_BUDGET_MS}ms`);
+
+  // No silent fallback in the run block. `${VAR:-default}` meant a lost env block
+  // quietly changed the budget to a smaller number - measured: env said 2100000
+  // (35 min) while the run block's fallback said 1800000 (30 min), below the
+  // data-foundation p95 of 2040 s. `${VAR:?}` fails loudly instead.
+  // Look only at the line that actually passes the flag, not at prose that
+  // mentions the old form.
+  const budgetLine = ci.split('\n').find((l) => /--budget-ms/.test(l) && !/^\s*#/.test(l));
+  assert.ok(budgetLine, 'ci.yml must pass --budget-ms');
+  assert.ok(!/GATE_BUDGET_MS:-/.test(budgetLine),
+    `the --budget-ms line must not carry a fallback; got: ${budgetLine.trim()}`);
+  assert.match(budgetLine, /GATE_BUDGET_MS:\?/,
+    'the --budget-ms line should use ${GATE_BUDGET_MS:?...} so a missing env is a hard error');
+});
+
+// The job timeout must exceed the wait budget by enough for the rest of the step.
+// A job killed by its own timeout reports `cancelled`, which is a worse signal
+// than a gate timeout that says why.
+test('ci.yml gives the gate a job timeout above its wait budget', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const ci = readFileSync(fileURLToPath(new URL('../../.github/workflows/ci.yml', import.meta.url)), 'utf8');
+
+  const budgetMatch = /GATE_BUDGET_MS:\s*\$\{\{\s*vars\.OPSWEAVE_GATE_BUDGET_MS\s*\|\|\s*'(\d+)'/.exec(ci);
+  assert.ok(budgetMatch, 'GATE_BUDGET_MS must have a numeric default');
+  const budgetMs = Number(budgetMatch[1]);
+
+  // The gate job block, then its timeout-minutes.
+  const gateStart = ci.indexOf('  ci-gate:');
+  assert.ok(gateStart > 0, 'ci-gate job must exist');
+  const gateBlock = ci.slice(gateStart, gateStart + 2000);
+  const timeoutMatch = /timeout-minutes:\s*(\d+)/.exec(gateBlock);
+  assert.ok(timeoutMatch, 'ci-gate must declare timeout-minutes');
+  const timeoutSec = Number(timeoutMatch[1]) * 60;
+
+  // The rest of the step (checkout, two ledger reads) measured at ~27 s on the
+  // longest observed run. Demand at least five minutes of slack on top of that.
+  const SLACK_SEC = 300;
+  assert.ok(timeoutSec > budgetMs / 1000 + SLACK_SEC,
+    `job timeout ${timeoutSec}s must exceed the ${budgetMs / 1000}s budget plus ${SLACK_SEC}s of slack`);
 });
 
 test('the poll interval backs off but is capped', async () => {
