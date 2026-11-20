@@ -3588,6 +3588,10 @@ mod tests {
 
         struct Fixture {
             deployment: Uuid,
+            /// The fixture's own node. `TASK-21`'s staleness test backdates it,
+            /// which is the only way to observe the sweep: `reconcile_once_scoped`
+            /// compares `last_seen_at` against `node_stale_seconds`.
+            node: Uuid,
             snapshot: serde_json::Value,
         }
 
@@ -3683,9 +3687,9 @@ mod tests {
             .await
             .expect("deployment");
 
-            let _ = node;
             Fixture {
                 deployment,
+                node,
                 snapshot,
             }
         }
@@ -3800,6 +3804,216 @@ mod tests {
                 .ok();
         }
 
+        /// TASK-21: a node that stops heartbeating must sweep to UNREACHABLE, and
+        /// its instances with it - not stay READY for ever.
+        ///
+        /// This is the "Node restart" row of the convergence table. Nothing in the
+        /// unit tests covers it because the sweep is SQL: `reconcile_once_scoped`
+        /// rewrites `kernel.nodes.status` and then propagates to instances, and a
+        /// predicate test cannot see either statement.
+        #[tokio::test]
+        async fn a_stale_node_and_its_instances_sweep_to_unreachable() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let f = fixture(&pool, 1, 1).await;
+            let state = state(&pool);
+
+            // Place one instance while the node is fresh.
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+            let placed: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances WHERE deployment_id=$1",
+            )
+            .bind(f.deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+            assert_eq!(
+                placed, 1,
+                "the fixture must place one instance before it can go stale"
+            );
+
+            // The node stops reporting. `node_stale_seconds` is 25 by default, so
+            // backdating by an hour is unambiguous.
+            sqlx::query(
+                "UPDATE kernel.nodes SET last_seen_at = now() - interval '1 hour' WHERE id=$1",
+            )
+            .bind(f.node)
+            .execute(&pool)
+            .await
+            .expect("backdate");
+
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+
+            let (node_status,): (String,) =
+                sqlx::query_as("SELECT status FROM kernel.nodes WHERE id=$1")
+                    .bind(f.node)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("node row");
+            assert_eq!(
+                node_status, "UNREACHABLE",
+                "a stale node must not stay READY"
+            );
+
+            let (inst_state,): (String,) =
+                sqlx::query_as("SELECT state FROM kernel.plugin_instances WHERE deployment_id=$1")
+                    .bind(f.deployment)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("instance row");
+            // The instance carries its own last observation. What must NOT happen
+            // is the instance staying READY while its node is UNREACHABLE - that
+            // would keep it a routing candidate (`route_candidates` requires both
+            // `i.state = 'READY'` AND `n.status = 'READY'`, so the route is safe
+            // either way, but the row would lie to an operator).
+            assert_ne!(
+                inst_state, "READY",
+                "an instance on an UNREACHABLE node must not report READY"
+            );
+
+            sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+                .bind(f.deployment)
+                .execute(&pool)
+                .await
+                .ok();
+        }
+
+        /// TASK-21: reconciling twice must reach the same state as once.
+        ///
+        /// The "Repeated reconcile" row. It is the cheapest invariant to state and
+        /// the easiest to break: a pass that increments a generation or re-creates
+        /// a row would drift under a timer that runs every few seconds.
+        #[tokio::test]
+        async fn reconcile_is_idempotent() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let f = fixture(&pool, 1, 1).await;
+            let state = state(&pool);
+
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+            let snapshot = |pool: sqlx::PgPool, d: Uuid| async move {
+                let (status, reason): (String, Option<String>) = sqlx::query_as(
+                    "SELECT status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
+                )
+                .bind(d)
+                .fetch_one(&pool)
+                .await
+                .expect("deployment");
+                let rows: Vec<(i32, String, String)> = sqlx::query_as(
+                    "SELECT slot, state, desired_action FROM kernel.plugin_instances
+                     WHERE deployment_id=$1 ORDER BY slot",
+                )
+                .bind(d)
+                .fetch_all(&pool)
+                .await
+                .expect("instances");
+                (status, reason, rows)
+            };
+            let first = snapshot(pool.clone(), f.deployment).await;
+
+            for _ in 0..3 {
+                crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                    .await
+                    .expect("reconcile");
+            }
+            let again = snapshot(pool.clone(), f.deployment).await;
+
+            assert_eq!(
+                first, again,
+                "three more passes changed the deployment's observable state; a reconciler \
+                 that drifts under repetition never converges"
+            );
+
+            sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+                .bind(f.deployment)
+                .execute(&pool)
+                .await
+                .ok();
+        }
+
+        /// TASK-21: a DISABLED deployment must stay stopped across reconciles.
+        ///
+        /// The "Deployment disabled" row. `reconcile_once` writes a STOP statement
+        /// for DISABLED deployments, and `must_rebuild` will happily re-plan a
+        /// ghost - so the question is whether a disabled deployment's instances get
+        /// resurrected by the next pass.
+        #[tokio::test]
+        async fn a_disabled_deployment_is_not_resurrected_by_reconcile() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let f = fixture(&pool, 1, 1).await;
+            let state = state(&pool);
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+
+            // DESIRED_REPLICAS STAYS 1 ON PURPOSE.
+            //
+            // The first version set `desired_replicas=0` as well, and the test
+            // passed for a reason that had nothing to do with disabling: with zero
+            // replicas the slot loop runs zero times, so no instance could be
+            // started no matter what the status was. A counterfactual that removed
+            // the DISABLED stop branch left the test green - proof it was asserting
+            // the replica count, not the disable semantic.
+            //
+            // With one replica the question becomes the real one: does reconciling
+            // a DISABLED deployment put its instance back to START?
+            sqlx::query("UPDATE kernel.plugin_deployments SET status='DISABLED' WHERE id=$1")
+                .bind(f.deployment)
+                .execute(&pool)
+                .await
+                .expect("disable");
+
+            for _ in 0..3 {
+                crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                    .await
+                    .expect("reconcile");
+            }
+
+            //  selects only PENDING/PREPARING/READY/ACTIVE/
+            // DEGRADED (deployments.rs:1414), so a DISABLED deployment is skipped
+            // entirely - the "Enable requested" branch further down is not reachable
+            // from this entry point. This test asserts the observable consequence:
+            // three passes leave the instances stopped.
+            let (status_after,): (String,) =
+                sqlx::query_as("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
+                    .bind(f.deployment)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("status");
+            assert_eq!(
+                status_after, "DISABLED",
+                "reconcile must not re-enable a disabled deployment"
+            );
+            let started: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances
+                 WHERE deployment_id=$1 AND desired_action='START'",
+            )
+            .bind(f.deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+            assert_eq!(
+                started, 0,
+                "a DISABLED deployment had {started} instance(s) put back to START; disabling \
+                 would be undone by the reconciler"
+            );
+
+            sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+                .bind(f.deployment)
+                .execute(&pool)
+                .await
+                .ok();
+        }
         /// TASK-20: two reconcilers running at once must not over-subscribe a node.
         ///
         /// WHY THIS IS NOT A UNIT TEST. The capacity checks read aggregates and
