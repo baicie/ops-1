@@ -49,7 +49,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { analyse, SUITES } from './impact.mjs';
 import { attributeChecks, checkState, UNFINISHED_STATUS } from './check-run-ledger.mjs';
@@ -269,6 +269,18 @@ export const REQUIRE_ANY_CHECK = new Set(['browser-e2e']);
  * workflow file in the repository must appear in this table, and the selftest
  * fails if one does not.
  */
+/**
+ * `ci-gate`'s own job budget in `ci.yml`, and how much of it the wait must leave
+ * free for checkout plus the check-run/ledger reads.
+ *
+ * These are duplicated numbers - `timeout-minutes: 45` cannot be imported from
+ * YAML - so they are asserted against the file by the selftest instead of being
+ * trusted. The pair only exists so an operator who raises `GATE_BUDGET_MS` gets a
+ * CONFIGURATION_ERROR instead of a job killed at 45 minutes reporting `cancelled`.
+ */
+export const GATE_JOB_TIMEOUT_MS = 45 * 60 * 1000;
+export const GATE_TIMEOUT_SLACK_MS = 10 * 60 * 1000;
+
 export const GATE_OWNERSHIP = {
   // --- MERGE GATE: a red check here blocks the merge -------------------------
   'ci.yml': 'merge',
@@ -1392,6 +1404,23 @@ function selftest() {
     process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: buckets=${bucketsOk} verdict=${verdict}(want ${c.expectVerdict})\n`);
   }
 
+  // The job timeout is the only place the wait budget has to fit, and it lives in
+  // YAML where nothing can import it. Read it back and compare, so raising one
+  // number without the other fails here rather than as a `cancelled` job.
+  {
+    const ciYml = readFileSync(fileURLToPath(new URL('../../.github/workflows/ci.yml', import.meta.url)), 'utf8');
+    const gateJob = ciYml.slice(ciYml.indexOf('\n  ci-gate:'));
+    const match = /timeout-minutes:\s*(\d+)/.exec(gateJob);
+    const minutes = match ? Number(match[1]) : null;
+    const ok = minutes !== null
+      && minutes * 60 * 1000 === GATE_JOB_TIMEOUT_MS
+      && DEFAULT_BUDGET_MS <= GATE_JOB_TIMEOUT_MS - GATE_TIMEOUT_SLACK_MS;
+    inlineChecks += 1;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} GATE_JOB_TIMEOUT_MS agrees with ci.yml and fits the budget `
+      + `(yml=${minutes}min const=${GATE_JOB_TIMEOUT_MS / 60000}min budget=${DEFAULT_BUDGET_MS / 60000}min slack=${GATE_TIMEOUT_SLACK_MS / 60000}min)\n`);
+  }
+
   for (const c of DELEGATED_SELFTEST) {
     const got = delegatedVerdict(fixtureLedger(c), c.suites);
     const ok = got.verified.length === c.want.verified
@@ -1469,7 +1498,24 @@ async function main(argv) {
     else if (argv[i] === '--workflow-runs-json') { workflowRunsJson = argv[++i]; }
     else if (argv[i] === '--fetch') { fetchMode = true; }
     else if (argv[i] === '--no-wait') { noWait = true; }
-    else if (argv[i] === '--budget-ms') { budgetMs = Number(argv[++i]); }
+    else if (argv[i] === '--budget-ms') {
+      // Validated at the point of parsing, so a bad value is a CONFIGURATION_ERROR
+      // with an exit code the workflow can distinguish from a suite result. The
+      // caller passes `GATE_BUDGET_MS` through `"${GATE_BUDGET_MS:?...}"`, which
+      // catches an UNSET variable but not a value that is set and wrong - and the
+      // repository variable is editable without touching this file.
+      const raw = argv[++i];
+      const parsed = Number(raw);
+      if (raw === undefined || raw === '' || !Number.isFinite(parsed) || parsed <= 0) {
+        process.stderr.write(
+          `ci-gate: --budget-ms must be a positive finite number, got ${JSON.stringify(raw)}\n` +
+          '  this is a configuration error, not a suite result: NaN would never expire and a\n' +
+          '  non-positive budget reports "nothing still running" before it has read anything.\n',
+        );
+        return 2;
+      }
+      budgetMs = parsed;
+    }
     else if (argv[i] === '--files') { while (i + 1 < argv.length && !argv[i + 1].startsWith('--')) files.push(argv[++i]); }
     else { process.stderr.write(`ci-gate: unknown argument ${argv[i]}\n`); return 2; }
   }
@@ -1534,6 +1580,24 @@ async function main(argv) {
     }
   }
 
+  // The budget has to fit inside the job, or the job is killed mid-wait and
+  // reports `cancelled` - a worse failure than a timeout, because it names no
+  // suite. The relationship is stated in `ci.yml`'s timeout comment; this is the
+  // code that enforces it, so editing either number alone fails here.
+  //
+  // 2700 s is `timeout-minutes: 45` in `ci.yml`; the slack covers checkout and
+  // the ledger reads. Both are asserted by the selftest, which is why they are
+  // exported rather than local.
+  if (budgetMs > GATE_JOB_TIMEOUT_MS - GATE_TIMEOUT_SLACK_MS) {
+    process.stderr.write(
+      `ci-gate: --budget-ms ${budgetMs} does not fit inside the job timeout.\n` +
+      `  the gate job is ${GATE_JOB_TIMEOUT_MS / 1000}s (timeout-minutes: 45 in ci.yml); the wait budget\n` +
+      `  must leave at least ${GATE_TIMEOUT_SLACK_MS / 1000}s for checkout and the ledger reads, so it cannot\n` +
+      `  exceed ${(GATE_JOB_TIMEOUT_MS - GATE_TIMEOUT_SLACK_MS) / 1000}s. A job killed by its own timeout reports\n` +
+      '  `cancelled`, which names no suite - that is why this is refused rather than clamped.\n',
+    );
+    return 2;
+  }
   const result = gate(needs, impact, ledger);
   let verdict = result.verdict;
 
