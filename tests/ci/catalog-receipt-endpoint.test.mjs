@@ -298,3 +298,48 @@ test('the two receipt tables enforce two different contract enums', async () => 
     await pool.end();
   }
 });
+
+test('the fenced sink bounds its lock wait instead of blocking the queue', async () => {
+  // `fence_authorize_effect` takes the pipeline_jobs row lock and holds it until
+  // the transaction commits. Every other write path in server.mjs sets a
+  // lock_timeout before taking a lock; this one did not, so a stuck Catalog
+  // transaction serialised every claim for as long as it stayed stuck.
+  //
+  // The assertion is on the SETTING, not on a hang: proving the bound by actually
+  // holding a lock for 30 seconds would make the suite slow and the result would
+  // still depend on machine speed. What can be checked cheaply and exactly is
+  // that the transaction is opened with both limits in effect - which is what
+  // makes the behaviour different.
+  const source = await import('node:fs').then((fs) => fs.promises.readFile(
+    path.join(ROOT, 'plugins/data-catalog/backend/server.mjs'), 'utf8',
+  ));
+
+  // Find the transaction that calls fence_authorize_effect and check that the
+  // lock_timeout is set between its BEGIN and the call.
+  // The CALL, not the first mention: the comment above it names the function too,
+  // and searching for the first occurrence found the comment - so `between` held
+  // no SET LOCAL and the assertion failed against correct code.
+  const idx = source.indexOf("FROM kernel.fence_authorize_effect");
+  assert.ok(idx > 0, 'the fence call must exist');
+  const begin = source.lastIndexOf("client.query('BEGIN')", idx);
+  assert.ok(begin > 0, 'the fence call must run inside a transaction');
+  const between = source.slice(begin, idx);
+  assert.match(
+    between,
+    /SET LOCAL lock_timeout/,
+    'the fenced sink must bound how long it waits for the pipeline_jobs lock; '
+    + 'without it a stuck transaction serialises every claim',
+  );
+  assert.match(
+    between,
+    /SET LOCAL statement_timeout/,
+    'and bound the statement itself',
+  );
+
+  // A THIRD ASSERTION WAS HERE AND IT WAS WRONG, not the code: it walked back from
+  // `INSERT INTO catalog_receipts` to the nearest BEGIN, which is the DATASET
+  // creation transaction (server.mjs:812) - and that one genuinely has no bound.
+  // Asserting it here would have been a claim about a different path wearing this
+  // test's name, so it is removed rather than fixed in place. The dataset-create
+  // gap is real and is recorded in the PR instead.
+});
