@@ -154,8 +154,14 @@ Brief §7.2 说「Required Check 不会永久 Pending」。实际情况更糟：
 9 of 9 required status checks are expected
 ```
 
-Ruleset 26958761 的九项是：`rust` `web` `web-unit` `contracts` `spec-coverage`
+Ruleset 26958761 **曾经**的九项是：`rust` `web` `web-unit` `contracts` `spec-coverage`
 `platform-only` `platform-image-build` `quality-faults` `linux-runtime`。
+
+> **2026-11-20 更新（`104e058` 之后）。** 那份规则**已不在 ruleset 里**。
+> 现在 `required_status_checks` 为空，CI 结果不阻止任何合并。
+> 下文关于「必需检查会被 skipped 绕过」的全部分析仍然正确——它解释的是**为什么**当初
+> 那九项是脆弱的，而这个脆弱性在恢复时依然存在。但它不再是「当前配置」的描述。
+> 当前状态用 `node tests/ci/check-gate-enforcement.mjs` 读，不是读这份文档。
 
 **四条独立路径，每条都能让其中一项不产出结论：**
 
@@ -595,9 +601,9 @@ bundle 组装成功（`staged opsweave.data-catalog@0.0.17455`），部署因
 
 | # | 项 | 状态 | 说明 |
 |---|---|---|---|
-| B-2 | 并发部署是否重复预留资源 | NOT_RUN | TASK-01 要求，未测 |
+| B-2 | 并发部署是否重复预留资源 | **PARTIAL** | `two_reconcilers_do_not_oversubscribe_one_node`：两个 reconcile 并发跑并断言不超 per-node 限制。**测不到超售**：先用的「1 核节点只容一个」设计能抓到（反事实红），但 flaky（8 次一败），因为 `node_has_capacity` 读整个节点预留；换成 per-node 限制后稳定，而反事实不再触发 |
 | B-3 | CPU 满 / 内存满但实例数未满 的独立用例 | NOT_RUN | 集成测试缺这两个分支 |
-| B-4 | Tag 被指向不同 digest 时拒绝 | NOT_RUN | 需要保存上次 digest 才能判断 |
+| B-4 | Tag 被指向不同 digest 时拒绝 | **FIXED（工具）/ 未接线** | `scripts/verify-registry-digest.mjs` 比较 expected / registry / local 三者，任一不符即 REFUSED。**未接进 `publish-data-plugins.sh`**：staging 被容量墙挡住，改一个无法在那里验证的路径不该先落地 |
 | B-5 | 签名移出长驻 kernel 容器 | NEEDS_DECISION | 需要 `opsctl` 脱离容器运行 |
 | B-6 | 版本 `% 100000` 碰撞 | NEEDS_DECISION | ADR-025 已提方案，未实现（会改动所有版本） |
 | B-7 | Staging 发布事务性（Kernel 新 / Plugin 旧） | NOT_RUN | TASK-06，未开始 |
@@ -606,7 +612,7 @@ bundle 组装成功（`staged opsweave.data-catalog@0.0.17455`），部署因
 | B-16 | staging 上四个旧 deployment 占满节点 | BLOCKED | 需要授权执行 `opsctl uninstall`；见下方「占用者」一节 |
 | B-17 | ADR-026 的发布状态机 | NOT_RUN | TASK-06 主体；ADR-028 记录了它还缺什么 |
 | B-18 | **发布链从不调用 `activate`** | VERIFIED | `grep -c activate scripts/publish-data-plugins.sh` = 0。`route_candidates` 要求 `r.status='ACTIVE'`，所以脚本装好并部署的插件**永远不会被路由**——即使实例健康、容量充足。这是「点治理就登出」的另一个独立原因，比容量更根本 |
-| B-19 | registry 侧 digest 核实 | NOT_RUN | 只有本地 `RepoDigests`，没有 `docker manifest inspect`；见 A-3 |
+| B-19 | **registry 侧 digest 核实** | **VERIFIED_DEFECT** | 实测真实 registry：本地 `RepoDigests` = `sha256:d9e853e8…`，registry 的 `Docker-Content-Digest` = `sha256:45e09956…`；`GET /v2/.../manifests/sha256:d9e853e8…` 返回 **404**，`45e09956` 返回 **200**。**本地记录的 digest 在 registry 上不存在。** 工具已交付，未接线 |
 | B-20 | gate 预算曾低于真实 p95 | FIXED | 30 分钟 vs data-foundation 实测 p95 2040s（34 分钟）；已改为 35 分钟并接上 `vars.OPSWEAVE_GATE_BUDGET_MS`，带反事实测试 |
 | B-21 | **rerun 期间 gate 用旧的绿色 attempt 放行** | FIXED（#163） | GitHub 每次 rerun **新建** check run 并让旧的永久保持 `completed`——实测 SHA `cc7be5c`（run 44524547400，attempt 2）上 `golden-path` 同时有 `135561535255 completed/failure` 与 `135572060029 completed/success`。`checkState` 取「最新完成的 attempt」，于是在 rerun 的整段时间里旧绿一直可读。两个 selftest 都把这个行为钉成正确，注释里的理由（「`whatToAwait` 会做决定」）是假的：`whatToAwait` 只对 `pending` 等待 |
 | B-22 | **`--budget-ms NaN` 让 gate 永不退出** | FIXED（#166） | `Number(argv[++i])` 无校验。`elapsedMs >= NaN` 恒假，循环永不结束，job 跑满 45 分钟被 timeout 杀死并报 `cancelled`——那是不点名任何 suite 的唯一结局。`-1`/`0` 则立刻返回 `timedOut: []`，即「没有 suite 在跑」，与事实相反 |
@@ -614,6 +620,12 @@ bundle 组装成功（`staged opsweave.data-catalog@0.0.17455`），部署因
 | B-24 | **单节点上部署能堆积自己跑不起来的实例行** | VERIFIED | 真实 PostgreSQL 测试 `single_node_replica_policy`：1 节点 + 2 副本 + `maxInstancesPerNode: 1`，实测状态是 `PREPARING`（不是 `PENDING`）、**两个** slot 都有实例行、`status_reason` 只有 `"0/2 replicas READY"`。根因：`is_ghost_instance` 把 UNREACHABLE 且无容器的行排除出 per-deployment 计数，下一轮就把 slot 1 放进同一节点。**未修** |
 | B-25 | `deploy --replicas` 默认 2 在单节点主机上不可满足 | FIXED（#162） | staging 只有一个 `node` 服务（`deployments/staging/compose.yaml:141`），`publish-data-plugins.sh` 从不传 `--replicas`。改为必填，脚本显式设 `REPLICAS=1` |
 | B-26 | **发布链从不调用 `activate`（B-18 的修复）** | FIXED（#162，未在 staging 跑过） | `deploy --activate` 走完 READY → CAS 激活 → 回读 `effectiveVersion` 断言。15 秒 drain 未改动 |
+| B-27 | **staging 容量墙的四个占用者是活动版本，不是幽灵** | VERIFIED_CODE | 真实主机 SQL：`data-catalog@0.0.2` / `data-integration@0.0.2` / `dev.opsweave.hello@0.0.1` 是 ACTIVE，`data-catalog@0.0.3590` 是 DEGRADED，四个都有容器，正好等于 per-node limit 4。**清理幽灵腾不出位置**。见 `docs/ci/staging-capacity-diagnosis.md` |
+| B-28 | **部分放置不报拒绝原因** | FIXED（#177） | `placement_rejection` 只在 `missing == desired_replicas` 时写进 `status_reason`；部分放置时只有 `0/2 replicas READY`，读起来像还在启动而等待永不收敛。现在每个未完全放置的分支都附上原因。新测试在旧代码上以裸比值失败 |
+| B-29 | **我写过的「planner 无限累积实例行」是错的** | RETRACTED | `deployments.rs:1551` 是 `for slot in 0..desired_replicas`，上界就是副本数。当时写错是因为 #162 的 fixture `nodeSelector` 为空，别的测试留下的 READY 节点成了合法候选，slot 1 有地方可去。**测试污染，不是产品行为** |
+| B-30 | 发布认证链缺失（每个 main commit 无独立结论） | IMPLEMENTED / NOT_RUN | `release-certification.yml` + `scripts/release-receipt.mjs`（ADR-029）。收据可从真实 run 写出并验证（run `44683722691`），篡改 SHA 即 NOT_CERTIFIED。**未创建过任何 tag，未执行过一次认证** |
+| B-31 | **certification 不能读单个 workflow 的 run** | VERIFIED_CODE | 实测：`ci.yml` 的 run 满足不了收据——`quality-faults` 在 `reliability.yml`、`linux-runtime` 在 `platform-linux-acceptance.yml`。收据必须从 **commit 的 check runs** 读。commit `104e058` 根本没有 `quality-faults` 与 `web-unit`，收据正确地拒绝了它 |
+| B-32 | **Ruleset 恢复会删掉其它四条保护** | VERIFIED_CODE | `PUT /rulesets/{id}` 替换整个 `rules` 数组；只提交 `required_status_checks` 会删掉 deletion / non_fast_forward / required_linear_history / pull_request。`check-ruleset-payload.mjs` 拒绝这类载荷，反事实 exit 1 |
 
 ### B-1 为什么「不统计幽灵」不等于「修复」
 
