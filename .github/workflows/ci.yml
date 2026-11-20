@@ -162,7 +162,13 @@ jobs:
           # `error` only. The tree has zero at this level; warning-level findings
           # are dominated by style and would need a suppression pass first - see
           # docs/ci/architecture-proposal.md.
-          shellcheck --severity=error -x tests/acceptance/*.sh tests/ci/*.sh scripts/*.sh
+          # Globbed, not listed - a new script must be checked without anyone
+          # remembering to add it. `find` rather than shell globs because two of
+          # these scripts live one level down (`scripts/tests/`,
+          # `tests/acceptance/lib/`) and a bare `dir/*.sh` silently skips them:
+          # measured, both existed and neither had ever been linted.
+          find tests/acceptance tests/ci scripts -name '*.sh' -type f -print0 \
+            | xargs -0 shellcheck --severity=error -x
 
   rust:
     # ALWAYS RUNS - `rust` is a required context. See the note on `web`.
@@ -1719,6 +1725,12 @@ jobs:
           # offline; the live write/verify path needs a token and belongs to the
           # certification workflow, not here.
           node scripts/release-receipt.mjs --selftest
+          # A new shell script must be linted without anyone remembering to add
+          # it, and a new workflow must be seen. Counts the unpinned actions too,
+          # without failing on them - 126 exist today and making that fatal would
+          # teach people to bypass the check.
+          node tests/ci/check-l0-discovery.mjs --selftest
+          node tests/ci/check-l0-discovery.mjs
           # The analyzer's output is what the gate judges, so its own tests run
           # here too - including the cases that pin the analyzer to the suites a
           # workflow can actually start.
