@@ -632,6 +632,8 @@ bundle 组装成功（`staged opsweave.data-catalog@0.0.17455`），部署因
 | B-35 | **Node runtime 稳态只探 liveness，`readinessPath` 启动后再没人读** | FIXED | `runtime.rs` 的稳态循环只调 `liveness_path`；`readiness_path` 只在启动循环里被读，而那个循环只在 manifest 设了 `startupPath` 时才跑。Kernel 的路由查询要求 `i.state = 'READY'`，所以**启动后失去能力的实例永远不会被摘出轮转**——B-34 修好了探针，但没人问它。现在稳态同时探 liveness 与 readiness，readiness 失败标 `UNHEALTHY`（摘出轮转）**但不计入重启阈值**：重建治不好不可达的依赖，只会变成带额外步骤的崩溃循环。计数逻辑抽成 `next_liveness_failures(previous, alive)`，签名里没有 readiness，所以「把 readiness 折进计数器」不是测试能抓的错误而是**编译错误** |
 | B-36 | **超时到期一律返回 500 INTERNAL / retryable=false** | FIXED | 顶层错误翻译只有 400/413/其它三档。`55P03`（lock_timeout）、`57014`（statement_timeout）、`40001`（序列化失败）、`08xxx`（连接断开）全都落进 `INTERNAL`，也就是告诉调用方「这是永久性故障」——而这四类按构造就是瞬时的。现在 503 + `DEPENDENCY_BLOCKED` / `RESOURCE_EXHAUSTED`，`retryable: true`；分开是因为运维的下一步不同：锁超时去看持有者，取用超时看本实例的池子 |
 | B-37 | **`catalog-readiness-bound` / `catalog-receipt-endpoint` 两个套件不被任何 workflow 执行** | FIXED | `check-spec-coverage` 只统计「有没有被引用」，不统计「有没有真的跑」——两个套件都进了 `b2-plugin-identity` job 的引用，但 receipt 套件此前没有任何地方执行。现在两个都在该 job 里显式 `node --test`，且**分两条命令串行** |
+| B-39 | **`data-integration` 有和 `data-catalog` 一模一样的池子与 readiness 缺陷** | FIXED | 两个插件是**各自的文件、各自部署**，所以在一个里面修好不等于另一个也好。相同三处：`new Pool({max:5})` 无取用上限、`/health/ready` 读启动锁存、超时一律 500。用同一套上限与错误码修掉，并加了 `tests/ci/data-integration-pool.test.mjs`（2 条，各自有反事实）。**教训**：`grep "new Pool("` 只能找到同形，找到之后还得逐个确认——两个文件长得像不代表它们的路由、表名、错误路径也一样 |
+| B-40 | **`validateFields` 抛出的校验错误答 500 INTERNAL** | FIXED | 四种畸形 body（缺 nullable/ordinal、字段名非法、ordinal 重复、fields 为空）实测全部回 `500 INTERNAL / retryable=false`。validator 靠抛异常中止请求，两个 schema 发布调用点不包裹，顶层处理器没有 status 可读。改为让 status 随错误走（`invalid(message)`），未带 status 的抛出仍回 500——那才是真正意外的正确默认 |
 
 ### B-1 为什么「不统计幽灵」不等于「修复」
 
