@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { attributeChecks, checkState, normaliseCheckRun } from './check-run-ledger.mjs';
+import { RED_CONCLUSIONS, attributeChecks, cancellationReason, checkState, normaliseCheckRun } from './check-run-ledger.mjs';
 
 const suite = (id) => ({ check_suite: { id } });
 const check = (name, status, conclusion, suiteId) => ({
@@ -159,4 +159,46 @@ test('normaliseCheckRun keeps status when there is no conclusion', () => {
 test('a conclusion of neutral is not a pass', () => {
   const ledger = attributeChecks([check('x', 'completed', 'neutral', 10)], [wf('.github/workflows/ci.yml', 10)]);
   assert.equal(checkState(ledger.byName, 'x', { workflow: 'ci.yml' }).state, 'failed');
+});
+
+// ---------------------------------------------------------------------------
+// TASK 4: cancelled is a FAIL, and the summary should still say why.
+// ---------------------------------------------------------------------------
+
+test('a cancelled check that was never re-answered explains itself as unanswered', () => {
+  const only = { ...check('rust', 'completed', 'cancelled', 12), started_at: '2026-01-01T00:00:00Z', id: 1 };
+  const ledger = attributeChecks([only], [wf('.github/workflows/ci.yml', 12)]);
+  const reason = cancellationReason(ledger.byName['rust'], ledger.byName['rust'][0]);
+  assert.equal(reason, 'unanswered',
+    'nothing replaced it, so there is no result - this is the case that must keep failing');
+});
+
+test('a cancelled check replaced by a later answer is named superseded, and still fails while it is the latest', () => {
+  const cancelled = { ...check('rust', 'completed', 'cancelled', 13), started_at: '2026-01-01T00:00:00Z', id: 1 };
+  const later = { ...check('rust', 'completed', 'success', 13), started_at: '2026-01-01T00:10:00Z', id: 2 };
+  const ledger = attributeChecks([cancelled, later], [wf('.github/workflows/ci.yml', 13)]);
+  // The REASON is about the cancelled row:
+  assert.equal(cancellationReason(ledger.byName['rust'], ledger.byName['rust'][0]), 'superseded');
+  // ...and the check as a whole passes, because a later attempt answered it.
+  assert.equal(checkState(ledger.byName, 'rust', { workflow: 'ci.yml' }).state, 'success');
+});
+
+test('a cancelled check with a later RED answer is failed, not "superseded and fine"', () => {
+  const cancelled = { ...check('rust', 'completed', 'cancelled', 14), started_at: '2026-01-01T00:00:00Z', id: 1 };
+  const later = { ...check('rust', 'completed', 'failure', 14), started_at: '2026-01-01T00:10:00Z', id: 2 };
+  const ledger = attributeChecks([cancelled, later], [wf('.github/workflows/ci.yml', 14)]);
+  assert.equal(cancellationReason(ledger.byName['rust'], ledger.byName['rust'][0]), 'superseded');
+  assert.equal(checkState(ledger.byName, 'rust', { workflow: 'ci.yml' }).state, 'failed');
+});
+
+test('a cancelled manual run is named manual, not superseded', () => {
+  const run = { ...check('conformance', 'completed', 'cancelled', 15), started_at: '2026-01-01T00:00:00Z', id: 1 };
+  const ledger = attributeChecks([run], [{ ...wf('.github/workflows/runtime-conformance.yml', 15), event: 'workflow_dispatch' }]);
+  assert.equal(cancellationReason(ledger.byName['conformance'], ledger.byName['conformance'][0]), 'manual',
+    'a person asked for this run; it did not finish, so the request went unanswered');
+});
+
+test('cancelled STAYS in RED_CONCLUSIONS', () => {
+  // The whole point of TASK 4 is that classification must not become permission.
+  assert.ok(RED_CONCLUSIONS.has('cancelled'), 'removing cancelled from RED_CONCLUSIONS would let the gate pass on a check that never answered');
 });

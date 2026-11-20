@@ -59,6 +59,50 @@ export const RED_CONCLUSIONS = new Set([
 ]);
 
 /**
+ * WHY a check was cancelled, as far as the evidence on this commit can tell.
+ *
+ * `cancelled` stays in `RED_CONCLUSIONS`. This classifier does not soften that
+ * verdict - it names the reason, so a reader (and a future policy) can tell four
+ * situations apart that currently look identical in the summary:
+ *
+ *   'superseded'      another run of the same name, on the SAME commit, finished
+ *                     AFTER this one was cancelled. The answer was re-answered, so
+ *                     this row is history. On a pull request this is the normal
+ *                     result of pushing twice with `concurrency` enabled.
+ *   'unanswered'      no later attempt exists on this commit. The check was
+ *                     cancelled and nothing replaced it - there is no result,
+ *                     which is the case that must keep failing.
+ *   'manual'          the cancelled run was started by `workflow_dispatch` or
+ *                     `schedule`. A person or a timer asked for it; if it did not
+ *                     finish, the request went unanswered.
+ *   'unattributed'    the API did not give enough to decide.
+ *
+ * IMPORTANT: 'superseded' is still a FAIL for a required check on the commit
+ * being merged. A commit whose own `rust` was cancelled and never re-run is not
+ * verified, whatever cancelled it. The classifier exists so the SUMMARY can say
+ * "superseded" instead of implying a product failure, not so the gate can merge
+ * on it.
+ *
+ * @param {object[]} runs all runs for one check name on one commit
+ * @param {object} target the specific run whose state is being explained
+ */
+export function cancellationReason(runs, target) {
+  if (target?.state !== 'cancelled') return null;
+  const order = (r) => Date.parse(r.startedAt ?? '') || Number(r.runId) || 0;
+  const later = (runs ?? []).filter(
+    (r) => r !== target && r.state !== 'cancelled' && !UNFINISHED_STATUS.has(r.state)
+      && order(r) > order(target),
+  );
+  if (later.length > 0) return 'superseded';
+  const event = target?.event ?? null;
+  if (event === 'workflow_dispatch' || event === 'schedule') return 'manual';
+  if (!target?.runId) return 'unattributed';
+  // A cancelled check with no later attempt on this commit is an answer that does
+  // not exist. It is the case the gate must never learn to ignore.
+  return 'unanswered';
+}
+
+/**
  * Normalise one check run to the facts the gate needs.
  *
  * `conclusion` is null while a run is unfinished, and `status` is the only thing
@@ -98,11 +142,16 @@ export function normaliseCheckRun(run) {
  */
 export function attributeChecks(checkRuns, workflowRuns = []) {
   const suiteToWorkflow = {};
+  // The check-run API does not carry `event`; the workflow run does, and the two
+  // are joined by `check_suite_id`. `cancellationReason` needs it to tell a
+  // cancelled manual run from a cancelled automatic one.
+  const suiteToEvent = {};
   for (const wf of workflowRuns ?? []) {
     if (wf?.check_suite_id == null) continue;
     const path = String(wf.path ?? wf.name ?? '');
     if (!path) continue;
     suiteToWorkflow[String(wf.check_suite_id)] = path.replace(/^\.github\/workflows\//, '');
+    if (wf.event) suiteToEvent[String(wf.check_suite_id)] = String(wf.event);
   }
 
   const byName = {};
@@ -111,6 +160,7 @@ export function attributeChecks(checkRuns, workflowRuns = []) {
     const run = normaliseCheckRun(raw);
     if (!run.name) continue;
     const workflow = run.suiteId == null ? null : (suiteToWorkflow[run.suiteId] ?? null);
+    if (run.suiteId != null && suiteToEvent[run.suiteId]) run.event = suiteToEvent[run.suiteId];
     const entry = { ...run, workflow };
     (byName[run.name] ??= []).push(entry);
     if (workflow == null) unattributed.push(run.name);
