@@ -207,3 +207,42 @@ test('the receipt read requires dataset:read', async () => {
 });
 
 test.after(() => { if (server) server.kill('SIGTERM'); });
+
+test('the receipt status column enforces the contract enum', async () => {
+  // `contracts/schema/sink-receipt.v1.schema.json` allows COMMITTED, REJECTED and
+  // UNKNOWN. The column was bare `text`, so a typo, a future code path, or a
+  // manual INSERT could store anything - and the recovery reader treats an
+  // unrecognised status as "cannot tell", which is the answer it must never be
+  // given by accident.
+  const pool = new pg.Pool({ connectionString: DATABASE_URL });
+  try {
+    // The three the contract names must be accepted.
+    for (const status of ['COMMITTED', 'REJECTED', 'UNKNOWN']) {
+      await pool.query(
+        `INSERT INTO catalog_effect_receipts
+           (receipt_id, effect_id, request_digest, job_id, lease_id, fencing_sequence,
+            pipeline_id, pipeline_revision, sink_node_id, logical_batch_id, dataset_id,
+            schema_revision, source_batch_key, status, accepted, rejected, unknown, errors)
+         VALUES ($1,$2,'d',$3,$4,1,'p',1,'n','l',$5,1,$6,$7,0,0,0,'[]'::jsonb)
+         ON CONFLICT DO NOTHING`,
+        [crypto.randomUUID(), `effect-enum-${status}`, crypto.randomUUID(),
+          crypto.randomUUID(), DATASET_A, `enumbatch-${status}`, status],
+      );
+    }
+    // Anything else must be refused by the database, not by convention.
+    await assert.rejects(
+      pool.query(
+        `INSERT INTO catalog_effect_receipts
+           (receipt_id, effect_id, request_digest, job_id, lease_id, fencing_sequence,
+            pipeline_id, pipeline_revision, sink_node_id, logical_batch_id, dataset_id,
+            schema_revision, source_batch_key, status, accepted, rejected, unknown, errors)
+         VALUES ($1,'effect-enum-bad','d',$2,$3,1,'p',1,'n','l',$4,1,'enumbatch-bad','PARTIAL',0,0,0,'[]'::jsonb)`,
+        [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), DATASET_A],
+      ),
+      /violates check constraint|check constraint/i,
+      'PARTIAL is not in the contract enum and must be refused by the column',
+    );
+  } finally {
+    await pool.end();
+  }
+});

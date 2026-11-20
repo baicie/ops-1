@@ -220,7 +220,7 @@ async function initDb() {
       dataset_id uuid NOT NULL,
       schema_revision integer NOT NULL,
       source_batch_key text NOT NULL,
-      status text NOT NULL,
+      status text NOT NULL CHECK (status IN ('COMMITTED','REJECTED','UNKNOWN')),
       accepted integer NOT NULL,
       rejected integer NOT NULL,
       unknown integer NOT NULL DEFAULT 0,
@@ -334,6 +334,30 @@ async function initDb() {
     ALTER TABLE catalog_datasets ALTER COLUMN workspace_id SET NOT NULL;
     CREATE INDEX IF NOT EXISTS catalog_datasets_workspace_idx
       ON catalog_datasets (workspace_id, created_at DESC);
+
+    -- THE CHECK HAS TO BE ADDED, NOT ONLY DECLARED.
+    --
+    -- CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so
+    -- a CHECK written inside it applies to fresh databases only: every existing
+    -- deployment keeps the unconstrained column while the source says otherwise.
+    -- Measured - after adding the CHECK to the CREATE and restarting,
+    -- pg_constraint still held zero check constraints on this table and PARTIAL
+    -- still inserted.
+    --
+    -- Adding it separately is what makes the declaration true for databases
+    -- created before it. Idempotent, so the second boot is a no-op.
+    DO $mig$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'catalog_effect_receipts'::regclass
+           AND conname = 'catalog_effect_receipts_status_check'
+      ) THEN
+        ALTER TABLE catalog_effect_receipts
+          ADD CONSTRAINT catalog_effect_receipts_status_check
+          CHECK (status IN ('COMMITTED','REJECTED','UNKNOWN'));
+      END IF;
+    END $mig$;
   `);
   ready = true;
 }
