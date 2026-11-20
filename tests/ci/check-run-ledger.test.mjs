@@ -113,13 +113,39 @@ test('a later red attempt is not masked by an earlier green one', () => {
 
 test('an unbalanced attempt is not the answer while an unfinished one exists', () => {
   // A re-run in flight: the old attempt is green, the new one has not finished.
-  // "Latest COMPLETED" would answer success and hide the in-flight retry - which
-  // is only correct if the caller has decided not to wait. `whatToAwait` in
-  // await-delegated.mjs is what makes that decision, so this function stays
-  // literal about completed attempts.
+  //
+  // THIS TEST USED TO ASSERT 'success', and its own comment gave the reasoning:
+  // "`whatToAwait` in await-delegated.mjs is what makes that decision, so this
+  // function stays literal about completed attempts." That was wrong, and the
+  // name of the test already said so.
+  //
+  // Measured: `whatToAwait` asks `checkState` and only waits on `pending`
+  // (await-delegated.mjs:94-95). With `checkState` answering `success`, the
+  // caller never waits either. So the two functions agreed with each other and
+  // neither one looked at the in-flight re-run.
+  //
+  // GitHub creates a NEW check run for every re-run and leaves the old attempt
+  // `completed` for ever - measured on SHA cc7be5c (run 44524547400,
+  // run_attempt 2), which has `golden-path id=135561535255 completed/failure`
+  // AND `id=135572060029 completed/success`. For the whole duration of a re-run
+  // the old green attempt is still readable, so "latest completed" answered
+  // `success` for a suite that was actively being re-run because someone had
+  // found a problem with it.
   const old = { ...check('x', 'completed', 'success', 9), started_at: '2026-01-01T00:00:01Z', id: 1 };
   const running = { ...check('x', 'in_progress', null, 9), started_at: '2026-01-01T00:10:00Z', id: 2 };
   const ledger = attributeChecks([old, running], [wf('.github/workflows/ci.yml', 9)]);
+  const st = checkState(ledger.byName, 'x', { workflow: 'ci.yml' });
+  assert.equal(st.state, 'pending', 'the in-flight attempt is the answer, and it has none yet');
+  assert.match(st.reason, /re-run/, 'and the reason must say a re-run is in flight');
+});
+
+test('a stale unfinished attempt older than the last completed one does not block', () => {
+  // The mirror case, and the reason the rule compares timestamps instead of
+  // counting unfinished runs. A check run that was left hanging before the
+  // attempt that DID finish must not hold the gate open for ever.
+  const stale = { ...check('x', 'in_progress', null, 9), started_at: '2026-01-01T00:00:01Z', id: 1 };
+  const done = { ...check('x', 'completed', 'success', 9), started_at: '2026-01-01T00:10:00Z', id: 2 };
+  const ledger = attributeChecks([stale, done], [wf('.github/workflows/ci.yml', 9)]);
   assert.equal(checkState(ledger.byName, 'x', { workflow: 'ci.yml' }).state, 'success');
 });
 
