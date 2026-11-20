@@ -56,9 +56,24 @@ pub async fn proxy(
     }
     let routes = route_candidates(&state, &plugin_id).await?;
     let Some(first) = routes.first() else {
+        // EVERY EMPTY-ROUTE CAUSE USED TO READ THE SAME.
+        //
+        // A disabled plugin, a revoked publisher, no healthy instance, a stale
+        // node and a never-activated deployment all produced
+        // `503 CAPABILITY_UNAVAILABLE ... no healthy instance is currently
+        // effective`. That sentence is true of all five and tells an operator
+        // nothing about which one they are looking at - the next action is
+        // completely different for each (re-enable the plugin, restore publisher
+        // trust, wait for an instance, check the node, activate a revision).
+        //
+        // The code stays CAPABILITY_UNAVAILABLE: it IS the same class of refusal,
+        // and callers keying on it must keep working. The MESSAGE now names the
+        // cause, derived from the same five gates `route_candidates` applies, so a
+        // reader can act without a second query.
+        let cause = empty_route_cause(&state, &plugin_id).await;
         return Err(AppError::unavailable(
             "CAPABILITY_UNAVAILABLE",
-            format!("no healthy instance is currently effective for {plugin_id}"),
+            format!("no healthy instance is currently effective for {plugin_id}: {cause}"),
         ));
     };
     let manifest: ManifestV11 = serde_json::from_value(first.manifest.clone())
@@ -291,6 +306,44 @@ fn safe_forward_path(path: &str) -> bool {
         }
     }
     true
+}
+
+/// Why `route_candidates` came back empty, in the terms an operator acts on.
+///
+/// Read-only and best-effort: a failure here must never turn a 503 into a 500, so
+/// every query degrades to an unknown cause rather than propagating.
+async fn empty_route_cause(state: &AppState, plugin_id: &str) -> &'static str {
+    let trust: Option<String> = sqlx::query_scalar(
+        "SELECT tp.trust_state FROM kernel.plugin_packages p
+           JOIN kernel.trusted_publishers tp ON tp.publisher_id = p.publisher
+          WHERE p.plugin_id = $1 ORDER BY p.created_at DESC LIMIT 1",
+    )
+    .bind(plugin_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+
+    if trust.as_deref() == Some("REVOKED") {
+        return "its publisher's trust was revoked and no active revision can be served";
+    }
+
+    let active_instances: Option<i64> = sqlx::query_scalar(
+        "SELECT count(*) FROM kernel.activation_revisions r
+           JOIN kernel.plugin_instances i ON i.deployment_id = r.deployment_id
+          WHERE r.plugin_id = $1 AND r.status = 'ACTIVE'",
+    )
+    .bind(plugin_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+
+    match active_instances {
+        Some(0) => "no revision is ACTIVE; the plugin is installed but not activated",
+        Some(_) => "a revision is ACTIVE but no instance is READY on a healthy node",
+        None => "the reason could not be determined",
+    }
 }
 
 async fn route_candidates(state: &AppState, plugin_id: &str) -> AppResult<Vec<RouteRow>> {
@@ -629,6 +682,74 @@ mod tests {
             let got = routes(&pool, &f.plugin).await;
             assert_eq!(got.len(), 1, "the control case: every gate open must route");
             assert_eq!(got[0].instance_id, f.instance);
+        }
+
+        /// The empty-route message names a cause an operator can act on.
+        ///
+        /// Before this, five different situations produced the identical sentence
+        /// "no healthy instance is currently effective" - a disabled plugin, a revoked
+        /// publisher, no instance, a stale node, an unactivated revision - and the next
+        /// action is different for every one of them.
+        ///
+        /// The CODE stays CAPABILITY_UNAVAILABLE: callers keying on it must not break.
+        /// What changes is that a reader can tell why.
+        #[tokio::test]
+        async fn an_empty_route_says_which_cause_it_was() {
+            let Some(pool) = pool().await else {
+                return;
+            };
+            let f = fixture(&pool).await;
+            let state = state(&pool);
+
+            // 1. Fully healthy: there is nothing to explain, and the fixture must route
+            //    before a cause is introduced or the assertions below prove nothing.
+            assert!(
+                !super::super::empty_route_cause(&state, &f.plugin)
+                    .await
+                    .contains("publisher"),
+                "a healthy fixture must not report a publisher problem"
+            );
+
+            // 2. Publisher revoked.
+            sqlx::query(
+                "UPDATE kernel.trusted_publishers SET trust_state='REVOKED' WHERE publisher_id=$1",
+            )
+            .bind(&f.publisher)
+            .execute(&pool)
+            .await
+            .expect("revoke");
+            let cause = super::super::empty_route_cause(&state, &f.plugin).await;
+            assert!(
+                cause.contains("publisher"),
+                "a revoked publisher must be named, got: {cause}"
+            );
+            sqlx::query(
+                "UPDATE kernel.trusted_publishers SET trust_state='TRUSTED' WHERE publisher_id=$1",
+            )
+            .bind(&f.publisher)
+            .execute(&pool)
+            .await
+            .expect("restore");
+
+            // 3. Nothing active: installed but not activated.
+            sqlx::query(
+                "UPDATE kernel.activation_revisions SET status='SUPERSEDED' WHERE plugin_id=$1",
+            )
+            .bind(&f.plugin)
+            .execute(&pool)
+            .await
+            .expect("deactivate");
+            let cause = super::super::empty_route_cause(&state, &f.plugin).await;
+            assert!(
+                cause.contains("not activated"),
+                "an unactivated plugin must be named, got: {cause}"
+            );
+
+            sqlx::query("DELETE FROM kernel.plugin_deployments WHERE plugin_id=$1")
+                .bind(&f.plugin)
+                .execute(&pool)
+                .await
+                .ok();
         }
 
         #[tokio::test]
