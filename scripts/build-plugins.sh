@@ -175,10 +175,27 @@ if [ ! -x plugins/hello-java/jre/bin/java ]; then
   [ -x plugins/hello-java/jre/bin/java ] || { echo "the Java plugin JRE was not produced ($JRE_SOURCE)" >&2; exit 1; }
   echo "Java plugin JRE source: $JRE_SOURCE" >&2
 fi
+# `-B`, not `-q`.
+#
+# This was `-q`, which suppresses INFO - including `Downloading from central:`
+# and `Downloaded from central:`. When this build failed once (run 44666711786)
+# the only line left was
+#
+#   Could not find artifact org.springframework.boot:spring-boot-starter-parent:pom:3.3.5
+#
+# which reads as "that version is not published". It was published, and the same
+# environment built it hours later (run 44674095884, see
+# docs/ci/plugin-lifecycle-maven-failure.md). The expensive part of that incident
+# was not the failure - it was that the log could not say what had happened, so
+# answering it needed a dedicated diagnostic workflow.
+#
+# Batch mode keeps the output non-interactive and keeps warnings and errors; it
+# gives up only the progress noise. It does not make failures less likely - it
+# makes the next one explain itself.
 if [ -x /opt/homebrew/opt/openjdk@21/bin/java ]; then
-  JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -f plugins/hello-java/pom.xml -DskipTests package
+  JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -B -f plugins/hello-java/pom.xml -DskipTests package
 else
-  mvn -q -f plugins/hello-java/pom.xml -DskipTests package
+  mvn -B -f plugins/hello-java/pom.xml -DskipTests package
 fi
 JAVA_BUILD="$(sha256_file plugins/hello-java/target/hello-java-0.0.1.jar)"
 docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION=0.0.1 --build-arg CAPABILITY_DIGEST="$JAVA_CAP" --build-arg BUILD_DIGEST="$JAVA_BUILD" -t "$REGISTRY/opsweave/hello-java:0.0.1" plugins/hello-java >/dev/null
