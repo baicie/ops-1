@@ -59,8 +59,14 @@ on:
 concurrency:
   # One per ref: a conformance run owns a Docker daemon, a PostgreSQL database
   # and a registry, and two of them on one runner would fight over the ports.
+  #
+  # `cancel-in-progress` is an expression, not `true`. This workflow has a
+  # `workflow_dispatch` trigger, and a bare `true` cancels a run somebody started
+  # BY HAND the moment a push arrives on the same ref - which is not that push
+  # superseding anything, it is the push discarding a request a person made. The
+  # push and the manual run are both legitimate and answer different questions.
   group: runtime-conformance-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 jobs:
   conformance:
