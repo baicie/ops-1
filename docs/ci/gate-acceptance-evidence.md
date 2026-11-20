@@ -236,3 +236,5 @@ verdict: FAIL
 
 **建议的迁移顺序不变**：先加 `ci-gate` 作为第十项（保留原九项），观察若干个 PR，
 确认它稳定产生且不误判，再讨论是否缩减。直接「九项改一项」不符合本文件任何一条证据。
+
+<!-- ruleset verification: required checks removed 2026-11-20 -->
