@@ -60,12 +60,16 @@ concurrency:
   # One per ref: a conformance run owns a Docker daemon, a PostgreSQL database
   # and a registry, and two of them on one runner would fight over the ports.
   #
-  # `cancel-in-progress` is an expression, not `true`. This workflow has a
-  # `workflow_dispatch` trigger, and a bare `true` cancels a run somebody started
-  # BY HAND the moment a push arrives on the same ref - which is not that push
-  # superseding anything, it is the push discarding a request a person made. The
-  # push and the manual run are both legitimate and answer different questions.
-  group: runtime-conformance-${{ github.ref }}
+  # `cancel-in-progress` names the automatic events, and the GROUP keeps
+  # protected runs apart.
+  #
+  # An expression alone is not enough, and #170 proved it: `cancel-in-progress`
+  # is read from the INCOMING run, so a push evaluating `true` cancels whatever
+  # is running in the group it joins - including a manual run, which that
+  # expression never mentions. The group has to differ, not just the flag. A
+  # `workflow_dispatch` or `schedule` run therefore gets a group keyed on its own
+  # `run_id`, and no automatic run can land in it.
+  group: runtime-conformance-${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && format('protected-{0}', github.run_id) || format('auto-{0}', github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 jobs:

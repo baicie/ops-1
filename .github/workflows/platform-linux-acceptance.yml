@@ -66,27 +66,40 @@ on:
     # the build.
   workflow_dispatch:
 
-# Supersede the previous run for the SAME ref, but only when a newer one was
-# triggered the same automatic way.
+# Supersede the previous run for the same ref - but keep protected runs (a
+# `workflow_dispatch`, a `schedule`) in a group of their own.
 #
-# `cancel-in-progress` unconditionally would be wrong here, and the existing
-# `staging-preview.yml` shows why: it keeps three separate buckets so a push can
-# never cancel a nightly certification. The same reasoning applies to every
-# suite in this file - a `workflow_dispatch` is a person asking for THIS run, and
-# a `schedule` is a run whose whole purpose is to exist at a fixed time. Neither
-# is "superseded" by the next push, so neither is cancelled by one.
+# THE DEFECT THIS FIXES, twice over.
 #
-# What IS superseded: a push to main followed by another push to main, or a new
-# commit on a pull request branch. The older run is now testing a tree nobody
-# will merge, and on 2026-11-20 six merges in one minute queued four identical
-# `ci.yml` runs that each spent a full suite-worth of billed minutes on commits
-# already superseded.
+# The previous version was `group: ${{ github.workflow }}-${{ github.ref }}` with
+# `cancel-in-progress: ${{ event_name == 'pull_request' || event_name == 'push' }}`.
+# Two things were wrong with it:
 #
-# `cancel-in-progress` takes an expression here rather than `true`: GitHub
-# evaluates it per run, and for a `workflow_dispatch` or `schedule` event this
-# is `false`, so those runs are never cancelled out from under themselves.
+#   1. `cancel-in-progress` is evaluated by the INCOMING run, against the group it
+#      is joining. A push whose expression is `true` therefore cancels whatever is
+#      RUNNING in that group - including a `workflow_dispatch` somebody started by
+#      hand. The expression never mentions dispatch; the shared GROUP is what put
+#      them in each other's way.
+#
+#   2. Even at `cancel-in-progress: false`, GitHub's default `queue: single`
+#      displaces an already-PENDING run: "any existing pending job or workflow run
+#      in the same concurrency group is canceled" and the newcomer takes its slot.
+#      So two manual runs queued behind a push lose one of them, flag or no flag.
+#
+# Both dissolve when the group differs by event class. A protected run gets a
+# group keyed on its own `run_id`, so no automatic run can ever share a group
+# with it; an automatic run gets the ref, so a newer push still supersedes an
+# older one on the same branch and never touches another branch.
+#
+# `queue: max` would be the other way to protect a pending manual run, but it is
+# not available here: actionlint's schema (1.7.7 in this repository's CI) rejects
+# `queue:` as an unknown key, so it cannot be linted, let alone relied on.
+#
+# `tests/ci/check-concurrency-supersede.mjs` evaluates these two expressions
+# against an arrival matrix and simulates the cancellation rules - it does not
+# match substrings, because a substring match is what passed the broken version.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && format('protected-{0}', github.run_id) || format('auto-{0}', github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 jobs:
