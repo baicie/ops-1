@@ -186,13 +186,40 @@ export function checkState(byName, name, opts = {}) {
     return { state: 'pending', runs, reason: `check named "${name}" is ${[...new Set(runs.map((r) => r.state))].join('/')}` };
   }
 
-  // Latest completed attempt decides. `started_at` may be null on an old run;
-  // fall back to the run id, which is monotonic per repository.
-  const latest = completed.reduce((a, b) => {
-    const ta = Date.parse(a.startedAt ?? '') || Number(a.runId) || 0;
-    const tb = Date.parse(b.startedAt ?? '') || Number(b.runId) || 0;
-    return tb >= ta ? b : a;
-  });
+  const attemptOrder = (r) => Date.parse(r.startedAt ?? '') || Number(r.runId) || 0;
+
+  // A RE-RUN IS IN FLIGHT. The attempt decided below must not be used yet.
+  //
+  // GitHub's re-run API does not reuse a check run: it creates a NEW one and
+  // leaves the old attempt `completed` for ever. Measured on this repository,
+  // SHA cc7be5c (run 44524547400, run_attempt 2):
+  //
+  //   golden-path id=135561535255 completed/failure  12:32:32   (attempt 1)
+  //   golden-path id=135572060029 completed/success  12:50:07   (attempt 2)
+  //
+  // During attempt 2 the first row is still `success` or `failure` - it is a
+  // finished attempt and nothing rewrites it. So "latest completed attempt" is
+  // green for the whole duration of a re-run that may be about to fail, and a
+  // gate reading that snapshot merges on an answer the re-run was called to
+  // revisit. That is the race: re-run a red suite, and for the several minutes
+  // it takes to run again the commit looks green.
+  //
+  // The fix is an ordering rule, not a new state: an unfinished attempt that
+  // STARTED AFTER the latest completed one means the answer is not settled yet.
+  // The mirror case - an unfinished attempt that started BEFORE a completed one -
+  // is a stale duplicate and must not block, which is why this compares times
+  // rather than counting.
+  const unfinished = runs.filter((r) => UNFINISHED_STATUS.has(r.state));
+  const latestCompleted = completed.reduce((a, b) => (attemptOrder(b) >= attemptOrder(a) ? b : a));
+  if (unfinished.some((r) => attemptOrder(r) >= attemptOrder(latestCompleted))) {
+    const pendingRun = unfinished.reduce((a, b) => (attemptOrder(b) >= attemptOrder(a) ? b : a));
+    return {
+      state: 'pending',
+      runs,
+      reason: `check named "${name}" was re-run and attempt started ${pendingRun.startedAt ?? 'after the last completed one'} is still ${pendingRun.state}; the completed attempt before it is not the answer`,
+    };
+  }
+  const latest = latestCompleted;
 
   if (latest.state === 'success') return { state: 'success', runs, reason: `check named "${name}" succeeded` };
   if (latest.state === 'skipped') return { state: 'skipped', runs, reason: `check named "${name}" was skipped` };
