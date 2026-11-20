@@ -36,13 +36,23 @@ pub async fn proxy(
     headers: HeaderMap,
     body: Bytes,
 ) -> AppResult<Response> {
-    if !matches!(
-        auth.role,
+    // A COMPILE-TIME GUARD, not a runtime one.
+    //
+    // This was `if !matches!(auth.role, Admin | Operator | Viewer) { 403 }`, and
+    // `Role` has exactly those three variants (`crates/contracts/src/lib.rs:745`).
+    // The condition is unsatisfiable, the branch is unreachable, and the 403 it
+    // returns has never been produced by any request - a check that reads like a
+    // defence and can never fire. It looked like the role guard was tested; it
+    // was not, because there is nothing to test.
+    //
+    // What the code actually wants is "every Role may read through the gateway,
+    // and a new one must not silently acquire that". An exhaustive match gives
+    // that at COMPILE time, where it cannot be bypassed and where adding a variant
+    // fails the build instead of shipping an untested path.
+    match auth.role {
         opsweave_contracts::Role::Admin
-            | opsweave_contracts::Role::Operator
-            | opsweave_contracts::Role::Viewer
-    ) {
-        return Err(AppError::forbidden("unsupported role"));
+        | opsweave_contracts::Role::Operator
+        | opsweave_contracts::Role::Viewer => {}
     }
     let routes = route_candidates(&state, &plugin_id).await?;
     let Some(first) = routes.first() else {
@@ -143,21 +153,9 @@ pub async fn proxy(
             request = request.header(name, value);
         }
         for (name, value) in headers.iter() {
-            let name_str = name.as_str().to_ascii_lowercase();
-            if matches!(
-                name_str.as_str(),
-                "host"
-                    | "authorization"
-                    | "cookie"
-                    | "content-length"
-                    | "connection"
-                    | "transfer-encoding"
-                    | "upgrade"
-            ) || name_str.starts_with("x-opsweave-")
-            {
-                continue;
+            if forwards_to_plugin(name.as_str()) {
+                request = request.header(name, value);
             }
-            request = request.header(name, value);
         }
         if !body.is_empty() {
             request = request.body(body.clone());
@@ -249,6 +247,37 @@ fn identity_headers(user_id: Uuid, user_context: &str) -> Vec<(&'static str, Str
     ]
 }
 
+/// Whether a caller-supplied header may be copied to the plugin.
+///
+/// Extracted from the forwarding loop so the RULE can be tested directly. The
+/// earlier test re-typed the `matches!` arm inside the test body - so deleting the
+/// guard from the loop left it green, because it was comparing the test's copy of
+/// the rule against the test's copy of the rule.
+///
+/// Two classes are refused:
+///   * `x-opsweave-*` - the gateway owns every name in that namespace.
+///     `identity_headers` sets the two signed ones BEFORE this loop runs, so a
+///     forged `x-opsweave-user-context` would overwrite it if this did not skip.
+///   * hop-by-hop and credential headers - forwarding `authorization` would hand a
+///     plugin the caller's token, and `host` would let a caller pick the TLS/SNI
+///     identity the plugin sees.
+pub(crate) fn forwards_to_plugin(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if lower.starts_with("x-opsweave-") {
+        return false;
+    }
+    !matches!(
+        lower.as_str(),
+        "host"
+            | "authorization"
+            | "cookie"
+            | "content-length"
+            | "connection"
+            | "transfer-encoding"
+            | "upgrade"
+    )
+}
+
 fn safe_forward_path(path: &str) -> bool {
     if path.contains('\0') || path.contains('\\') || path.contains('\\') {
         return false;
@@ -299,7 +328,7 @@ mod tests {
     // `route_candidates` is imported inside `route_gates` instead: it only
     // exists with the default features, and a top-level import breaks
     // `cargo clippy --no-default-features -- -D warnings` with "unused import".
-    use super::{identity_headers, safe_forward_path};
+    use super::{forwards_to_plugin, identity_headers, safe_forward_path};
     use uuid::Uuid;
 
     #[test]
@@ -326,6 +355,69 @@ mod tests {
         assert!(!safe_forward_path("/api/%2E%2E/admin"));
         assert!(!safe_forward_path("/api/%2fadmin"));
         assert!(!safe_forward_path("/api\\admin"));
+    }
+
+    /// A client-supplied identity header must not survive to the plugin.
+    ///
+    /// The forwarding loop skips any name starting with `x-opsweave-` and a fixed
+    /// list of hop-by-hop and credential headers. That ordering matters and was
+    /// never asserted: `identity_headers` is applied BEFORE the copy loop, so if
+    /// the copy did not skip the prefix, a forged `x-opsweave-user-context` would
+    /// overwrite the Kernel-signed one and the plugin would believe whatever the
+    /// caller wrote.
+    ///
+    /// This is the header-injection case TASK-25 lists and nothing tested. The
+    /// assertion is on the FORWARDING RULE rather than on a live socket, because
+    /// the rule is where the decision is made.
+    #[test]
+    fn a_caller_cannot_smuggle_an_identity_header_past_the_gateway() {
+        // Every name the copy loop must refuse, in the spelling a client would
+        // send it. `to_ascii_lowercase` in the loop means an upper-case variant is
+        // the same header, so both spellings are listed.
+        let refused = [
+            "x-opsweave-user-id",
+            "x-opsweave-user-context",
+            "X-OpsWeave-User-Context",
+            "x-opsweave-user-role",
+            "x-opsweave-plugin-id",
+            "x-opsweave-anything-new",
+            "host",
+            "authorization",
+            "Authorization",
+            "cookie",
+            "content-length",
+            "connection",
+            "transfer-encoding",
+            "upgrade",
+        ];
+        for name in refused {
+            assert!(
+                !forwards_to_plugin(name),
+                "\"{name}\" would be forwarded to the plugin; a caller could set an \
+                 identity or credential header the gateway is supposed to own"
+            );
+        }
+
+        // The inverse: ordinary request headers must still reach the plugin, or
+        // "safe" would mean "the gateway drops the request body's metadata".
+        for name in ["content-type", "accept", "x-request-id", "if-none-match"] {
+            assert!(
+                forwards_to_plugin(name),
+                "\"{name}\" is a normal header and must be forwarded"
+            );
+        }
+
+        // And the signed set the gateway DOES send is exactly two names. Adding a
+        // third is a security decision, which is why it is pinned.
+        let signed: Vec<&str> = identity_headers(Uuid::nil(), "owu1.a.b")
+            .iter()
+            .map(|(n, _)| *n)
+            .collect();
+        assert_eq!(
+            signed,
+            vec!["x-opsweave-user-id", "x-opsweave-user-context"],
+            "the signed identity header set changed; every plugin reads this contract"
+        );
     }
 
     /// The five gates `route_candidates` puts between a plugin id and a socket.

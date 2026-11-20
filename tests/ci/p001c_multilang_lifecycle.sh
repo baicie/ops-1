@@ -407,16 +407,43 @@ for dep in d.get('deployments') or []:
     [ -n "$b" ] && args+=(-H 'content-type: application/json' --data-binary "$b")
     curl "${args[@]}" "$KERNEL_URL$p" 2>/dev/null || echo 000
   }
+  # Same call, but the answer keeps the ERROR CODE alongside the status.
+  #
+  # `api` returns the status alone, so any 503 looked like a correct refusal.
+  # 503 is what the gateway returns when a capability has no healthy instance -
+  # and it is also what it returns when the kernel cannot reach the database. Two
+  # very different facts, one number. Everything below that asserts a REFUSAL uses
+  # this instead, and requires the code the kernel is supposed to send.
+  api_code() { # method, path, [body] -> "status code", or "000 none"
+    local m="$1" p="$2" b="${3:-}"
+    local key body
+    key="p001c-ml-$m-$(printf '%s' "$p" | tr '/' '-')-$(date +%s%N)"
+    local args=(-sS -o /tmp/p001c-ml-body.$$ -w '%{http_code}' -m 20 -X "$m"
+                -H "Authorization: Bearer $SESSION_TOKEN"
+                -H "Idempotency-Key: $key")
+    [ -n "$b" ] && args+=(-H 'content-type: application/json' --data-binary "$b")
+    local status
+    status="$(curl "${args[@]}" "$KERNEL_URL$p" 2>/dev/null || echo 000)"
+    body="$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get("code") or "none")
+except Exception: print("none")' /tmp/p001c-ml-body.$$ 2>/dev/null || echo none)"
+    rm -f /tmp/p001c-ml-body.$$
+    printf '%s %s' "$status" "$body"
+  }
 
   DIS="$(api POST "/api/v1/plugins/$plugin/disable" '{}')"
   case "$DIS" in
     200|202|204)
-      REFUSED="$(api GET "/api/v1/gateway/$plugin/api/hello")"
-      if [ "$REFUSED" = "503" ]; then
-        row "$lang" "disable -> gateway refuses (503)" PASS ""
+      REFUSED="$(api_code GET "/api/v1/gateway/$plugin/api/hello")"
+      # STATUS **AND** CODE. A bare 503 is what the gateway returns when a
+      # capability has no healthy instance - and also what it returns when the
+      # kernel cannot reach the database. Accepting the number alone records a
+      # database outage as "the disable worked".
+      if [ "$REFUSED" = "503 CAPABILITY_UNAVAILABLE" ]; then
+        row "$lang" "disable -> gateway refuses (503 CAPABILITY_UNAVAILABLE)" PASS ""
         PASS=$((PASS+1))
       else
-        row "$lang" "disable -> gateway refuses (503)" FAIL "got HTTP $REFUSED"
+        row "$lang" "disable -> gateway refuses (503 CAPABILITY_UNAVAILABLE)" FAIL "got HTTP $REFUSED"
         FAIL=$((FAIL+1))
       fi
       ENA="$(api POST "/api/v1/plugins/$plugin/enable" '{}')"
@@ -472,12 +499,13 @@ for dep in d.get("deployments") or []:
   UNI="$(api POST "/api/v1/plugins/$plugin/uninstall" '{}')"
   case "$UNI" in
     200|202|204)
-      AFTER="$(api GET "/api/v1/gateway/$plugin/api/hello")"
-      if [ "$AFTER" = "503" ]; then
-        row "$lang" "uninstall -> gateway refuses (503)" PASS ""
+      AFTER="$(api_code GET "/api/v1/gateway/$plugin/api/hello")"
+      # STATUS AND CODE, for the same reason as the disable case above.
+      if [ "$AFTER" = "503 CAPABILITY_UNAVAILABLE" ]; then
+        row "$lang" "uninstall -> gateway refuses (503 CAPABILITY_UNAVAILABLE)" PASS ""
         PASS=$((PASS+1))
       else
-        row "$lang" "uninstall -> gateway refuses (503)" FAIL "got HTTP $AFTER"
+        row "$lang" "uninstall -> gateway refuses (503 CAPABILITY_UNAVAILABLE)" FAIL "got HTTP $AFTER"
         FAIL=$((FAIL+1))
       fi ;;
     000) row "$lang" "uninstall" NOT_RUN "HTTP 000"; NOT_RUN=$((NOT_RUN+1)) ;;
