@@ -124,13 +124,57 @@ test('ci.yml reads check runs for the PR head, not the merge commit', async () =
 // satisfied by a gate that always returns the same answer.
 const E2E_REPO = 'baicie/ops-1';
 
+/**
+ * Whether the two end-to-end cases below can run here.
+ *
+ * They read real check runs through `gh`, which needs a token. The selftest step
+ * in `ci.yml` runs WITHOUT one - measured on PR #167, where both cases failed with
+ * `delegated-api-error` because `gh` had no credential. The test was correct
+ * locally (a developer's `gh` is authenticated) and wrong in the only environment
+ * that matters.
+ *
+ * So they are skipped, LOUDLY, with the reason recorded. Skipping is the right
+ * answer and not a loophole: `ci-gate`'s Decide step runs the same `--fetch` path
+ * with `GH_TOKEN` on every PR, and that is the production caller. These cases
+ * exist to catch a regression in the pieces on the way there, and a regression in
+ * those pieces also fails `check-run-ledger.test.mjs`, `await-delegated.test.mjs`
+ * and the selftest.
+ *
+ * `OPSWEAVE_REQUIRE_LIVE_API=1` turns the skip into a failure, for a job that does
+ * have a token and wants to prove these ran.
+ */
+function liveApiSkipReason() {
+  // A token in the environment is the CI case. A developer's `gh` is not - it
+  // stores its credential in the keyring and sets no variable, so checking
+  // `process.env` alone skipped these cases for the one person who can run them.
+  // `gh auth status` asks the command that would actually be used.
+  let authed = Boolean(process.env.GH_TOKEN || process.env.GITHUB_TOKEN);
+  if (!authed) {
+    try {
+      execFileSync('gh', ['auth', 'status'], { stdio: 'ignore' });
+      authed = true;
+    } catch {
+      authed = false;
+    }
+  }
+  if (authed) return false;
+  if (process.env.OPSWEAVE_REQUIRE_LIVE_API === '1') {
+    assert.fail('OPSWEAVE_REQUIRE_LIVE_API=1 but neither GH_TOKEN nor GITHUB_TOKEN is set: '
+      + 'the end-to-end cases cannot reach the check-run API, and letting them pass would be false');
+  }
+  return 'no GH_TOKEN in this step, so the check-run API is unreadable; the same --fetch path '
+    + 'runs in ci-gate\'s Decide step WITH a token';
+}
+
 /** Every ci.yml job green, so the gate is judged on the delegated results. */
 async function allJobsGreen() {
   const { JOB_TO_SUITE } = await import('./ci-gate.mjs');
   return JSON.stringify(Object.fromEntries(Object.keys(JOB_TO_SUITE).map((j) => [j, 'success'])));
 }
 
-test('entry point, PASS: a real commit where the staging deploy failed and the gate still passes', async () => {
+test('entry point, PASS: a real commit where the staging deploy failed and the gate still passes', async (t) => {
+  const skip = liveApiSkipReason();
+  if (skip) { t.skip(skip); return; }
   // `ca257fd` is a real commit with an awkward shape: 31 check runs across nine
   // workflows, `deploy to staging host` FAILURE, three `seeded-data` jobs and
   // `smoke the preview` SKIPPED, and `ci-gate` itself present. Pinned by SHA: a
@@ -179,7 +223,9 @@ test('entry point, PASS: a real commit where the staging deploy failed and the g
   );
 });
 
-test('entry point, FAIL: the same repository, a commit whose required check is red', () => {
+test('entry point, FAIL: the same repository, a commit whose required check is red', (t) => {
+  const skip = liveApiSkipReason();
+  if (skip) { t.skip(skip); return; }
   // The control. Without it the test above is satisfied by a gate that always
   // exits 0.
   //
