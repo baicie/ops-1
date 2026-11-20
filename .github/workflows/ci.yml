@@ -10,6 +10,29 @@ on:
 # `pull_request` trigger at all.
 permissions:
   contents: read
+# Supersede the previous run for the SAME ref, but only when a newer one was
+# triggered the same automatic way.
+#
+# `cancel-in-progress` unconditionally would be wrong here, and the existing
+# `staging-preview.yml` shows why: it keeps three separate buckets so a push can
+# never cancel a nightly certification. The same reasoning applies to every
+# suite in this file - a `workflow_dispatch` is a person asking for THIS run, and
+# a `schedule` is a run whose whole purpose is to exist at a fixed time. Neither
+# is "superseded" by the next push, so neither is cancelled by one.
+#
+# What IS superseded: a push to main followed by another push to main, or a new
+# commit on a pull request branch. The older run is now testing a tree nobody
+# will merge, and on 2026-11-20 six merges in one minute queued four identical
+# `ci.yml` runs that each spent a full suite-worth of billed minutes on commits
+# already superseded.
+#
+# `cancel-in-progress` takes an expression here rather than `true`: GitHub
+# evaluates it per run, and for a `workflow_dispatch` or `schedule` event this
+# is `false`, so those runs are never cancelled out from under themselves.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+
 jobs:
   # Which suites does this change actually require? Answered ONCE, here, and read
   # by every job that is expensive enough to care.
@@ -1653,6 +1676,12 @@ jobs:
           # runs, discovered from these workflow files rather than hard-coded.
           node tests/ci/check-test-substance.mjs --selftest
           node tests/ci/check-test-substance.mjs --all
+          # Every suite workflow must supersede a run that a newer push has made
+          # obsolete, and must never cancel a manual or scheduled run. Two
+          # properties, one place, because the second is the one that gets lost
+          # when someone "simplifies" the first to `cancel-in-progress: true`.
+          node tests/ci/check-concurrency-supersede.mjs --selftest
+          node tests/ci/check-concurrency-supersede.mjs
           # The analyzer's output is what the gate judges, so its own tests run
           # here too - including the cases that pin the analyzer to the suites a
           # workflow can actually start.
