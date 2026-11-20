@@ -1,0 +1,90 @@
+name: maven-diagnosis
+
+# TEMPORARY. Diagnoses the plugin-lifecycle Maven failure (run 44666711786) by
+# running the same command with `-X`, in an environment built the same way, so
+# "Maven never tried to download" and "Maven tried and timed out" can be told
+# apart. Deleted once the answer is recorded.
+#
+# `workflow_dispatch` only. It touches no deployment, publishes nothing, and runs
+# one Maven build against the same pom the lifecycle job uses.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # The three steps below reproduce `plugin-lifecycle.yml`'s toolchain setup
+      # IN THE SAME ORDER, because the order is a hypothesis: `setup-java` pins
+      # Temurin 21 via JAVA_HOME, and `apt-get install maven` then pulls Ubuntu's
+      # own JRE as a dependency. Whichever `mvn` script wins decides which JDK and
+      # which Maven version actually run.
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+
+      - name: Install Maven
+        run: sudo apt-get update && sudo apt-get install -y maven
+
+      - name: Which Maven and which JDK actually run
+        run: |
+          set -x
+          which -a mvn
+          mvn -v
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version 2>&1
+          echo "--- maven's own idea of java ---"
+          mvn -v 2>&1 | grep -i "java version"
+          ls -l /usr/bin/mvn /usr/share/maven/bin/mvn 2>&1 || true
+
+      - name: Is Central reachable from this runner, and how fast
+        run: |
+          set -x
+          for i in 1 2 3; do
+            curl -sS -o /dev/null \
+              -w "attempt $i: http=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\n" \
+              --max-time 60 \
+              https://repo.maven.apache.org/maven2/org/springframework/boot/spring-boot-starter-parent/3.3.5/spring-boot-starter-parent-3.3.5.pom
+          done
+
+      - name: Is there a settings.xml or mirror nobody documented
+        run: |
+          set -x
+          ls -la ~/.m2/ 2>&1 || true
+          cat ~/.m2/settings.xml 2>&1 || echo "no ~/.m2/settings.xml"
+          cat /usr/share/maven/conf/settings.xml 2>/dev/null | grep -A5 -i "<mirror>" || echo "no mirror in the system settings"
+          cat /etc/maven/settings.xml 2>/dev/null | grep -A5 -i "<mirror>" || true
+
+      - name: Cold local repository - does Maven even attempt a download
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/m2-diag
+          # -X so the resolver's own decisions are in the log. This is the run the
+          # PR body said was needed: 'Downloading from' proves an attempt,
+          # 'Could not transfer' proves the attempt failed, and their total absence
+          # with 'Non-resolvable' proves Maven decided without asking.
+          mvn -B -X -Dmaven.repo.local=/tmp/m2-diag \
+              -f plugins/hello-java/pom.xml -DskipTests package \
+              > /tmp/mvn-x.log 2>&1 || true
+          echo "=== resolver-relevant lines ==="
+          grep -nE 'Downloading from|Downloaded from|Could not transfer|Could not find|Non-resolvable|Connect to|UnknownHost|SSLHandshake|Read timed out|proxy|Proxy' /tmp/mvn-x.log | head -40 || true
+          echo "=== counts ==="
+          printf 'Downloading from: %s\n' "$(grep -c 'Downloading from' /tmp/mvn-x.log || true)"
+          printf 'Could not transfer: %s\n' "$(grep -c 'Could not transfer' /tmp/mvn-x.log || true)"
+          printf 'Non-resolvable: %s\n' "$(grep -c 'Non-resolvable' /tmp/mvn-x.log || true)"
+          echo "=== did it produce a jar? ==="
+          ls -l plugins/hello-java/target/*.jar 2>&1 || echo "no jar"
+
+      - name: Upload the full -X log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mvn-x-log
+          path: /tmp/mvn-x.log
+          retention-days: 7

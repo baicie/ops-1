@@ -313,8 +313,11 @@ export const GATE_OWNERSHIP = {
  * for them - an unlisted file is the blind spot, not an unlisted check.
  */
 export const NON_GATE_WORKFLOWS = {
-  // Nothing today. A workflow that only publishes, only comments, or only runs on
-  // a schedule with no PR surface belongs here WITH A REASON.
+  // A manual-only diagnostic that runs one Maven build and uploads its log. It has
+  // no `pull_request` trigger, publishes nothing and deploys nothing, so no PR can
+  // be made red by it. It exists only until the plugin-lifecycle Maven failure is
+  // diagnosed, and is deleted with it.
+  'maven-diagnosis.yml': 'manual diagnostic, no pull_request trigger',
 };
 
 /**
