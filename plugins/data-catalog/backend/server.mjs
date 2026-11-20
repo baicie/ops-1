@@ -180,26 +180,50 @@ async function workspaceScope(who, url) {
   return { allowed, workspaceId: resolved.workspaceId };
 }
 
+// A BAD REQUEST BODY IS THE CALLER'S FAULT, AND MUST NOT ANSWER 500.
+//
+// `validateFields` throws to abort the request, and the two call sites that
+// publish a schema (`POST /datasets`, `POST /datasets/{id}/schemas/drafts`) do
+// not wrap it. Every throw therefore reached the top-level handler, which had
+// no status to read and answered `500 INTERNAL / retryable=false`.
+//
+// Measured 2026-11-20 against the real server: `POST /datasets` with
+// `fields: [{name:'id',type:'string',required:true}]` (no `nullable`, no
+// `ordinal`) returned `500 INTERNAL` in 27ms. A caller with a malformed body
+// is told the server broke, and an operator paged on INTERNAL looks in the
+// wrong place.
+//
+// The status travels on the error rather than being decided at each call site:
+// the validator is what knows the failure is a validation failure, and there
+// are four rule-validation call sites that already hand-roll their own 400.
+// Anything without a `status` still reaches the handler as a 500, which is the
+// correct default for a genuinely unexpected throw.
+function invalid(message) {
+  const error = new Error(message);
+  error.status = 400;
+  return error;
+}
+
 function validateFields(fields) {
-  if (!Array.isArray(fields) || fields.length < 1 || fields.length > 512) throw new Error('fields must contain 1..512 entries');
+  if (!Array.isArray(fields) || fields.length < 1 || fields.length > 512) throw invalid('fields must contain 1..512 entries');
   const names = new Set();
   const ordinals = new Set();
   for (const field of fields) {
-    if (!field || typeof field.name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(field.name)) throw new Error('invalid field name');
-    if (names.has(field.name)) throw new Error(`duplicate field ${field.name}`);
+    if (!field || typeof field.name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(field.name)) throw invalid('invalid field name');
+    if (names.has(field.name)) throw invalid(`duplicate field ${field.name}`);
     names.add(field.name);
-    if (!['string', 'integer', 'number', 'boolean', 'timestamp', 'json'].includes(field.type)) throw new Error(`invalid type for ${field.name}`);
-    if (typeof field.nullable !== 'boolean') throw new Error(`nullable missing for ${field.name}`);
-    if (!Number.isInteger(field.ordinal) || field.ordinal < 0 || field.ordinal > 1023 || ordinals.has(field.ordinal)) throw new Error(`invalid ordinal for ${field.name}`);
+    if (!['string', 'integer', 'number', 'boolean', 'timestamp', 'json'].includes(field.type)) throw invalid(`invalid type for ${field.name}`);
+    if (typeof field.nullable !== 'boolean') throw invalid(`nullable missing for ${field.name}`);
+    if (!Number.isInteger(field.ordinal) || field.ordinal < 0 || field.ordinal > 1023 || ordinals.has(field.ordinal)) throw invalid(`invalid ordinal for ${field.name}`);
     ordinals.add(field.ordinal);
-    if (field.semanticTags && (!Array.isArray(field.semanticTags) || field.semanticTags.length > 16)) throw new Error(`invalid semanticTags for ${field.name}`);
+    if (field.semanticTags && (!Array.isArray(field.semanticTags) || field.semanticTags.length > 16)) throw invalid(`invalid semanticTags for ${field.name}`);
   }
   return fields.slice().sort((a, b) => a.ordinal - b.ordinal);
 }
 function validateRuleFields(config, fields) {
   const available = new Set(fields.map((field) => field.name));
   const names = config.fields || (config.field ? [config.field] : []);
-  for (const name of names) if (!available.has(name)) throw new Error(`rule field ${name} is not in the published schema`);
+  for (const name of names) if (!available.has(name)) throw invalid(`rule field ${name} is not in the published schema`);
 }
 
 function schemaDigest(fields) { return digest(validateFields(fields).slice().sort((a, b) => a.name.localeCompare(b.name))); }

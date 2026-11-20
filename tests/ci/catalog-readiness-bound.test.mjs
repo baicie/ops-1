@@ -161,6 +161,41 @@ test('A: a request blocked on a lock fails in bounded time, and says it is retry
   }
 });
 
+test('D: a malformed body is 400, not 500', async () => {
+  // Measured before the fix: `POST /datasets` with `fields: [{name,type,...}]`
+  // missing `nullable` and `ordinal` answered `500 INTERNAL / retryable=false`
+  // in 27ms. The validator throws to abort the request, the two schema-publish
+  // call sites do not wrap it, and the top-level handler had no status to read.
+  //
+  // A caller with a bad body told "the server broke" files a bug against the
+  // platform; an operator paged on INTERNAL looks in the wrong place. The
+  // distinction between 400 and 500 is the whole content of this test.
+  const bodies = [
+    ['missing nullable and ordinal', { fields: [{ name: 'id', type: 'string', required: true }] }],
+    ['a field name that is not an identifier', { fields: [{ name: '1bad', type: 'string', nullable: false, ordinal: 0 }] }],
+    ['duplicate ordinals', { fields: [
+      { name: 'a', type: 'string', nullable: false, ordinal: 0 },
+      { name: 'b', type: 'string', nullable: false, ordinal: 0 },
+    ] }],
+    ['no fields at all', { fields: [] }],
+  ];
+  for (const [label, fields] of bodies) {
+    const response = await fetch(`${base}/api/data-catalog/datasets`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-opsweave-user-context': userContext() },
+      body: JSON.stringify({ name: `invalid-body-${crypto.randomUUID()}`, ...fields }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const body = await response.json().catch(() => null);
+    assert.equal(response.status, 400,
+      `${label} must be 400, got ${response.status}: ${JSON.stringify(body)}`);
+    assert.equal(body?.code, 'INVALID_REQUEST', `${label} must name the failure: ${JSON.stringify(body)}`);
+    // And the message is the validator's, not "internal catalog error".
+    assert.doesNotMatch(String(body?.message || ''), /internal/i,
+      `${label} must explain what was wrong with the body`);
+  }
+});
+
 test('B: readiness reflects the database, so a wedged instance leaves rotation', async () => {
   // The assertion the pre-fix server could not satisfy: it answered 200 here.
   //
