@@ -153,3 +153,52 @@ ERROR ...: missing rule "deletion". PUT replaces the whole rules array, so sendi
 推荐：**方案 A 优先**。理由不是它更完整，而是它的代价已经被测量过（p95 34 分钟），
 而方案 B 的 `ci-gate` 从未被 GitHub 强制过——第一次强制会给第一个答案，而那应该是
 一次有意的观察，不是一次顺手的配置变更。
+
+---
+
+# 附录：TASK-02 的可执行检查器
+
+`tests/ci/check-gate-enforcement.mjs`。它读**实时 ruleset**，不是读 YAML——
+因为 YAML 完美而 ruleset 不要求，正是本仓库当前的状态。
+
+```
+$ node tests/ci/check-gate-enforcement.mjs
+required: (none)
+produced: 27 context(s)
+note: NO required status checks: CI is advisory. A red gate blocks nothing.
+note: ci-gate is produced but not required. The gate computes a verdict on every PR
+      and no merge consults it.
+produced but not required (27): acceptance, artifact-budget, ..., ci-gate, ...
+gate enforcement: ADVISORY
+```
+
+## 四种判决
+
+| 判决 | 含义 | 退出码 |
+|---|---|---|
+| `ENFORCED` | `ci-gate` 在必需列表里 | 0 |
+| `PARTIAL` | 有必需检查，但 `ci-gate` 不在其中 | 0 |
+| `ADVISORY` | **没有任何必需检查**（当前状态） | 0 |
+| `BROKEN` | 必需了一个没人产生的 context | **1** |
+
+只有 `BROKEN` 非零退出。另外三种是**关于仓库的事实**，不是代码缺陷——由迁移决策，
+不该让 CI 替人决定。
+
+## 为什么 `BROKEN` 单独处理
+
+`required but never produced` 会让每个 PR 永久卡在 `Expected`——不是失败，是缺席。
+那是最糟的一种状态：没有任何红色，也没有任何合并。它需要被当成错误拦住。
+
+## selftest 自己的 bug
+
+第一版五条全 FAIL。原因：`cases` 数组里存的是**已求值的布尔**，循环却当函数调用
+（`fn()`），每次都抛 `TypeError`，`catch` 把它变成 `false`。
+
+**一个永远不能通过的 selftest 和一个永远不能失败的 selftest 一样没用。** 已修正，
+5/5。
+
+## 与 §4 方案 B 的关系
+
+检查器现在会说 `ci-gate` 是 "not produced by this repository"——那是
+`check-ruleset-payload.mjs` 的九项白名单在说话。加 `ci-gate` 之前必须先扩展那个白名单，
+而那是一次需要论证的变更，不是恢复步骤的一部分。
