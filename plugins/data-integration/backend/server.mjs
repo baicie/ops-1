@@ -22,9 +22,49 @@ const { Pool } = pg;
 let CAPABILITY_TOKENS = {};
 try { CAPABILITY_TOKENS = JSON.parse(process.env.OPSWEAVE_CAPABILITY_TOKENS || '{}'); } catch { CAPABILITY_TOKENS = {}; }
 let tokenRefreshPromise = null;
-const pool = new Pool({ connectionString: DATABASE_URL, max: 5 });
+// THE SAME TWO DEFECTS AS data-catalog, FIXED THE SAME WAY.
+//
+// `max: 5` with no acquire bound is not a cap on concurrency, it is a cap on
+// nothing: pg's `connectionTimeoutMillis` defaults to 0, meaning the sixth
+// caller waits forever. Measured on the sibling plugin (data-catalog,
+// 2026-11-20): five blocked requests parked five clients and the sixth never
+// returned. The bound goes in the startup packet so a connection is limited
+// before its first statement - `initDb` runs before any request exists and
+// per-transaction settings cannot reach it.
+const DB_LOCK_TIMEOUT_MS = Number(process.env.OPSWEAVE_DB_LOCK_TIMEOUT_MS || 2000);
+const DB_STATEMENT_TIMEOUT_MS = Number(process.env.OPSWEAVE_DB_STATEMENT_TIMEOUT_MS || 30000);
+const DB_IDLE_TX_TIMEOUT_MS = Number(process.env.OPSWEAVE_DB_IDLE_TX_TIMEOUT_MS || 30000);
+const DB_ACQUIRE_TIMEOUT_MS = Number(process.env.OPSWEAVE_DB_ACQUIRE_TIMEOUT_MS || 5000);
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  max: 5,
+  connectionTimeoutMillis: DB_ACQUIRE_TIMEOUT_MS,
+  idleTimeoutMillis: 30000,
+  options: `-c lock_timeout=${DB_LOCK_TIMEOUT_MS} -c statement_timeout=${DB_STATEMENT_TIMEOUT_MS}`
+    + ` -c idle_in_transaction_session_timeout=${DB_IDLE_TX_TIMEOUT_MS}`,
+});
 let ready = false;
 let stopping = false;
+
+// Readiness that cannot see the database is not readiness. Deliberately NOT a
+// query through the request pool: that probe queues behind the parked requests,
+// becomes the next victim, and cannot tell "database slow" from "pool
+// exhausted". Its own short-lived connection with a hard ceiling gives a
+// different answer for each.
+async function databaseReachable() {
+  let probe;
+  try {
+    probe = new pg.Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 1500 });
+    await probe.connect();
+    await probe.query("SET statement_timeout = '1500ms'");
+    await probe.query('SELECT 1');
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (probe) await probe.end().catch(() => {});
+  }
+}
 
 function rid(req) { const v = req.headers['x-opsweave-request-id']; return typeof v === 'string' && v.length <= 128 ? v : crypto.randomUUID(); }
 function send(res, status, body, id) { const payload = JSON.stringify(body); res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(payload), 'cache-control': 'no-store', 'x-opsweave-request-id': id }); res.end(payload); }
@@ -290,7 +330,14 @@ async function handle(req, res) {
   const id = rid(req); const url = new URL(req.url || '/', 'http://localhost');
   if (url.pathname === '/_opsweave/runtime/v1/info') return send(res, 200, { pluginId: PLUGIN_ID, version: VERSION, runtimeProtocol: 'http-json-v1', capabilityDigest: CAPABILITY_DIGEST, buildDigest: BUILD_DIGEST }, id);
   if (url.pathname === '/_opsweave/health/live') return send(res, stopping ? 503 : 200, { status: stopping ? 'stopping' : 'live' }, id);
-  if (url.pathname === '/_opsweave/health/ready') return send(res, ready && !stopping ? 200 : 503, { status: ready && !stopping ? 'ready' : 'not_ready' }, id);
+  if (url.pathname === '/_opsweave/health/ready') {
+    // Was `ready && !stopping` alone: a boot-time boolean that answered 200
+    // while the plugin could not reach its database (same measurement as
+    // data-catalog, 2026-11-20).
+    let db = false;
+    if (ready && !stopping) db = await databaseReachable();
+    return send(res, ready && !stopping && db ? 200 : 503, { status: ready && !stopping ? (db ? 'ready' : 'database unreachable') : 'not_ready' }, id);
+  }
   if (url.pathname === '/_opsweave/health/startup') return send(res, 200, { status: 'started' }, id);
   const who = identity(req.headers); if (!who) return fail(res, 401, 'UNAUTHENTICATED', 'caller identity required', id);
   if (url.pathname === '/api/data-integration/sources' && req.method === 'GET') { if (!hasScope(who, 'source:read')) return fail(res, 403, 'FORBIDDEN', 'source:read required', id); const scope = await workspaceScope(who, url); if (scope.error) return fail(res, scope.status, scope.code, scope.message, id); const rows = await pool.query('SELECT * FROM integration_sources WHERE workspace_id = ANY($1::uuid[]) ORDER BY created_at DESC LIMIT 100', [scope.allowed]); return send(res, 200, rows.rows.map(sourceView), id); }
@@ -315,7 +362,25 @@ async function handle(req, res) {
   if (runMatch) { if (!hasScope(who, 'source:read')) return fail(res, 403, 'FORBIDDEN', 'source:read required', id); const scope = await workspaceScope(who, url); if (scope.error) return fail(res, scope.status, scope.code, scope.message, id); const run = await pool.query('SELECT r.* FROM integration_runs r JOIN integration_specs s ON s.spec_id=r.spec_id JOIN integration_sources src ON src.source_id=s.source_id WHERE r.run_id=$1 AND src.workspace_id = ANY($2::uuid[])', [runMatch[1], scope.allowed]); if (!run.rows[0]) return fail(res, 404, 'RUN_NOT_FOUND', 'run not found', id); if (runMatch[2] === 'quality') return send(res, 200, { runId: run.rows[0].run_id, total: run.rows[0].input_count, missing: 0, validationRejected: run.rows[0].rejected, unknown: run.rows[0].unknown, sampleLimit: 100, computedAt: new Date().toISOString() }, id); if (runMatch[2] === 'lineage') { const spec = await pool.query('SELECT source_id,source_revision,target_dataset_id,schema_revision FROM integration_specs WHERE spec_id=$1', [run.rows[0].spec_id]); return send(res, 200, { runId: run.rows[0].run_id, sourceId: spec.rows[0]?.source_id, sourceRevision: spec.rows[0]?.source_revision, sourceBatchKey: run.rows[0].source_batch_key, datasetId: spec.rows[0]?.target_dataset_id, schemaRevision: spec.rows[0]?.schema_revision, counts: { accepted: run.rows[0].accepted, rejected: run.rows[0].rejected, unknown: run.rows[0].unknown } }, id); } return send(res, 200, runView(run.rows[0]), id); }
   return fail(res, 404, 'NOT_FOUND', 'route not found', id);
 }
-const server = http.createServer((req, res) => { handle(req, res).catch((error) => { const id = rid(req); fail(res, error.status || 500, error.code || 'INTERNAL', error.status && error.status < 500 ? error.message : 'internal integration error', id); }); });
+const server = http.createServer((req, res) => { handle(req, res).catch((error) => {
+  const id = rid(req);
+  // A BOUNDED WAIT THAT EXPIRED IS NOT AN INTERNAL ERROR. Same four codes and
+  // the same reasoning as data-catalog: these are transient by construction,
+  // and answering retryable=false tells the caller to give up.
+  //   55P03 lock_not_available     - lock_timeout expired
+  //   57014 query_canceled         - statement_timeout expired
+  //   40001 serialization_failure  - aborted to preserve serialisability
+  //   08xxx connection errors      - the database went away mid-request
+  const code = error.code;
+  if (code === '55P03' || code === '57014' || code === '40001' || /^08/.test(String(code || ''))) {
+    return fail(res, 503, 'DEPENDENCY_BLOCKED', 'the database could not be reached in time; retry', id, true);
+  }
+  // pg-pool's acquire timeout is a plain Error with this message and no code.
+  if (/timeout exceeded when trying to connect/i.test(String(error.message || ''))) {
+    return fail(res, 503, 'RESOURCE_EXHAUSTED', 'this instance has no free database connection; retry', id, true);
+  }
+  fail(res, error.status || 500, error.code || 'INTERNAL', error.status && error.status < 500 ? error.message : 'internal integration error', id);
+}); });
 server.on('SIGTERM', () => { stopping = true; server.close(() => pool.end().then(() => process.exit(0))); });
 initDb().then(() => {
   server.listen(PORT, '0.0.0.0', () => console.log(`data-integration ${VERSION} listening ${PORT}`));

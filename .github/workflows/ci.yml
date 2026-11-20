@@ -456,6 +456,11 @@ jobs:
         run: |
           node --test tests/ci/catalog-readiness-bound.test.mjs
           node --test tests/ci/catalog-receipt-endpoint.test.mjs
+          # data-integration has the same pool shape and the same boot-latch
+          # readiness handler in its own file. A fix in one plugin is not a fix
+          # in the other, so the second is asserted separately rather than
+          # assumed to follow.
+          node --test tests/ci/data-integration-pool.test.mjs
   # The decomposed suites cannot prove a round trip: two implementations of the
   # same digest can both be wrong. This job starts a real Kernel, a real plugin
   # process and a real PostgreSQL, and checks that the bytes the plugin signed
