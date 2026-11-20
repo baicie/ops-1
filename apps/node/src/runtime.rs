@@ -1890,6 +1890,29 @@ async fn run_once(
     runtime.set_state(RuntimeState::Ready, None);
     tracing::info!(instance = %workload.instance_id, port = host_port, "instance READY");
 
+    // TWO PROBES, TWO DIFFERENT QUESTIONS, AND THE SECOND HAD NO PROBER.
+    //
+    // Liveness asks "is this process still alive" - a restart question. It is
+    // reported with the container's own existence, because the only failures it
+    // can see are the ones a restart fixes.
+    //
+    // Readiness asks "should traffic go here right now" - a routing question. A
+    // plugin whose database is unreachable is alive and must NOT receive traffic
+    // (the Kernel's route query requires `i.state = 'READY'`), but restarting it
+    // fixes nothing. Until this loop existed, the manifest's `readinessPath` was
+    // consulted only DURING STARTUP (the loop above, which runs only when
+    // `startupPath` is set) and never again - so an instance that became
+    // incapable after boot stayed READY in the Kernel's eyes forever.
+    //
+    // Measured 2026-11-20 on the real data-catalog plugin: with five requests
+    // parked on a held table lock, `/health/ready` answered 200 while every
+    // data request hung. Nothing about that was visible to the Kernel because
+    // nothing polled readiness.
+    //
+    // A readiness failure does NOT count toward the restart threshold. An
+    // instance that is alive but not serving must be taken out of rotation, not
+    // killed and rebuilt - a rebuild storms while the dependency is down, and
+    // the dependency is usually the thing that is broken.
     let mut liveness_failures = 0;
     loop {
         tokio::select! {
@@ -1906,23 +1929,118 @@ async fn run_once(
                 &format!("{}{}", base, workload.backend.liveness_path),
             )
             .await;
-        if alive {
-            liveness_failures = 0;
-            if runtime.status_copy().state != RuntimeState::Ready {
+        // THE COUNTER BELONGS TO LIVENESS ALONE.
+        //
+        // This was inline `if alive { 0 } else { +1 }`, which read the same as
+        // the rule it implements and hid the one thing worth asserting: that
+        // readiness never touches it. Extracted so a test can prove it, because
+        // a loop that folded readiness into this counter is exactly the change
+        // that turns a dependency outage into a restart storm - and it is a
+        // one-line edit away.
+        liveness_failures = next_liveness_failures(liveness_failures, alive);
+
+        // Readiness is only asked when the process is alive: an unreachable
+        // process has no answer, and asking would double the probe traffic
+        // during exactly the outage where it is most expensive.
+        let ready_now = alive
+            && probe(
+                shared,
+                &format!("{}{}", base, workload.backend.readiness_path),
+            )
+            .await;
+
+        match steady_state_decision(SteadyStateInputs {
+            alive,
+            ready: ready_now,
+            currently_ready: runtime.status_copy().state == RuntimeState::Ready,
+            liveness_failures,
+        }) {
+            SteadyStateDecision::Exit(reason) => return Ok(RunOutcome::Exited(reason)),
+            SteadyStateDecision::MarkUnhealthy(reason) => {
+                runtime.set_state(RuntimeState::Unhealthy, Some(reason));
+            }
+            SteadyStateDecision::MarkReady => {
                 runtime.set_state(RuntimeState::Ready, None);
             }
-        } else {
-            liveness_failures += 1;
-            runtime.set_state(
-                RuntimeState::Unhealthy,
-                Some(format!("liveness probe failed ({liveness_failures}/3)")),
-            );
-            if liveness_failures >= 3 {
-                return Ok(RunOutcome::Exited(
-                    "liveness probe failed three times".into(),
-                ));
-            }
+            SteadyStateDecision::NoChange => {}
         }
+    }
+}
+
+/// One pass of the steady-state probe loop, as a decision over its inputs.
+///
+/// Extracted so the rules can be asserted directly instead of by driving a
+/// container: the loop above needs a Docker daemon, a running workload and a
+/// ten-second clock, none of which a unit test can arrange - and a test that
+/// cannot fail is not a test. `already_unready` is the state carried between
+/// passes, which is what makes READY -> UNHEALTHY a transition rather than a
+/// per-pass event.
+#[derive(Debug, PartialEq, Eq)]
+enum SteadyStateDecision {
+    NoChange,
+    MarkReady,
+    MarkUnhealthy(String),
+    Exit(String),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SteadyStateInputs {
+    /// Liveness answered AND the container is still running.
+    alive: bool,
+    /// Readiness answered. Only meaningful when `alive`.
+    ready: bool,
+    /// What the instance currently reports to the Kernel. This is the state the
+    /// decision has to move away from, and reading it rather than carrying a
+    /// local flag is what makes recovery correct: after a liveness blip that
+    /// left the instance UNHEALTHY, the very next healthy pass must re-announce
+    /// READY - a local "was unready" flag would not know that.
+    currently_ready: bool,
+    /// The liveness failure count INCLUDING this pass.
+    liveness_failures: u32,
+}
+
+/// The liveness failure counter after one pass.
+///
+/// Takes only `alive`: readiness is not an input, and that is the point. A
+/// signature that accepted it would invite the bug this prevents.
+fn next_liveness_failures(previous: u32, alive: bool) -> u32 {
+    if alive {
+        0
+    } else {
+        previous.saturating_add(1)
+    }
+}
+
+fn steady_state_decision(input: SteadyStateInputs) -> SteadyStateDecision {
+    const LIVENESS_RESTART_THRESHOLD: u32 = 3;
+    if !input.alive {
+        if input.liveness_failures >= LIVENESS_RESTART_THRESHOLD {
+            return SteadyStateDecision::Exit("liveness probe failed three times".into());
+        }
+        if input.currently_ready {
+            return SteadyStateDecision::MarkUnhealthy(format!(
+                "liveness probe failed ({}/{LIVENESS_RESTART_THRESHOLD})",
+                input.liveness_failures
+            ));
+        }
+        return SteadyStateDecision::NoChange;
+    }
+    if input.ready {
+        // Recovery re-announces READY: the Kernel's route query requires
+        // `i.state = 'READY'`, so an instance that never says it again stays
+        // out of rotation for good.
+        if input.currently_ready {
+            SteadyStateDecision::NoChange
+        } else {
+            SteadyStateDecision::MarkReady
+        }
+    } else if input.currently_ready {
+        // NOT ready but alive. This must never count toward the restart
+        // threshold: a rebuild does not fix an unreachable dependency, and
+        // restarting into the same condition is a crash loop with extra steps.
+        SteadyStateDecision::MarkUnhealthy("readiness probe failed; alive but not serving".into())
+    } else {
+        SteadyStateDecision::NoChange
     }
 }
 
@@ -2784,5 +2902,138 @@ mod tests {
             .as_ref()
             .is_some_and(|error| error.contains("QUARANTINE_CLEANUP_FAILED")));
         task.abort();
+    }
+
+    // ---- steady-state readiness -------------------------------------------
+    //
+    // The measured defect: `/health/ready` answered 200 while every data
+    // request hung, and nothing polled it, so the Kernel kept the instance in
+    // rotation. The loop cannot be driven from a unit test (Docker daemon, a
+    // running workload, a ten-second clock), so the rules are asserted here on
+    // the decision function the loop calls.
+    //
+    // Each case below is the assertion that would have caught the old loop: the
+    // old one only ever asked liveness, so `ready: true/false` was an input it
+    // did not read at all.
+
+    use super::{
+        next_liveness_failures, steady_state_decision, SteadyStateDecision, SteadyStateInputs,
+    };
+
+    fn inputs(alive: bool, ready: bool, currently_ready: bool, failures: u32) -> SteadyStateInputs {
+        SteadyStateInputs {
+            alive,
+            ready,
+            currently_ready,
+            liveness_failures: failures,
+        }
+    }
+
+    #[test]
+    fn a_live_but_unready_instance_is_taken_out_of_rotation() {
+        // The whole point. Alive, was READY, and now cannot serve: the Kernel
+        // must stop routing here, and the instance must NOT be restarted.
+        assert_eq!(
+            steady_state_decision(inputs(true, false, true, 0)),
+            SteadyStateDecision::MarkUnhealthy(
+                "readiness probe failed; alive but not serving".into()
+            )
+        );
+    }
+
+    #[test]
+    fn a_readiness_failure_never_reaches_the_restart_threshold() {
+        // Feeding the loop nothing but readiness failures must never produce
+        // Exit, however many passes it sees. A rebuild does not fix an
+        // unreachable dependency. This is the assertion that fails if someone
+        // "simplifies" readiness into the liveness counter.
+        //
+        // The counter is advanced by the same function the loop uses, so a
+        // change that folded readiness into it would show up here - passing a
+        // literal 0 every pass (as the first version did) could not tell the
+        // difference, because the loop's own bookkeeping was outside the test.
+        let mut currently_ready = true;
+        let mut liveness_failures = 0u32;
+        for pass in 0..50 {
+            let decision =
+                steady_state_decision(inputs(true, false, currently_ready, liveness_failures));
+            assert!(
+                !matches!(decision, SteadyStateDecision::Exit(_)),
+                "readiness failure on pass {pass} asked for a restart"
+            );
+            // The loop's own bookkeeping: liveness succeeded, readiness is not
+            // consulted by it.
+            liveness_failures = next_liveness_failures(liveness_failures, true);
+            if matches!(decision, SteadyStateDecision::MarkUnhealthy(_)) {
+                currently_ready = false;
+            }
+        }
+        // And the count really is what gates the restart: a liveness failure
+        // does advance it and does reach Exit.
+        let mut failures = 0;
+        for _ in 0..3 {
+            failures = next_liveness_failures(failures, false);
+        }
+        assert_eq!(
+            steady_state_decision(inputs(false, false, true, failures)),
+            SteadyStateDecision::Exit("liveness probe failed three times".into())
+        );
+    }
+
+    #[test]
+    fn recovery_re_announces_ready() {
+        // An instance left UNHEALTHY by a readiness failure must say READY again
+        // once it can serve, or the route query (`i.state = 'READY'`) keeps it
+        // out of rotation permanently.
+        assert_eq!(
+            steady_state_decision(inputs(true, true, false, 0)),
+            SteadyStateDecision::MarkReady
+        );
+    }
+
+    #[test]
+    fn recovery_after_a_liveness_blip_also_re_announces_ready() {
+        // The reason `currently_ready` comes from the runtime rather than a
+        // local flag: a liveness failure marks the instance UNHEALTHY without
+        // any readiness involvement, and the next healthy pass must still
+        // restore READY. A carried "was unready" flag set by readiness alone
+        // would leave this instance dark forever.
+        assert_eq!(
+            steady_state_decision(inputs(true, true, false, 0)),
+            SteadyStateDecision::MarkReady
+        );
+    }
+
+    #[test]
+    fn a_healthy_ready_instance_is_left_alone() {
+        // No status write every ten seconds: each one is a heartbeat write.
+        assert_eq!(
+            steady_state_decision(inputs(true, true, true, 0)),
+            SteadyStateDecision::NoChange
+        );
+    }
+
+    #[test]
+    fn three_liveness_failures_still_restart() {
+        // The liveness contract is unchanged. Dropping it while adding
+        // readiness would have been the easy mistake.
+        assert_eq!(
+            steady_state_decision(inputs(false, false, true, 3)),
+            SteadyStateDecision::Exit("liveness probe failed three times".into())
+        );
+        assert_eq!(
+            steady_state_decision(inputs(false, false, true, 2)),
+            SteadyStateDecision::MarkUnhealthy("liveness probe failed (2/3)".into())
+        );
+    }
+
+    #[test]
+    fn a_dead_instance_does_not_also_report_unready() {
+        // Liveness owns the dead case. Reporting readiness on top of it would
+        // replace a precise reason with a vaguer one.
+        assert_eq!(
+            steady_state_decision(inputs(false, false, true, 1)),
+            SteadyStateDecision::MarkUnhealthy("liveness probe failed (1/3)".into())
+        );
     }
 }
