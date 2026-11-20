@@ -109,3 +109,137 @@ test('ci.yml reads check runs for the PR head, not the merge commit', async () =
   assert.match(headLine, /github\.event\.pull_request\.head\.sha/,
     `HEAD_SHA must come from pull_request.head.sha; got: ${headLine.trim()}`);
 });
+
+// ---------------------------------------------------------------------------
+// TASK-14: drive the PRODUCTION entry point end to end, both ways.
+//
+// The selftest and the tests above cover the pieces. These run `main()` the way
+// `ci.yml` runs it - `--fetch`, real `gh`, real check runs on a real commit - and
+// assert the exit code and the parsed summary. If any link regresses (argument
+// parsing, `readLedger`, `attributeChecks`, `gate`, `delegatedVerdict`,
+// `awaitDelegated`, the final verdict, the exit code), these fail. A test that
+// calls `gate()` directly cannot see any of that.
+//
+// Both directions are asserted on the same repository, because either alone is
+// satisfied by a gate that always returns the same answer.
+const E2E_REPO = 'baicie/ops-1';
+
+/**
+ * Whether the two end-to-end cases below can run here.
+ *
+ * They read real check runs through `gh`, which needs a token. The selftest step
+ * in `ci.yml` runs WITHOUT one - measured on PR #167, where both cases failed with
+ * `delegated-api-error` because `gh` had no credential. The test was correct
+ * locally (a developer's `gh` is authenticated) and wrong in the only environment
+ * that matters.
+ *
+ * So they are skipped, LOUDLY, with the reason recorded. Skipping is the right
+ * answer and not a loophole: `ci-gate`'s Decide step runs the same `--fetch` path
+ * with `GH_TOKEN` on every PR, and that is the production caller. These cases
+ * exist to catch a regression in the pieces on the way there, and a regression in
+ * those pieces also fails `check-run-ledger.test.mjs`, `await-delegated.test.mjs`
+ * and the selftest.
+ *
+ * `OPSWEAVE_REQUIRE_LIVE_API=1` turns the skip into a failure, for a job that does
+ * have a token and wants to prove these ran.
+ */
+function liveApiSkipReason() {
+  // A token in the environment is the CI case. A developer's `gh` is not - it
+  // stores its credential in the keyring and sets no variable, so checking
+  // `process.env` alone skipped these cases for the one person who can run them.
+  // `gh auth status` asks the command that would actually be used.
+  let authed = Boolean(process.env.GH_TOKEN || process.env.GITHUB_TOKEN);
+  if (!authed) {
+    try {
+      execFileSync('gh', ['auth', 'status'], { stdio: 'ignore' });
+      authed = true;
+    } catch {
+      authed = false;
+    }
+  }
+  if (authed) return false;
+  if (process.env.OPSWEAVE_REQUIRE_LIVE_API === '1') {
+    assert.fail('OPSWEAVE_REQUIRE_LIVE_API=1 but neither GH_TOKEN nor GITHUB_TOKEN is set: '
+      + 'the end-to-end cases cannot reach the check-run API, and letting them pass would be false');
+  }
+  return 'no GH_TOKEN in this step, so the check-run API is unreadable; the same --fetch path '
+    + 'runs in ci-gate\'s Decide step WITH a token';
+}
+
+/** Every ci.yml job green, so the gate is judged on the delegated results. */
+async function allJobsGreen() {
+  const { JOB_TO_SUITE } = await import('./ci-gate.mjs');
+  return JSON.stringify(Object.fromEntries(Object.keys(JOB_TO_SUITE).map((j) => [j, 'success'])));
+}
+
+test('entry point, PASS: a real commit where the staging deploy failed and the gate still passes', async (t) => {
+  const skip = liveApiSkipReason();
+  if (skip) { t.skip(skip); return; }
+  // `ca257fd` is a real commit with an awkward shape: 31 check runs across nine
+  // workflows, `deploy to staging host` FAILURE, three `seeded-data` jobs and
+  // `smoke the preview` SKIPPED, and `ci-gate` itself present. Pinned by SHA: a
+  // floating "latest main" would make a counterfactual whose fixture moves.
+  const { code, out } = runGate(
+    { REPO: E2E_REPO, CHECKS_SHA: 'ca257fd2081c7bb9ca31b6687cb7f65e2968593c' },
+    // The REAL changed files of that commit, read from the GitHub API. This
+    // matters: `--files apps/node/src/worker_supervisor.rs` makes the analyzer
+    // require `plugin-lifecycle`, whose workflow has a paths filter that this
+    // commit does not match - so the gate correctly reported
+    // `delegated-absent: plugin-lifecycle`. My first version of this test asserted
+    // PASS against a requirement that never applied, and the gate was right to
+    // refuse it. A fixture the gate disagrees with is a fixture bug until proven
+    // otherwise.
+    ['--needs-json', await allJobsGreen(), '--files',
+      '.github/workflows/ci.yml', 'docs/ci/architecture-proposal.md', 'docs/ci/failure-analysis.md',
+      'docs/ci/ruleset-migration.md', 'tests/ci/check-impact-consistency.mjs',
+      'tests/ci/ci-gate.api-failure.test.mjs', 'tests/ci/ci-gate.mjs',
+      '--fetch', '--budget-ms', '30000'],
+  );
+  assert.equal(code, 0, `exit 0 expected; output:\n${out}`);
+  assert.match(out, /verdict: PASS/);
+
+  const json = JSON.parse(out.slice(out.indexOf('{'), out.lastIndexOf('}\n') + 1));
+  assert.equal(json.verdict, 'PASS');
+
+  // The ownership split on real data: the staging deploy FAILED and must appear
+  // as a deployment failure, never as a merge blocker.
+  assert.ok(
+    json.deploymentFailures.some((d) => /deploy to staging host/.test(d)),
+    `the real staging failure must be reported; got ${JSON.stringify(json.deploymentFailures)}`,
+  );
+  assert.deepEqual(json.failed, [], 'a deployment failure must not enter `failed`');
+
+  // Delegated suites were read, not assumed.
+  assert.ok(json.delegatedResults, 'delegatedResults must be present with --fetch');
+  assert.ok(
+    (json.delegatedResults.verified ?? []).includes('linux-runtime'),
+    `linux-runtime must verify; got ${JSON.stringify(json.delegatedResults.verified)}`,
+  );
+
+  // A skipped job from another workflow must not block either.
+  assert.ok(
+    !json.failed.some((f) => /smoke the preview|seeded-data/.test(f)),
+    `a skipped staging job must not block; got ${JSON.stringify(json.failed)}`,
+  );
+});
+
+test('entry point, FAIL: the same repository, a commit whose required check is red', (t) => {
+  const skip = liveApiSkipReason();
+  if (skip) { t.skip(skip); return; }
+  // The control. Without it the test above is satisfied by a gate that always
+  // exits 0.
+  //
+  // `web-unit` is `failure` and `rust` is `cancelled` on this commit genuinely -
+  // it is the branch that carried a deliberate red check for the acceptance
+  // evidence. The branch is deleted; the check runs remain on the commit, which
+  // is all this reads.
+  const needs = JSON.stringify({ 'web-unit': 'failure', rust: 'cancelled' });
+  const { code, out } = runGate(
+    { REPO: E2E_REPO, CHECKS_SHA: '5fb7c46d5d9957d5c6fcfe8df46e38ebe237e9e0' },
+    ['--needs-json', needs, '--files', 'docs/a.md', '--fetch', '--budget-ms', '30000'],
+  );
+  assert.equal(code, 1, `exit 1 expected; output:\n${out}`);
+  assert.match(out, /verdict: FAIL/);
+  assert.match(out, /web-unit/, 'the red required job must be named');
+  assert.match(out, /cancelled/, 'and the cancelled one must be named as cancelled');
+});
