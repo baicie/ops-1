@@ -115,6 +115,18 @@ concurrency:
   # main cancel it mid-certification - and a cancelled nightly is a data point
   # that silently does not exist, which is exactly the state this schedule was
   # added to end.
+  #
+  # WHAT THIS BLOCK DOES NOT DO, and the job-level locks below do. These buckets
+  # decide which runs may CANCEL each other. They do not serialise anything: a
+  # `deploy` and a `nightly` are in different buckets, so they never cancel each
+  # other, which also means nothing stops them from running AT THE SAME TIME
+  # against one host. The host has `flock` on `deploy.lock` for the deploy
+  # itself; the `staging-host-*` job group added on `deploy`, `smoke` and the
+  # seeded suites is what serialises the deploy TOGETHER WITH its acceptance, so a
+  # suite cannot certify a host that a second run has already replaced.
+  #
+  # `cancel-in-progress: true` is kept - it is what makes a newer deploy supersede
+  # an older deploy in the same bucket, which is the behaviour this file wants.
   group: "staging-preview-${{ (inputs.verify_only == true) && format('verify-{0}', inputs.sha || github.sha) || (github.event_name == 'schedule' && 'nightly') || 'deploy' }}"
   cancel-in-progress: true
 
@@ -422,6 +434,25 @@ jobs:
       target_sha: ${{ needs.build.outputs.sha }}
       previous_sha: ${{ steps.previous.outputs.sha }}
       result: ${{ steps.fallback.outputs.result || steps.deploy.outputs.result }}
+    # One host, one transaction. Shared by every job that touches the staging host -
+    # deploy, the smoke suites, the seeded-data suites - and REPOSITORY-scoped, not
+    # run-scoped: a job-level group serialises across different workflow runs too.
+    #
+    # WHY THE WORKFLOW-LEVEL GROUP ALONE IS NOT ENOUGH. The host has `flock` on
+    # `deploy.lock`, and `cmd_deploy` holds it from acquire to return, so two
+    # concurrent DEPLOYS are already excluded. But the deploy job ends once the
+    # containers are healthy and certified, and `smoke` / `seeded_*` run as SEPARATE
+    # JOBS afterwards with no lock. A second run can deploy between them, and the
+    # suites then certify a host serving a different commit than the one they were
+    # started for - the failure mode where a green acceptance belongs to somebody
+    # else's build.
+    #
+    # `cancel-in-progress: false` deliberately. A deployment transaction already
+    # running must not be killed by the next arrival: a cancel mid-rollback is worse
+    # than a queue, because the host state is exactly what the rollback is repairing.
+    concurrency:
+      group: ${{ format('staging-host-{0}', vars.OPSWEAVE_STAGING_HOST || 'default') }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -723,6 +754,25 @@ jobs:
       OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha || inputs.sha || github.sha }}
       OPSWEAVE_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
       OPSWEAVE_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
+    # One host, one transaction. Shared by every job that touches the staging host -
+    # deploy, the smoke suites, the seeded-data suites - and REPOSITORY-scoped, not
+    # run-scoped: a job-level group serialises across different workflow runs too.
+    #
+    # WHY THE WORKFLOW-LEVEL GROUP ALONE IS NOT ENOUGH. The host has `flock` on
+    # `deploy.lock`, and `cmd_deploy` holds it from acquire to return, so two
+    # concurrent DEPLOYS are already excluded. But the deploy job ends once the
+    # containers are healthy and certified, and `smoke` / `seeded_*` run as SEPARATE
+    # JOBS afterwards with no lock. A second run can deploy between them, and the
+    # suites then certify a host serving a different commit than the one they were
+    # started for - the failure mode where a green acceptance belongs to somebody
+    # else's build.
+    #
+    # `cancel-in-progress: false` deliberately. A deployment transaction already
+    # running must not be killed by the next arrival: a cancel mid-rollback is worse
+    # than a queue, because the host state is exactly what the rollback is repairing.
+    concurrency:
+      group: ${{ format('staging-host-{0}', vars.OPSWEAVE_STAGING_HOST || 'default') }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1502,6 +1552,25 @@ jobs:
       OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha || inputs.sha || github.sha }}
       OPSWEAVE_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
       OPSWEAVE_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
+    # One host, one transaction. Shared by every job that touches the staging host -
+    # deploy, the smoke suites, the seeded-data suites - and REPOSITORY-scoped, not
+    # run-scoped: a job-level group serialises across different workflow runs too.
+    #
+    # WHY THE WORKFLOW-LEVEL GROUP ALONE IS NOT ENOUGH. The host has `flock` on
+    # `deploy.lock`, and `cmd_deploy` holds it from acquire to return, so two
+    # concurrent DEPLOYS are already excluded. But the deploy job ends once the
+    # containers are healthy and certified, and `smoke` / `seeded_*` run as SEPARATE
+    # JOBS afterwards with no lock. A second run can deploy between them, and the
+    # suites then certify a host serving a different commit than the one they were
+    # started for - the failure mode where a green acceptance belongs to somebody
+    # else's build.
+    #
+    # `cancel-in-progress: false` deliberately. A deployment transaction already
+    # running must not be killed by the next arrival: a cancel mid-rollback is worse
+    # than a queue, because the host state is exactly what the rollback is repairing.
+    concurrency:
+      group: ${{ format('staging-host-{0}', vars.OPSWEAVE_STAGING_HOST || 'default') }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1570,6 +1639,25 @@ jobs:
       OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha || inputs.sha || github.sha }}
       OPSWEAVE_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
       OPSWEAVE_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
+    # One host, one transaction. Shared by every job that touches the staging host -
+    # deploy, the smoke suites, the seeded-data suites - and REPOSITORY-scoped, not
+    # run-scoped: a job-level group serialises across different workflow runs too.
+    #
+    # WHY THE WORKFLOW-LEVEL GROUP ALONE IS NOT ENOUGH. The host has `flock` on
+    # `deploy.lock`, and `cmd_deploy` holds it from acquire to return, so two
+    # concurrent DEPLOYS are already excluded. But the deploy job ends once the
+    # containers are healthy and certified, and `smoke` / `seeded_*` run as SEPARATE
+    # JOBS afterwards with no lock. A second run can deploy between them, and the
+    # suites then certify a host serving a different commit than the one they were
+    # started for - the failure mode where a green acceptance belongs to somebody
+    # else's build.
+    #
+    # `cancel-in-progress: false` deliberately. A deployment transaction already
+    # running must not be killed by the next arrival: a cancel mid-rollback is worse
+    # than a queue, because the host state is exactly what the rollback is repairing.
+    concurrency:
+      group: ${{ format('staging-host-{0}', vars.OPSWEAVE_STAGING_HOST || 'default') }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1624,7 +1712,13 @@ jobs:
     name: seeded-data visual [known-flaky]
     # Runs after smoke: all four jobs drive the same single staging host, and the core/surfaces
     # suites are timing sensitive (which is why core and surfaces never run in parallel either).
-    # Sequencing this group behind smoke keeps the only new concurrency inside the group.
+    #
+    # Ordering alone used to be the whole argument - "sequencing this group behind smoke keeps the
+    # only new concurrency inside the group" - and it was wrong for a reason that has nothing to do
+    # with ordering WITHIN one run: a second workflow run could deploy between `deploy` finishing and
+    # this job starting. The host lock below is what actually closes that, because it is
+    # repository-scoped rather than run-scoped. The `needs` chain is still needed: it keeps the
+    # suites from starting before the build they assert against exists.
     needs: [plan, build, deploy, smoke]
     if: ${{ always() && needs.plan.outputs.tier == 'full' && needs.smoke.outputs.mode == 'playwright' && (inputs.verify_only == true || needs.deploy.result == 'success') }}
     runs-on: ubuntu-24.04
@@ -1648,6 +1742,25 @@ jobs:
       OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha || inputs.sha || github.sha }}
       OPSWEAVE_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
       OPSWEAVE_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
+    # One host, one transaction. Shared by every job that touches the staging host -
+    # deploy, the smoke suites, the seeded-data suites - and REPOSITORY-scoped, not
+    # run-scoped: a job-level group serialises across different workflow runs too.
+    #
+    # WHY THE WORKFLOW-LEVEL GROUP ALONE IS NOT ENOUGH. The host has `flock` on
+    # `deploy.lock`, and `cmd_deploy` holds it from acquire to return, so two
+    # concurrent DEPLOYS are already excluded. But the deploy job ends once the
+    # containers are healthy and certified, and `smoke` / `seeded_*` run as SEPARATE
+    # JOBS afterwards with no lock. A second run can deploy between them, and the
+    # suites then certify a host serving a different commit than the one they were
+    # started for - the failure mode where a green acceptance belongs to somebody
+    # else's build.
+    #
+    # `cancel-in-progress: false` deliberately. A deployment transaction already
+    # running must not be killed by the next arrival: a cancel mid-rollback is worse
+    # than a queue, because the host state is exactly what the rollback is repairing.
+    concurrency:
+      group: ${{ format('staging-host-{0}', vars.OPSWEAVE_STAGING_HOST || 'default') }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
