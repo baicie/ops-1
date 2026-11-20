@@ -1608,6 +1608,19 @@ jobs:
             echo "\`delegated (partly)\` means this job checked one facet and another"
             echo "workflow checks the rest — read it as partial, not as covered."
           } >> "$GITHUB_STEP_SUMMARY"
+          # Exit 2 is a CONFIGURATION_ERROR, and it is named as one.
+          #
+          # The distinction is the point: a gate that refuses to run because
+          # `GATE_BUDGET_MS` is not a number must not read as "the tests failed".
+          # Both are red, but one is fixed by editing a repository variable and the
+          # other by fixing code, and a reader who is told "tests failed" will look
+          # in the wrong place. `ci-gate.mjs` returns 2 only for a bad invocation -
+          # bad arguments, a missing `--needs-json`, or a budget that cannot fit in
+          # the job timeout - never for a suite result.
+          if [ "$GATE_RC" -eq 2 ]; then
+            echo "::error::ci-gate could not run: CONFIGURATION_ERROR (exit 2). Nothing about the suites was decided - see the message above, which names the invalid setting."
+            exit 2
+          fi
           if [ "$GATE_RC" -ne 0 ]; then
             echo "::error::ci-gate failed (exit $GATE_RC). The summary above says why."
             exit "$GATE_RC"
