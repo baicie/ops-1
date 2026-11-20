@@ -1715,6 +1715,10 @@ jobs:
           # it runs with REPO unset and reports that instead of pretending. The
           # live check is a local/operator command; `--selftest` is what CI guards.
           node tests/ci/check-gate-enforcement.mjs --selftest
+          # The release receipt is what a promotion would verify. Its checks are
+          # offline; the live write/verify path needs a token and belongs to the
+          # certification workflow, not here.
+          node scripts/release-receipt.mjs --selftest
           # The analyzer's output is what the gate judges, so its own tests run
           # here too - including the cases that pin the analyzer to the suites a
           # workflow can actually start.
