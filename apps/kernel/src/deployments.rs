@@ -1737,6 +1737,38 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         .iter()
         .filter(|instance| matches!(instance.state.as_str(), "UNHEALTHY" | "UNREACHABLE"))
         .count() as i32;
+    // Why the slots that could not be placed were refused.
+    //
+    // The PENDING branch below has always carried this; every other branch threw
+    // it away. That made the case an operator actually hits on a full node -
+    // "slot 0 took the last place, slot 1 was refused" - indistinguishable from
+    // "still starting": `status_reason` said `0/2 replicas READY` and waiting is
+    // the one thing that cannot help.
+    //
+    // So it is computed once, here, and appended by every branch that describes a
+    // deployment which is not fully placed.
+    let placement_note = if missing > 0 {
+        match placement_rejection.as_ref() {
+            Some((node_name, rejection, node_id)) => {
+                let mut line = placement_failure_reason(node_name, rejection);
+                if rejection.code() == "INSTANCE_CAPACITY_EXCEEDED" {
+                    let occupants = capacity_occupants(&state.db, *node_id).await;
+                    if !occupants.is_empty() {
+                        line.push_str(&format!("; occupied by {}", occupants.join(", ")));
+                    }
+                }
+                Some(line)
+            }
+            None => Some(PLACEMENT_FAILURE.to_string()),
+        }
+    } else {
+        None
+    };
+    let with_placement = |base: String| match placement_note.as_ref() {
+        Some(note) => format!("{base}; {note}"),
+        None => base,
+    };
+
     let (status, reason) = if deployment.desired_replicas == 0 {
         ("DISABLED", Some("Desired replicas is zero".to_string()))
     } else if missing == deployment.desired_replicas {
@@ -1749,20 +1781,7 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         // enough: the operator's next action depends entirely on whether the
         // occupants are this plugin's own stale attempts, another plugin that
         // should be moved, or a limit that should be raised.
-        let occupied = match placement_rejection.as_ref() {
-            Some((node_name, rejection, node_id)) => {
-                let mut line = placement_failure_reason(node_name, rejection);
-                if rejection.code() == "INSTANCE_CAPACITY_EXCEEDED" {
-                    let occupants = capacity_occupants(&state.db, *node_id).await;
-                    if !occupants.is_empty() {
-                        line.push_str(&format!("; occupied by {}", occupants.join(", ")));
-                    }
-                }
-                Some(line)
-            }
-            None => Some(PLACEMENT_FAILURE.to_string()),
-        };
-        ("PENDING", occupied)
+        ("PENDING", placement_note.clone())
     } else if ready == deployment.desired_replicas {
         if is_effective {
             ("ACTIVE", None)
@@ -1772,18 +1791,18 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
     } else if is_effective {
         (
             "DEGRADED",
-            Some(format!(
+            Some(with_placement(format!(
                 "{ready}/{} replicas READY",
                 deployment.desired_replicas
-            )),
+            ))),
         )
     } else if starting > 0 {
         (
             "PREPARING",
-            Some(format!(
+            Some(with_placement(format!(
                 "{ready}/{} replicas READY",
                 deployment.desired_replicas
-            )),
+            ))),
         )
     } else if failed > 0 {
         (
@@ -3597,6 +3616,19 @@ mod tests {
             .await
             .expect("publisher");
 
+            // ISOLATE THE PLANNER FROM OTHER TESTS' NODES - by SELECTOR, not by
+            // revoking them.
+            //
+            // `reconcile_once` plans against every eligible node, not only this
+            // fixture's. A node left READY by a neighbouring test offered a second
+            // place to put a replica, so a test that exists to observe a capacity
+            // refusal observed placement instead.
+            //
+            // The first fix revoked other nodes; that broke the tests against each
+            // other, because they share one database and each fixture revoked its
+            // neighbours. The node is given a unique label and the deployment's
+            // `nodeSelector` names it, so no row outside this fixture is ever a
+            // candidate - and nothing outside this fixture is touched.
             // `last_seen_at = now()` matters: `reconcile_once` marks a node
             // UNREACHABLE before planning, and a stale row would make this test
             // fail on node health rather than on the replica limit.
@@ -3605,12 +3637,13 @@ mod tests {
                    (id, name, control_token_hash, data_token, generation, os, arch,
                     labels, capabilities, status, enrolled_at, last_seen_at,
                     data_endpoint, resource_snapshot)
-                 VALUES ($1,$2,'x','tok',1,'linux','amd64','{}'::jsonb,'[]'::jsonb,
+                 VALUES ($1,$2,'x','tok',1,'linux','amd64',$4::jsonb,'[]'::jsonb,
                          'READY',now(),now(),'http://127.0.0.1:1',$3)",
             )
             .bind(node)
             .bind(format!("rep-node-{tag}"))
             .bind(&snapshot)
+            .bind(serde_json::json!({ "test-fixture": tag }))
             .execute(pool)
             .await
             .expect("node");
@@ -3642,7 +3675,10 @@ mod tests {
             .bind(&plugin)
             .bind(package)
             .bind(replicas)
-            .bind(serde_json::json!({ "nodeSelector": {}, "maxInstancesPerNode": max_per_node }))
+            .bind(serde_json::json!({
+                "nodeSelector": { "test-fixture": tag },
+                "maxInstancesPerNode": max_per_node,
+            }))
             .execute(pool)
             .await
             .expect("deployment");
@@ -3714,48 +3750,92 @@ mod tests {
                 status, "PREPARING",
                 "a half-placed deployment reports PREPARING, not PENDING: {reason:?}"
             );
-            // MEASURED, and not what I expected: BOTH slots exist.
+            // ONE row, not two.
             //
-            // I predicted the planner would refuse slot 1 and never create it. It
-            // creates it, because `global_instance_counts` and `used_nodes` both
-            // exclude an instance that is UNHEALTHY/UNREACHABLE with no container
-            // (`is_ghost_instance`, deployments.rs:1491 and 1529). A freshly
-            // planned instance is STARTING, and once the node stops reporting it
-            // becomes UNREACHABLE with no container - at which point it stops
-            // counting toward `max_instances_per_deployment` (1) and the next pass
-            // happily plans slot 1 onto the same node.
+            // #162 measured "both slots get rows" and concluded the ghost-exclusion
+            // rule lets a deployment over-subscribe its own per-deployment limit.
+            // That conclusion was drawn from a fixture with an EMPTY nodeSelector,
+            // so the planner could place slot 1 on a node left READY by a
+            // neighbouring test in the same database. Two READY nodes meant slot 1
+            // legitimately had somewhere to go.
             //
-            // So the per-deployment limit does not bound the number of slots a
-            // single deployment can accumulate on one node; it only bounds how
-            // many are non-ghost at once. On a single-node host that is how a
-            // deployment ends up with more instance rows than the topology can
-            // ever run.
+            // With the fixture's node labelled and the selector pinned to it, the
+            // per-deployment limit of 1 does what it says: slot 1 is refused and no
+            // row is created for it. The rule was never broken; the fixture was.
             assert_eq!(
-                instances, 2,
-                "both slots get rows; the ghost-exclusion rule is what lets the second \
-                 one through (see the comment above)"
+                instances, 1,
+                "the refused slot must not get a row; a second row here would mean the \
+                 per-deployment limit let the deployment place onto another node"
             );
-            // The observability gap, asserted rather than described: nothing tells
-            // the operator that the second replica was refused for capacity.
             let reason_text = reason.unwrap_or_default();
+            // THE OBSERVABILITY GAP IS NOW CLOSED, and this asserts the closure.
+            //
+            // When this test was written, `status_reason` was only
+            // "0/2 replicas READY" - the placement rejection was attached by the
+            // PENDING branch alone, which is entered only when NOT ONE replica was
+            // placed. The assertion here used to state that the rejection must NOT
+            // appear, and to fail if it did, so that fixing the gap could not pass
+            // silently. It now asserts the opposite.
             assert!(
-                !reason_text.contains("INSTANCE_CAPACITY_EXCEEDED"),
-                "if this now carries the rejection, the gap this test documents has been \
-                 fixed and the assertion should say so: {reason_text}"
+                reason_text.contains("INSTANCE_CAPACITY_EXCEEDED"),
+                "a partly placed deployment must name the rejection: {reason_text}"
             );
             assert!(
-                reason_text.contains("/2"),
-                "it reports a replica ratio against the target it cannot meet: {reason_text}"
+                reason_text.contains("per-deployment limit of 1"),
+                "and the limit that refused it: {reason_text}"
             );
             assert!(
                 reason_text.contains("0/2"),
-                "and the ratio is 0/2 here: the slots exist but nothing is READY, because \
-                 the node never accepted them: {reason_text}"
+                "alongside the ratio it already reported: {reason_text}"
             );
 
             // The node had ample CPU and memory the whole time. Without this the
             // test would pass on a resource rejection and prove the wrong rule.
             assert_eq!(f.snapshot["cpuCores"], 8);
+
+            sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+                .bind(f.deployment)
+                .execute(&pool)
+                .await
+                .ok();
+        }
+
+        /// TASK-07: when SOME replicas are placed, the deployment must still say
+        /// why the others were not.
+        ///
+        /// THE DEFECT. The placement rejection is only attached in the PENDING
+        /// branch, which is entered when `missing == desired_replicas` - i.e. when
+        /// NOT ONE replica could be placed. As soon as a single slot lands, the
+        /// status falls through to PREPARING and `status_reason` becomes
+        /// "0/2 replicas READY" and nothing else.
+        //
+        //         That is the case an operator actually hits on a full node: slot 0
+        //         took the last place, slot 1 was refused for capacity. "0/2 replicas
+        //         READY" reads as "still starting", so the obvious next move is to
+        //         wait - and it will never converge. The rejection the planner
+        //         already computed (deployments.rs:1579) is thrown away.
+        #[tokio::test]
+        async fn partial_placement_reports_why_the_rest_were_refused() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            // A node with room for exactly one of the two requested replicas.
+            let f = fixture(&pool, 2, 1).await;
+            let state = state(&pool);
+            for _ in 0..2 {
+                crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                    .await
+                    .expect("reconcile");
+            }
+
+            let (status, reason, _) = status_of(&pool, f.deployment).await;
+            let reason = reason.unwrap_or_default();
+            assert_ne!(status, "READY");
+            assert!(
+                reason.contains("INSTANCE_CAPACITY_EXCEEDED") || reason.contains("per-deployment"),
+                "a partly placed deployment must name the placement rejection that refused \
+                 the remaining slots, not only a ready ratio; got {reason}"
+            );
 
             sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
                 .bind(f.deployment)

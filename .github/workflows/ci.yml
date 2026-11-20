@@ -1701,6 +1701,20 @@ jobs:
           # into the suite matrix, which models cancellations and not locks.
           node tests/ci/check-staging-concurrency.mjs --selftest
           node tests/ci/check-staging-concurrency.mjs
+          # `PUT /rulesets/{id}` replaces the WHOLE rules array. A payload that
+          # carries only required_status_checks would silently delete main's other
+          # four protections. The saved restore payloads are checked here so the
+          # mistake cannot reach a terminal.
+          node tests/ci/check-ruleset-payload.mjs --selftest
+          node tests/ci/check-ruleset-payload.mjs
+          # Is the gate actually enforceable? Reads the LIVE ruleset, because a
+          # flawless workflow that nothing requires gates nothing. ADVISORY and
+          # PARTIAL exit 0 - they are facts for a migration to decide about, not
+          # code defects. Only BROKEN (a required context nobody produces) fails.
+          # This step has no GH_TOKEN, so it cannot read the live ruleset here -
+          # it runs with REPO unset and reports that instead of pretending. The
+          # live check is a local/operator command; `--selftest` is what CI guards.
+          node tests/ci/check-gate-enforcement.mjs --selftest
           # The analyzer's output is what the gate judges, so its own tests run
           # here too - including the cases that pin the analyzer to the suites a
           # workflow can actually start.
