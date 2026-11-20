@@ -403,6 +403,21 @@ pub async fn revoke_node(
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
+/// The one statement that applies an instance observation.
+///
+/// A constant rather than an inline string so the tests can run THE PRODUCTION
+/// STATEMENT. A test that copies the SQL proves the copy is right; the first
+/// version of `observation_order` did exactly that, and a counterfactual that
+/// removed the ordering guard from the production query left it green.
+pub(crate) const INSTANCE_OBSERVATION_SQL: &str = r#"
+    UPDATE kernel.plugin_instances SET
+      state = $3, observed_at = $4, container_id = $5, image_digest = $6,
+      host_port = $7, restart_count = $8, last_error = $9,
+      runtime_adapter_version = $10, updated_at = now()
+    WHERE id = $1 AND node_id = $2 AND deployment_generation = $11
+      AND (observed_at IS NULL OR observed_at < $4)
+    "#;
+
 pub async fn heartbeat(
     State(state): State<AppState>,
     Path(node_id): Path<Uuid>,
@@ -495,28 +510,20 @@ pub async fn heartbeat(
         if observation.deployment_id.is_nil() {
             continue;
         }
-        let updated = sqlx::query(
-            r#"
-            UPDATE kernel.plugin_instances SET
-              state = $3, observed_at = $4, container_id = $5, image_digest = $6,
-              host_port = $7, restart_count = $8, last_error = $9,
-              runtime_adapter_version = $10, updated_at = now()
-            WHERE id = $1 AND node_id = $2 AND deployment_generation = $11
-            "#,
-        )
-        .bind(observation.instance_id)
-        .bind(node_id)
-        .bind(instance_state_str(observation.state))
-        .bind(observation.observed_at)
-        .bind(&observation.container_id)
-        .bind(&observation.image_digest)
-        .bind(observation.host_port.map(i32::from))
-        .bind(observation.restart_count)
-        .bind(&observation.error)
-        .bind(&observation.runtime_adapter_version)
-        .bind(observation.generation)
-        .execute(&state.db)
-        .await?;
+        let updated = sqlx::query(INSTANCE_OBSERVATION_SQL)
+            .bind(observation.instance_id)
+            .bind(node_id)
+            .bind(instance_state_str(observation.state))
+            .bind(observation.observed_at)
+            .bind(&observation.container_id)
+            .bind(&observation.image_digest)
+            .bind(observation.host_port.map(i32::from))
+            .bind(observation.restart_count)
+            .bind(&observation.error)
+            .bind(&observation.runtime_adapter_version)
+            .bind(observation.generation)
+            .execute(&state.db)
+            .await?;
         if updated.rows_affected() == 0 {
             tracing::debug!(
                 node = %node_id,
@@ -832,4 +839,251 @@ pub async fn node_instances(
             })
             .collect(),
     ))
+}
+
+/// TASK-21 / delayed observation: an older heartbeat must not overwrite a
+/// newer one.
+///
+/// `nodes.rs` writes instance state from `WHERE id AND node_id AND
+/// deployment_generation` - three identity predicates and no ORDERING
+/// predicate. The node sends what it saw; the network decides what order the
+/// reports arrive in. So a report saying "STARTING at T1" can land after
+/// "READY at T2" and the row then describes a state that has been superseded.
+#[cfg(test)]
+mod observation_order {
+    use sqlx::postgres::PgConnectOptions;
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+    async fn test_pool() -> Option<PgPool> {
+        let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                    panic!("{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset");
+                }
+                eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                return None;
+            }
+        };
+        let options: PgConnectOptions = url.parse().expect("test database URL parses");
+        let pool = PgPool::connect_with(options).await.expect("connects");
+        crate::db::migrate(&pool).await.expect("migrates");
+        Some(pool)
+    }
+
+    /// THE PRODUCTION STATEMENT, not a copy of it.
+    ///
+    /// The first version of this helper repeated the SQL. A counterfactual
+    /// that removed the `observed_at` guard from `heartbeat` left the test
+    /// GREEN, because the test was running its own query - it was asserting
+    /// that a query written to reject stale writes rejects stale writes.
+    /// `INSTANCE_OBSERVATION_SQL` is the constant `heartbeat` itself uses.
+    async fn observe(pool: &PgPool, instance: Uuid, node: Uuid, state: &str, at: &str) -> u64 {
+        let result = sqlx::query(crate::nodes::INSTANCE_OBSERVATION_SQL)
+            .bind(instance)
+            .bind(node)
+            .bind(state)
+            .bind(sqlx::types::chrono::DateTime::parse_from_rfc3339(at).unwrap())
+            .bind(Option::<String>::None)
+            .bind(Option::<String>::None)
+            .bind(Option::<i32>::None)
+            .bind(0_i32)
+            .bind(Option::<String>::None)
+            .bind(Option::<String>::None)
+            .bind(1_i64)
+            .execute(pool)
+            .await
+            .expect("observe");
+        result.rows_affected()
+    }
+
+    #[tokio::test]
+    async fn a_late_arriving_older_observation_does_not_overwrite_a_newer_one() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let tag = Uuid::new_v4().simple().to_string();
+        let node = Uuid::new_v4();
+        let package = Uuid::new_v4();
+        let deployment = Uuid::new_v4();
+        let instance = Uuid::new_v4();
+        let plugin = format!("test.ooo.{tag}");
+        let publisher = format!("pub-{tag}");
+
+        sqlx::query(
+            "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+        )
+        .bind(&publisher)
+        .execute(&pool)
+        .await
+        .expect("publisher");
+
+        sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at)
+                 VALUES ($1,$2,'x','tok',1,'linux','amd64','{}'::jsonb,'[]'::jsonb,'READY',now(),now())",
+            ).bind(node).bind(format!("ooo-{tag}")).execute(&pool).await.expect("node");
+
+        sqlx::query(
+            "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+        )
+        .bind(package)
+        .bind(&plugin)
+        .bind(&publisher)
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .execute(&pool)
+        .await
+        .expect("package");
+
+        sqlx::query(
+            "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 VALUES ($1,$2,$3,'1.0.0',1,1,'{}'::jsonb,
+                         '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'PENDING',now(),now())",
+        )
+        .bind(deployment)
+        .bind(&plugin)
+        .bind(package)
+        .execute(&pool)
+        .await
+        .expect("deployment");
+
+        sqlx::query(
+            "INSERT INTO kernel.plugin_instances
+                   (id, deployment_id, node_id, slot, deployment_generation,
+                    desired_action, state)
+                 VALUES ($1,$2,$3,0,1,'START','STARTING')",
+        )
+        .bind(instance)
+        .bind(deployment)
+        .bind(node)
+        .execute(&pool)
+        .await
+        .expect("instance");
+
+        // T2 arrives first and is applied.
+        let applied = observe(&pool, instance, node, "READY", "2026-11-20T10:00:00Z").await;
+        assert_eq!(applied, 1, "the newest observation must land");
+
+        // T1 arrives late. It describes an older moment and must be dropped.
+        let applied = observe(&pool, instance, node, "STARTING", "2026-11-20T09:00:00Z").await;
+        assert_eq!(
+            applied, 0,
+            "an older observation must not overwrite a newer one; without the \
+                 observed_at predicate the row goes back to STARTING"
+        );
+
+        let (state,): (String,) =
+            sqlx::query_as("SELECT state FROM kernel.plugin_instances WHERE id=$1")
+                .bind(instance)
+                .fetch_one(&pool)
+                .await
+                .expect("state");
+        assert_eq!(
+            state, "READY",
+            "the row must still describe the newer observation"
+        );
+
+        sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+            .bind(deployment)
+            .execute(&pool)
+            .await
+            .ok();
+    }
+
+    /// The control: with no prior observation, the first report lands. Without
+    /// this, the test above would pass on a predicate that rejects everything.
+    #[tokio::test]
+    async fn the_first_observation_lands_when_nothing_was_observed_yet() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let tag = Uuid::new_v4().simple().to_string();
+        let node = Uuid::new_v4();
+        let package = Uuid::new_v4();
+        let deployment = Uuid::new_v4();
+        let instance = Uuid::new_v4();
+        let plugin = format!("test.first.{tag}");
+        let publisher = format!("pub-{tag}");
+
+        sqlx::query(
+            "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+        )
+        .bind(&publisher)
+        .execute(&pool)
+        .await
+        .expect("publisher");
+        sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at)
+                 VALUES ($1,$2,'x','tok',1,'linux','amd64','{}'::jsonb,'[]'::jsonb,'READY',now(),now())",
+            ).bind(node).bind(format!("first-{tag}")).execute(&pool).await.expect("node");
+        sqlx::query(
+            "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+        )
+        .bind(package)
+        .bind(&plugin)
+        .bind(&publisher)
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .execute(&pool)
+        .await
+        .expect("package");
+        sqlx::query(
+            "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 VALUES ($1,$2,$3,'1.0.0',1,1,'{}'::jsonb,
+                         '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'PENDING',now(),now())",
+        )
+        .bind(deployment)
+        .bind(&plugin)
+        .bind(package)
+        .execute(&pool)
+        .await
+        .expect("deployment");
+        sqlx::query(
+            "INSERT INTO kernel.plugin_instances
+                   (id, deployment_id, node_id, slot, deployment_generation,
+                    desired_action, state)
+                 VALUES ($1,$2,$3,0,1,'START','STARTING')",
+        )
+        .bind(instance)
+        .bind(deployment)
+        .bind(node)
+        .execute(&pool)
+        .await
+        .expect("instance");
+
+        let applied = observe(&pool, instance, node, "READY", "2026-11-20T10:00:00Z").await;
+        assert_eq!(
+            applied, 1,
+            "a row with no observed_at must accept its first report"
+        );
+
+        sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+            .bind(deployment)
+            .execute(&pool)
+            .await
+            .ok();
+    }
 }
