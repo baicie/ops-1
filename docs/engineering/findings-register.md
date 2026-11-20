@@ -608,6 +608,12 @@ bundle 组装成功（`staged opsweave.data-catalog@0.0.17455`），部署因
 | B-18 | **发布链从不调用 `activate`** | VERIFIED | `grep -c activate scripts/publish-data-plugins.sh` = 0。`route_candidates` 要求 `r.status='ACTIVE'`，所以脚本装好并部署的插件**永远不会被路由**——即使实例健康、容量充足。这是「点治理就登出」的另一个独立原因，比容量更根本 |
 | B-19 | registry 侧 digest 核实 | NOT_RUN | 只有本地 `RepoDigests`，没有 `docker manifest inspect`；见 A-3 |
 | B-20 | gate 预算曾低于真实 p95 | FIXED | 30 分钟 vs data-foundation 实测 p95 2040s（34 分钟）；已改为 35 分钟并接上 `vars.OPSWEAVE_GATE_BUDGET_MS`，带反事实测试 |
+| B-21 | **rerun 期间 gate 用旧的绿色 attempt 放行** | FIXED（#163） | GitHub 每次 rerun **新建** check run 并让旧的永久保持 `completed`——实测 SHA `cc7be5c`（run 44524547400，attempt 2）上 `golden-path` 同时有 `135561535255 completed/failure` 与 `135572060029 completed/success`。`checkState` 取「最新完成的 attempt」，于是在 rerun 的整段时间里旧绿一直可读。两个 selftest 都把这个行为钉成正确，注释里的理由（「`whatToAwait` 会做决定」）是假的：`whatToAwait` 只对 `pending` 等待 |
+| B-22 | **`--budget-ms NaN` 让 gate 永不退出** | FIXED（#166） | `Number(argv[++i])` 无校验。`elapsedMs >= NaN` 恒假，循环永不结束，job 跑满 45 分钟被 timeout 杀死并报 `cancelled`——那是不点名任何 suite 的唯一结局。`-1`/`0` 则立刻返回 `timedOut: []`，即「没有 suite 在跑」，与事实相反 |
+| B-23 | 部署失败在 gate 启动后才结束时不进 `deploymentFailures` | VERIFIED_GAP | `gate()` 用开跑时的 ledger 快照判决（`ci-gate.mjs:1442`），`awaitDelegated` 只重读 delegated suite。不会放行任何东西（部署失败本就不是合并条件），但「这次 push 的部署为什么红」无法从 gate 摘要回答 |
+| B-24 | **单节点上部署能堆积自己跑不起来的实例行** | VERIFIED | 真实 PostgreSQL 测试 `single_node_replica_policy`：1 节点 + 2 副本 + `maxInstancesPerNode: 1`，实测状态是 `PREPARING`（不是 `PENDING`）、**两个** slot 都有实例行、`status_reason` 只有 `"0/2 replicas READY"`。根因：`is_ghost_instance` 把 UNREACHABLE 且无容器的行排除出 per-deployment 计数，下一轮就把 slot 1 放进同一节点。**未修** |
+| B-25 | `deploy --replicas` 默认 2 在单节点主机上不可满足 | FIXED（#162） | staging 只有一个 `node` 服务（`deployments/staging/compose.yaml:141`），`publish-data-plugins.sh` 从不传 `--replicas`。改为必填，脚本显式设 `REPLICAS=1` |
+| B-26 | **发布链从不调用 `activate`（B-18 的修复）** | FIXED（#162，未在 staging 跑过） | `deploy --activate` 走完 READY → CAS 激活 → 回读 `effectiveVersion` 断言。15 秒 drain 未改动 |
 
 ### B-1 为什么「不统计幽灵」不等于「修复」
 
