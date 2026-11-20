@@ -246,3 +246,55 @@ test('the receipt status column enforces the contract enum', async () => {
     await pool.end();
   }
 });
+
+test('the two receipt tables enforce two different contract enums', async () => {
+  // catalog_receipts   -> data-catalog.v1.schema.json: ACCEPTED/PARTIAL/REJECTED/UNKNOWN
+  // catalog_effect_receipts -> sink-receipt.v1.schema.json: COMMITTED/REJECTED/UNKNOWN
+  //
+  // Two tables, two contracts, two value sets. Having a CHECK on only one of them
+  // was an accident of which table got fixed first, so both are asserted here and
+  // each is asserted to REJECT a value that belongs to the other.
+  const pool = new pg.Pool({ connectionString: DATABASE_URL });
+  try {
+    const insertIngestion = (receiptId, status) => pool.query(
+      `INSERT INTO catalog_receipts
+         (receipt_id, dataset_id, schema_revision, source_batch_key, request_digest,
+          status, accepted, rejected, unknown, errors)
+       VALUES ($1,$2,1,$3,'d',$4,0,0,0,'[]'::jsonb)`,
+      [receiptId, DATASET_A, `ingest-${receiptId}`, status],
+    );
+    const insertEffect = (receiptId, status) => pool.query(
+      `INSERT INTO catalog_effect_receipts
+         (receipt_id, effect_id, request_digest, job_id, lease_id, fencing_sequence,
+          pipeline_id, pipeline_revision, sink_node_id, logical_batch_id, dataset_id,
+          schema_revision, source_batch_key, status, accepted, rejected, unknown, errors)
+       VALUES ($1,$2,'d',$3,$4,1,'p',1,'n','l',$5,1,$6,$7,0,0,0,'[]'::jsonb)`,
+      [receiptId, `effect-${receiptId}`, crypto.randomUUID(), crypto.randomUUID(),
+        DATASET_A, `key-${receiptId}`, status],
+    );
+
+    // Every value each contract names must be accepted.
+    for (const status of ['ACCEPTED', 'PARTIAL', 'REJECTED', 'UNKNOWN']) {
+      await insertIngestion(crypto.randomUUID(), status);
+    }
+    for (const status of ['COMMITTED', 'REJECTED', 'UNKNOWN']) {
+      await insertEffect(crypto.randomUUID(), status);
+    }
+
+    // The cross-check: a value from the OTHER contract's enum must be refused by
+    // each table. Without this, "both have a CHECK" could be satisfied by both
+    // having the same one.
+    await assert.rejects(
+      insertIngestion(crypto.randomUUID(), 'COMMITTED'),
+      /check constraint/i,
+      'COMMITTED belongs to the effect receipt, not the ingestion receipt',
+    );
+    await assert.rejects(
+      insertEffect(crypto.randomUUID(), 'PARTIAL'),
+      /check constraint/i,
+      'PARTIAL belongs to the ingestion receipt, not the effect receipt',
+    );
+  } finally {
+    await pool.end();
+  }
+});

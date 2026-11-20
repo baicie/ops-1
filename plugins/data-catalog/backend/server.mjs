@@ -198,7 +198,7 @@ async function initDb() {
       schema_revision integer NOT NULL,
       source_batch_key text NOT NULL,
       request_digest text NOT NULL,
-      status text NOT NULL,
+      status text NOT NULL CHECK (status IN ('ACCEPTED','PARTIAL','REJECTED','UNKNOWN')),
       accepted integer NOT NULL,
       rejected integer NOT NULL,
       unknown integer NOT NULL,
@@ -358,6 +358,26 @@ async function initDb() {
           CHECK (status IN ('COMMITTED','REJECTED','UNKNOWN'));
       END IF;
     END $mig$;
+
+    -- The ingestion receipt carries a DIFFERENT enum from the effect receipt, and
+    -- both are in contracts: catalog_receipts is data-catalog.v1's ingestion
+    -- receipt (ACCEPTED / PARTIAL / REJECTED / UNKNOWN) while
+    -- catalog_effect_receipts is sink-receipt.v1's committed effect
+    -- (COMMITTED / REJECTED / UNKNOWN). Two tables, two contracts, two sets of
+    -- values - so one CHECK cannot cover both, and having a CHECK on only one of
+    -- them was an accident of which table got fixed first.
+    DO $ing$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'catalog_receipts'::regclass
+           AND conname = 'catalog_receipts_status_check'
+      ) THEN
+        ALTER TABLE catalog_receipts
+          ADD CONSTRAINT catalog_receipts_status_check
+          CHECK (status IN ('ACCEPTED','PARTIAL','REJECTED','UNKNOWN'));
+      END IF;
+    END $ing$;
   `);
   ready = true;
 }
