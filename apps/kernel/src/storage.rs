@@ -51,9 +51,21 @@ impl From<StorageBindingRow> for StorageBindingView {
 
 pub async fn get_binding(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(plugin_id): Path<String>,
 ) -> AppResult<Json<StorageBindingView>> {
+    // OPERATOR, NOT JUST "SIGNED IN".
+    //
+    // `_auth: AuthUser` accepted any authenticated user - including Viewer - and
+    // returned any plugin's binding, which carries `credential_ref`. Reading a
+    // credential reference is not a read-only convenience: it names the secret a
+    // plugin's storage role uses, and the write endpoints next to this one already
+    // require admin. The pair was asymmetric in the direction that matters least:
+    // changing a binding was guarded, learning about every binding was not.
+    //
+    // Operator rather than admin because an operator is who diagnoses a storage
+    // problem; creating or applying a migration stays admin-only.
+    auth.require_operator()?;
     let row = sqlx::query_as::<_, StorageBindingRow>(
         "SELECT plugin_id,schema_name,role_name,credential_ref,state,migration_plan_digest,created_at,updated_at FROM kernel.plugin_storage_bindings WHERE plugin_id=$1",
     )
@@ -439,6 +451,94 @@ async fn record_failed_migration(
 mod tests {
     use super::{has_transaction_control, safe_names, split_sql_statements};
 
+    /// The role gate on the storage read paths.
+    ///
+    /// `get_binding` and `list_migrations` took `_auth: AuthUser` - any session at
+    /// all, Viewer included - while the write endpoints beside them required
+    /// admin. The asymmetry pointed the wrong way: changing a binding was guarded
+    /// and LEARNING ABOUT EVERY binding was not, and the binding carries
+    /// `credential_ref`, the name of the secret the storage role uses.
+    ///
+    /// This asserts the rule the handlers now call, not a live HTTP response: the
+    /// handlers are thin wrappers whose only decision IS this call.
+    #[test]
+    fn the_storage_read_paths_require_more_than_a_session() {
+        use crate::auth::AuthUser;
+        use opsweave_contracts::Role;
+        use uuid::Uuid;
+
+        let user = |role: Role| AuthUser {
+            user_id: Uuid::new_v4(),
+            email: "u@example.invalid".into(),
+            display_name: "u".into(),
+            role,
+            session_id: Uuid::new_v4(),
+            csrf_token: "t".into(),
+            via_cookie: false,
+        };
+
+        // A viewer is signed in and still refused. This is the case that was
+        // accepted before the fix - and the one an auditor would test first.
+        let viewer = user(Role::Viewer);
+        assert!(
+            viewer.require_operator().is_err(),
+            "a viewer must not read storage bindings or migration history"
+        );
+        assert!(viewer.require_admin().is_err());
+
+        // The roles that diagnose storage problems may read; only admin may write.
+        for role in [Role::Operator, Role::Admin] {
+            let who = user(role);
+            assert!(
+                who.require_operator().is_ok(),
+                "{role:?} is who diagnoses a storage problem and must be able to read"
+            );
+        }
+        assert!(
+            user(Role::Operator).require_admin().is_err(),
+            "operators must not apply migrations"
+        );
+        assert!(user(Role::Admin).require_admin().is_ok());
+    }
+
+    /// The handlers actually CALL the gate.
+    ///
+    /// The test above proves `require_operator` behaves correctly; it would pass
+    /// with the call deleted from `get_binding`, because the rule it asserts lives
+    /// in `AuthUser`, not in the handler. That is the same mistake this repository
+    /// made with the forwarding rule and with the receipt SQL: a test of the rule
+    /// is not a test of the wiring.
+    ///
+    /// The source is checked rather than a live request because the handlers are
+    /// three lines each and the only thing that can regress is whether the call is
+    /// there.
+    #[test]
+    fn every_storage_http_handler_checks_a_role() {
+        let source = include_str!("storage.rs");
+        // Each handler's signature line, then the first line of its body.
+        for handler in [
+            "fn get_binding",
+            "fn ensure_binding",
+            "fn list_migrations",
+            "fn apply_migration",
+        ] {
+            let at = source
+                .find(handler)
+                .unwrap_or_else(|| panic!("{handler} not found"));
+            // The body starts after the signature's closing `) -> ... {`.
+            let body_start = source[at..]
+                .find("{\n")
+                .map(|i| at + i)
+                .unwrap_or_else(|| panic!("{handler} has no body"));
+            let body = &source[body_start..body_start + 1200.min(source.len() - body_start)];
+            assert!(
+                body.contains("require_operator()") || body.contains("require_admin()"),
+                "{handler} does not check a role in its first lines; a handler that \
+                 takes `_auth: AuthUser` and never reads it authorises every session"
+            );
+        }
+    }
+
     #[test]
     fn migration_sql_is_split_without_breaking_quoted_semicolons() {
         let statements = split_sql_statements("CREATE TABLE t(id int); SELECT 'a;b'; SELECT 1;");
@@ -502,9 +602,12 @@ pub struct MigrationView {
 
 pub async fn list_migrations(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(plugin_id): Path<String>,
 ) -> AppResult<Json<Vec<MigrationView>>> {
+    // Same asymmetry as `get_binding`: applying a migration requires admin, and
+    // reading the applied list required nothing beyond a session.
+    auth.require_operator()?;
     let rows = sqlx::query_as::<_, MigrationView>(
         "SELECT migration_id,version,checksum,phase,status,applied_at FROM kernel.plugin_migrations WHERE plugin_id=$1 ORDER BY migration_id",
     )

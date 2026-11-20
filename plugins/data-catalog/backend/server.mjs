@@ -938,6 +938,20 @@ async function handle(req, res) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        // THE FENCED SINK IS THE LOCK HOLDER, SO IT IS THE ONE THAT NEEDS A BOUND.
+        //
+        // `fence_authorize_effect` takes the same pipeline_jobs row lock as Claim
+        // and holds it until this transaction commits. Every other write path in
+        // this file sets a lock_timeout before taking a lock (lines 533, 594) and
+        // this one did not - so a stuck Catalog transaction serialised every claim
+        // for as long as it stayed stuck, with nothing to break it.
+        //
+        // The numbers match the ingestion path: 2 s to acquire a contended lock,
+        // 30 s for the whole statement. A sink that cannot get its fence inside
+        // two seconds is a sink that should fail and be retried by the job, not one
+        // that should hold the queue.
+        await client.query("SET LOCAL lock_timeout = '2s'");
+        await client.query("SET LOCAL statement_timeout = '30s'");
         // The function takes the same pipeline_jobs row lock as Claim. It is the
         // authoritative fence check and remains held until this transaction commits.
         const authority = await client.query(

@@ -742,11 +742,7 @@ pub async fn service_catalog_get(
 /// tell "your token is for another capability" from "your token was minted for
 /// another audience", and TASK-25's audit found the capability-mismatch case had
 /// no distinct code to assert at all.
-fn token_binding_error(
-    claims: &WorkloadClaims,
-    name: &str,
-    major: i64,
-) -> Option<AppError> {
+fn token_binding_error(claims: &WorkloadClaims, name: &str, major: i64) -> Option<AppError> {
     if claims.capability_name != name || claims.capability_major != major {
         return Some(AppError::new(
             StatusCode::FORBIDDEN,
