@@ -133,6 +133,34 @@ export async function awaitDelegated(opts) {
     log = () => {},
   } = opts;
 
+  // THE BUDGET IS VALIDATED HERE, because the loop below cannot survive a bad
+  // one and neither of the two failure modes is acceptable.
+  //
+  // `budgetMs` arrives from `--budget-ms`, which `ci-gate.mjs` parsed as
+  // `Number(argv[++i])` with no check, and from `GATE_BUDGET_MS`, a repository
+  // variable anyone with settings access can set. Measured before this guard:
+  //
+  //   NaN  -> `elapsedMs >= NaN` is false for ever, so the poll loop NEVER
+  //           exits. The gate job runs until its 45-minute timeout kills it, and
+  //           a killed job reports `cancelled` - the one outcome that says
+  //           nothing about the suites.
+  //   -1   -> returns on the first read with `timedOut: []`, i.e. "nothing was
+  //           still running", which is the opposite of what is true.
+  //   0    -> same as -1.
+  //
+  // A configuration error is not a suite result. It is thrown so the CLI can
+  // report CONFIGURATION_ERROR and exit non-zero, rather than being mistaken for
+  // a timeout (the suites) or a crash (the harness).
+  if (!Number.isFinite(budgetMs) || budgetMs <= 0) {
+    const error = new RangeError(
+      `await-delegated: budgetMs must be a positive finite number, got ${String(budgetMs)}. ` +
+      'This is a configuration error, not a suite result: NaN would never expire and a ' +
+      'non-positive budget reports "nothing still running" before reading anything.',
+    );
+    error.code = 'CONFIGURATION_ERROR';
+    throw error;
+  }
+
   const started = now();
   let attempt = 0;
   let wait = pollMs;
