@@ -3,7 +3,11 @@
 **运行**：[run 44666711786](https://github.com/baicie/ops-1/actions/runs/44666711786)，
 任务 `full TypeScript lifecycle`，main `f26ed77`。
 
-**状态：`SUSPECTED_RISK` —— 根因未确定，修复未提交。**
+**状态：`INFRASTRUCTURE_FAILURE`（瞬时）—— 已由真实 runner 上的 `-X` 运行排除环境因素，
+不需要代码修复。**
+
+> **2026-11-20 更新。** 下面的第 1–7 节是**诊断之前**的记录，保留原样因为它们准确描述了当时
+> 的证据边界。结论在第 8 节。
 
 ---
 
@@ -88,3 +92,82 @@ mvn -B -X -f plugins/hello-java/pom.xml -DskipTests package 2>&1 | grep -E \
 
 无关。`plugin-lifecycle.yml` 的 `concurrency` 改动只影响**多个 run 之间**的排队与取消，
 不影响单个 run 内部的 Maven 行为。这次失败发生在唯一一个正在运行的 run 里。
+
+
+---
+
+# 8. 诊断运行的结果（决定性）
+
+**运行**：workflow `maven-diagnosis.yml`，run `44674095884`，job `136081683625`，
+分支 main `6d8579f`，`completed/success`。
+
+## 8.1 环境与失败那次**完全相同**
+
+| 项 | 值 |
+|---|---|
+| Runner | `ubuntu-24.04`（与 `plugin-lifecycle.yml:148` 相同） |
+| 工具链装配顺序 | `setup-java` → `apt-get install maven`（与失败那次相同） |
+| `which -a mvn` | `/usr/bin/mvn` → `/etc/alternatives/mvn` → `/usr/share/maven/bin/mvn` |
+| `mvn -v` | **Apache Maven 3.8.7** |
+| JDK | 21.0.13，Eclipse Adoptium，`/usr/lib/jvm/temurin-21-jdk-amd64` |
+| `JAVA_HOME` | `/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.13-9/x64` |
+
+**Maven 3.8.7 就是 CI 实际用的版本**——不是我在第 3 节猜的「Maven 版本差异」。
+
+## 8.2 网络：正常，而且很快
+
+```
+attempt 1: http=200 connect=0.047s ttfb=0.086s total=0.086s
+attempt 2: http=200 connect=0.006s ttfb=0.044s total=0.044s
+attempt 3: http=200 connect=0.006s ttfb=0.044s total=0.044s
+```
+
+**43–86 毫秒**，不是我在本机测到的 6.8–19 秒。**「超时」这个假设被证伪。**
+
+## 8.3 Maven 确实下载了，而且成功了
+
+```
+[INFO] Downloading from central: .../spring-boot-starter-parent-3.3.5.pom
+[INFO] Downloaded from central: ... (13 kB at 23 kB/s)
+[INFO] Downloading from central: .../spring-boot-dependencies-3.3.5.pom
+[INFO] Downloaded from central: ... (100 kB at 1.9 MB/s)
+...
+-rw-r--r-- 1 runner runner 20058377 ... hello-java-0.0.1.jar
+```
+
+冷本地仓库（`-Dmaven.repo.local=/tmp/m2-diag`）、`-X`、同一条命令——**构建成功，产出 20 MB 的 jar**。
+
+## 8.4 结论
+
+| 维度 | 判定 |
+|---|---|
+| pom 或版本错误 | **否**——`3.3.5` 存在且能解析 |
+| Maven 版本问题 | **否**——同一个 3.8.7 成功 |
+| 工具链/JDK 问题 | **否**——同一个 JDK 成功 |
+| 持续性网络问题 | **否**——同一条路径 43–86 ms |
+| 仓库配置/mirror | **否**——`setup-java` 写的 `~/.m2/settings.xml` 无害 |
+| **分类** | **`INFRASTRUCTURE_FAILURE`（瞬时）** |
+
+失败的那次（`44666711786`）是一次**不可复现的瞬时故障**。同环境同命令在同一天成功。
+
+**不提交代码修复**：没有可修的确定性缺陷。改 `build-plugins.sh` 只会是在一个健康路径上加
+无用的重试逻辑。
+
+## 8.5 我之前的哪些判断是错的
+
+诚实地记下来，因为这些错误方法本身值得警惕：
+
+| 我写过的 | 实际情况 |
+|---|---|
+| 「本机复现出 TLS 超时，看起来像网络」 | 我的本机走 `198.18.0.55` 代理，**与 runner 无关**。runner 是 43 ms |
+| 「加大 Maven 超时是修复方向」 | 方向完全错了——网络没问题，超时不会发生 |
+| 「CI 日志零 `Downloading` 行说明 Maven 可能没试」 | 这个不确定性是真实的，但**解决它不需要推理，只需要一次 `-X` 运行** |
+| （隐含）「没有 settings.xml」 | **错**。`setup-java` 会写 `~/.m2/settings.xml` 和 `toolchains.xml` |
+
+## 8.6 唯一值得保留的改进
+
+`scripts/build-plugins.sh` 用 `mvn -q`。正是它让这次失败**看起来像「版本不存在」**，
+把一次可自证的瞬时故障变成了需要专门诊断运行才能解释的谜。
+
+把 `-q` 换成 `-B` 不会让失败消失，但会让**下一次**失败自己说明原因。这不是修复，
+是可观测性改进——值得单独提，但不适用于掩盖本次结论。
