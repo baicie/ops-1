@@ -13,7 +13,7 @@ import { test, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import pg from 'pg';
-import { openStorage, SourceConflictError, StorageUnavailableError } from './storage.mjs';
+import { openStorage, SourceConflictError, StorageUnavailableError, storageFailure } from './storage.mjs';
 
 const { Client } = pg;
 const DATABASE_URL = process.env.OPSWEAVE_TEST_PLUGIN_DATABASE_URL || '';
@@ -178,4 +178,157 @@ test('reopening an already migrated database is a no-op', { skip }, async () => 
   await second.close();
   const rows = await raw('SELECT version FROM zabbix_schema_migrations ORDER BY version');
   assert.deepEqual(rows.rows.map((row) => row.version), [1]);
+});
+
+// ---- bounded waits -------------------------------------------------------
+//
+// B-41. `openStorage` set `connectionTimeoutMillis`, which bounds waiting for a
+// free POOL SLOT, and nothing else. Two waits inside a transaction were
+// unbounded, and both are reachable from ordinary operations:
+//
+//   - `updateSource` takes `FOR UPDATE` on the source row;
+//   - `migrate` takes `pg_advisory_xact_lock` on a fixed key, and runs on every
+//     `openStorage`, so a second instance starting while the first migrates
+//     queues behind it.
+//
+// Measured 2026-11-21 against PostgreSQL 17.10 with a holder sleeping 12s:
+//
+//   shipped options (acquire bound only), FOR UPDATE  -> STILL WAITING at 5s
+//   + lock_timeout=1s, same wait                      -> 55P03 at 1476ms
+//   + lock_timeout=1s, pg_advisory_xact_lock          -> 55P03 at 1527ms
+//
+// The assertion is on the OUTCOME and the CODE, not on a wall-clock number: a
+// test that says "fails within N ms" is a test that fails on a slow runner. The
+// holder is held for far longer than the bound, so "returned at all" is the
+// signal - and with the old options this test hangs until its own timeout.
+
+test('a source update behind a held row lock fails as retryable, not as a hang', { skip }, async () => {
+  const store = await openStorage({ databaseUrl: DATABASE_URL, allowMemory: false });
+  try {
+    const created = await store.createSource(source());
+
+    // An independent connection holds the row the way a concurrent update or a
+    // stuck transaction would. It is held for 20s - far past lock_timeout, so
+    // the only way this test finishes quickly is if the pool bounds the wait.
+    const holder = new Client({ connectionString: DATABASE_URL });
+    await holder.connect();
+    await holder.query('BEGIN');
+    await holder.query('SELECT 1 FROM zabbix_sources WHERE source_id=$1 FOR UPDATE', [created.source_id]);
+
+    try {
+      const started = Date.now();
+      const attempt = store.updateSource(
+        created.source_id, [WORKSPACE_A],
+        { name: 'renamed', endpoint: created.endpoint, credential: { kind: 'api-token', ref: 'secretref:zabbix/main' }, verifyTls: true, budget: source().budget },
+        ACTOR,
+      );
+      const bounded = await Promise.race([
+        attempt.then(() => ({ settled: 'resolved' }), (error) => ({ settled: 'rejected', error })),
+        new Promise((resolve) => setTimeout(() => resolve({ settled: 'HUNG' }), 15000)),
+      ]);
+      const elapsed = Date.now() - started;
+
+      assert.notEqual(bounded.settled, 'HUNG',
+        `the update was still waiting after ${elapsed}ms; the pool has no lock bound`);
+      assert.equal(bounded.settled, 'rejected', 'a contended row must not let the update succeed');
+      // The translation matters as much as the bound: an untranslated 55P03
+      // reaches the server as 500 INTERNAL / retryable=false, which tells the
+      // caller to give up on a condition that is transient by construction.
+      assert.ok(bounded.error instanceof StorageUnavailableError,
+        `expected StorageUnavailableError, got ${bounded.error?.name}: ${bounded.error?.message}`);
+      assert.equal(bounded.error.status, 503);
+      assert.equal(bounded.error.retryable, true);
+      assert.equal(bounded.error.code, 'ZBX_STORAGE_UNAVAILABLE');
+    } finally {
+      await holder.query('ROLLBACK').catch(() => {});
+      await holder.end().catch(() => {});
+    }
+  } finally {
+    await store.close();
+  }
+});
+
+test('a second instance starting while the migration lock is held is bounded too', { skip }, async () => {
+  // `migrate` runs from `openStorage`, so this is the path a second replica
+  // takes on startup. The lock is `pg_advisory_xact_lock`, which has no row to
+  // point at and is therefore easy to assume the row-lock settings do not
+  // cover. Measured: it does.
+  const first = await openStorage({ databaseUrl: DATABASE_URL, allowMemory: false });
+  await first.close();
+
+  const holder = new Client({ connectionString: DATABASE_URL });
+  await holder.connect();
+  await holder.query('BEGIN');
+  await holder.query("SELECT pg_advisory_xact_lock(hashtext('opsweave.zabbix-source.migrations'))");
+  try {
+    const started = Date.now();
+    const attempt = openStorage({ databaseUrl: DATABASE_URL, allowMemory: false });
+    const bounded = await Promise.race([
+      attempt.then(() => ({ settled: 'resolved' }), (error) => ({ settled: 'rejected', error })),
+      new Promise((resolve) => setTimeout(() => resolve({ settled: 'HUNG' }), 15000)),
+    ]);
+    const elapsed = Date.now() - started;
+    assert.notEqual(bounded.settled, 'HUNG',
+      `openStorage was still waiting on the migration lock after ${elapsed}ms`);
+    assert.equal(bounded.settled, 'rejected');
+    assert.ok(bounded.error instanceof StorageUnavailableError,
+      `expected StorageUnavailableError, got ${bounded.error?.name}: ${bounded.error?.message}`);
+    assert.equal(bounded.error.status, 503);
+    // AND THE MESSAGE MUST BE THE TRANSLATION'S, NOT THE GENERIC WRAP.
+    //
+    // `openStorage` wraps an untranslated failure as "the plugin database is
+    // configured but unusable: ...", and that is also a StorageUnavailableError
+    // with status 503 - so the two assertions above pass either way. Measured:
+    // with `storageFailure` disabled and only the pool options left in place,
+    // this test stayed green, because the outer wrapper had turned the raw
+    // 55P03 into the same class of error for a different reason.
+    assert.doesNotMatch(bounded.error.message, /configured but unusable/,
+      'the advisory-lock timeout must be translated, not laundered through the generic wrapper');
+    assert.match(bounded.error.message, /could not be reached in time/,
+      `expected the translation's message, got: ${bounded.error.message}`);
+  } finally {
+    await holder.query('ROLLBACK').catch(() => {});
+    await holder.end().catch(() => {});
+  }
+});
+
+
+// ---- the translation's coverage -------------------------------------------
+//
+// This is a superset assertion, and it exists because the first version of
+// `storageFailure` was NOT one. The inline list it replaced translated
+// ECONNREFUSED, 57P01, 08006 and 08001; the replacement kept ECONNREFUSED and
+// a ` 08` prefix, silently dropping 57P01 (admin_shutdown) - the code a
+// database sends while restarting. That would have turned a retryable restart
+// into a permanent 500 on a path the old code handled correctly.
+//
+// A pure function, so this needs no database and is always run.
+test('every code the old inline translation handled is still transient', () => {
+  const previouslyTranslated = ['ECONNREFUSED', '57P01', '08006', '08001'];
+  for (const code of previouslyTranslated) {
+    const error = Object.assign(new Error(`probe ${code}`), { code });
+    const outcome = storageFailure(error);
+    assert.ok(outcome instanceof StorageUnavailableError,
+      `${code} was translated before this change and must still be: got ${outcome?.name}`);
+    assert.equal(outcome.status, 503, `${code} must answer 503`);
+    assert.equal(outcome.retryable, true, `${code} is transient and must say so`);
+  }
+  // The bounded-wait codes this change introduces.
+  for (const code of ['55P03', '57014', '40001', '57P03', '08000', '08003', '08004', '08P01']) {
+    assert.ok(storageFailure(Object.assign(new Error('x'), { code })) instanceof StorageUnavailableError,
+      `${code} must be transient`);
+  }
+});
+
+test('a genuinely unexpected database error is NOT laundered into a 503', () => {
+  // The failure mode of an over-broad translation: everything becomes
+  // "retry, the database was slow", and a real bug is retried forever instead
+  // of being seen. A constraint violation is the caller's problem and keeps
+  // its own handling; an unlisted code stays as it was.
+  const conflict = Object.assign(new Error('duplicate key'), { code: '23505' });
+  assert.equal(storageFailure(conflict), conflict, '23505 must not become a 503');
+  const odd = Object.assign(new Error('something else'), { code: 'XX000' });
+  assert.equal(storageFailure(odd), odd, 'an unlisted code must pass through');
+  const plain = new Error('no code at all');
+  assert.equal(storageFailure(plain), plain);
 });
