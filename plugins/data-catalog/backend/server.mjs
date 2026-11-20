@@ -705,6 +705,50 @@ async function handle(req, res) {
     const result = await pool.query('SELECT * FROM catalog_datasets WHERE workspace_id = ANY($1::uuid[]) ORDER BY created_at DESC LIMIT 100', [scope.allowed]);
     return send(res, 200, { items: result.rows.map(datasetView), nextCursor: null }, requestId);
   }
+  // THE RECEIPT READ THE CONTRACT PROMISES.
+  //
+  // `contracts/openapi/data-catalog-fenced-v1.yaml:54` specifies
+  // `GET /datasets/{datasetId}/receipts/{sourceBatchKey}` and returns 200 with a
+  // `sink-receipt.v1` document, or 404 when no receipt exists. Nothing served it:
+  // the server had nine routes and none of them was this one, so a client written
+  // from the contract got a 404 that meant "no such route" and could not tell it
+  // apart from "no receipt yet" - the two outcomes the contract distinguishes.
+  //
+  // That matters more than a missing endpoint usually does, because this read is
+  // the whole recovery path: a worker that was killed mid-effect comes back, asks
+  // for the receipt by its business key, and re-applies only if there is none.
+  // With the route absent, "no receipt" and "cannot ask" are the same answer.
+  if (url.pathname.startsWith('/api/data-catalog/datasets/') && url.pathname.includes('/receipts/')) {
+    if (req.method !== 'GET') return fail(res, 405, 'METHOD_NOT_ALLOWED', 'receipts are read-only', requestId);
+    if (!hasScope(who, 'dataset:read')) return fail(res, 403, 'FORBIDDEN', 'dataset:read required', requestId);
+    const parts = url.pathname.split('/');
+    // .../datasets/<datasetId>/receipts/<sourceBatchKey>
+    const datasetId = parts[parts.length - 3];
+    const sourceBatchKey = decodeURIComponent(parts[parts.length - 1] || '');
+    if (!/^[0-9a-fA-F-]{36}$/.test(datasetId || '')) {
+      return fail(res, 400, 'INVALID_DATASET_ID', 'datasetId must be a uuid', requestId);
+    }
+    if (!sourceBatchKey) {
+      return fail(res, 400, 'INVALID_SOURCE_BATCH_KEY', 'sourceBatchKey is required', requestId);
+    }
+    // The dataset must be in the caller's workspace. Answering 404 for both
+    // "wrong workspace" and "no such dataset" is deliberate: a 403 here would
+    // confirm the dataset exists, which is the cross-tenant leak
+    // `b2_workspace_isolation` exists to prevent.
+    const scope = await workspaceScope(who, url);
+    if (scope.error) return fail(res, scope.status, scope.code, scope.message, requestId);
+    const owned = await pool.query(
+      'SELECT 1 FROM catalog_datasets WHERE dataset_id=$1 AND workspace_id = ANY($2::uuid[])',
+      [datasetId, scope.allowed],
+    );
+    if (owned.rowCount === 0) return fail(res, 404, 'DATASET_NOT_FOUND', 'no such dataset', requestId);
+    const receipt = await pool.query(
+      'SELECT * FROM catalog_effect_receipts WHERE dataset_id=$1 AND source_batch_key=$2',
+      [datasetId, sourceBatchKey],
+    );
+    if (receipt.rowCount === 0) return fail(res, 404, 'RECEIPT_NOT_FOUND', 'no receipt for that source batch key', requestId);
+    return send(res, 200, effectReceiptView(receipt.rows[0]), requestId);
+  }
   if (url.pathname === '/api/data-catalog/datasets' && req.method === 'POST') {
     if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
     const scope = await workspaceScope(who, url);
