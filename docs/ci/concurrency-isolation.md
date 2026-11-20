@@ -109,3 +109,54 @@ pending）。但「手动 run 不被 pending 顶替」这一条只能靠 group �
 3. **`ci-gate` 仍把 `cancelled` 当失败。** 在 PR 上安全（新 SHA 不会被合入），但 main 上
    快速连合会让前一个 commit 永远没有 CI 结论。这是 TASK 4 的题目，本轮未改
    `RED_CONCLUSIONS`。
+
+---
+
+# 6. `cancelled` 的语义（TASK 4）
+
+**`cancelled` 仍在 `RED_CONCLUSIONS` 里，本轮没有删除。**
+
+删掉它会让 gate 在一个「从未得到答复」的检查上放行——那是今天 #163 修复的反面。
+所以这里做的是**分类**，不是**放行**。
+
+## 6.1 `cancellationReason()` 区分四种情形
+
+| 返回值 | 含义 |
+|---|---|
+| `superseded` | 同一 commit 上，同名检查有一个**更晚且非取消**的 attempt。答案被重新回答过，这一行是历史 |
+| `unanswered` | 这个 commit 上没有更晚的 attempt。被取消，且没有东西替代它——**没有答案** |
+| `manual` | 被取消的是 `workflow_dispatch` 或 `schedule` run。有人或定时器要它，它没跑完 |
+| `unattributed` | API 给的信息不足 |
+
+`event` 字段来自 `workflow_runs[].event`，通过 `check_suite_id` 关联——check-run API 本身不返回它。
+
+## 6.2 但 `superseded` **不是**通过
+
+这是最容易搞错的一点，所以写在代码注释里也写在这里：
+
+> 一个 commit 自己的 `rust` 被取消、且从未重跑，它就是**没有验证过**，无论被谁取消。
+
+gate 读的是**某个 SHA** 的 check。并发取消只影响**旧 SHA**——新推送产生新 SHA，旧 SHA
+不会被合入。所以在 PR 上，`superseded` 只会出现在不会被合并的 commit 上。
+
+**在 main 上则不然**：快速连合两个 PR，第一个 commit 的 `ci.yml` 被第二个取代并取消，
+它在 main 上永远没有 CI 结论。
+
+## 6.3 main 快速连合意味着什么
+
+| 事实 | 含义 |
+|---|---|
+| commit A 的 `ci.yml` 被 commit B 取消 | A 在 main 上**没有**构建/测试结论 |
+| A 已经合入 | 不可撤销 |
+| 仓库没有逐提交的验收链 | 无法从最新运行推导出 A 曾被验证 |
+
+**如果发布需要逐提交证据，必须另设一条不可被取代的验收链**（例如 tag 触发的
+release-certification workflow，其 group 含 `run_id`，永不与自动 run 同组）。
+本轮没有建这条链——记 **PENDING**，不是「已完成」。
+
+## 6.4 仍然存在的风险
+
+1. **`superseded` 在 main 上依然判红。** 一个被取代的旧 commit 在 main 上的 `ci.yml`
+   会显示 failure。这是诚实的（它确实没有结论），但它会掩盖真正的问题。
+2. **分类依赖 `workflow_runs[].event`。** 该字段缺失时退化为 `unattributed`，
+   不影响判决，只影响可读性。

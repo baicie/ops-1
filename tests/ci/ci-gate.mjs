@@ -52,7 +52,7 @@ import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { analyse, SUITES } from './impact.mjs';
-import { attributeChecks, checkState, UNFINISHED_STATUS } from './check-run-ledger.mjs';
+import { attributeChecks, cancellationReason, checkState, UNFINISHED_STATUS } from './check-run-ledger.mjs';
 import { awaitDelegated, DEFAULT_BUDGET_MS } from './await-delegated.mjs';
 
 /**
@@ -442,7 +442,19 @@ export function delegatedVerdict(checks, suites) {
     const byState = (s) => states.filter(([, st]) => st.state === s).map(([n, st]) => `${n}: ${st.reason}`);
 
     const green = states.filter(([, st]) => st.state === 'success').map(([n]) => n);
-    const red = byState('failed');
+    // A red row says WHY when the check was cancelled: "superseded", "unanswered",
+    // "manual". The VERDICT is unchanged - `cancelled` stays red - but a reader can
+    // tell "another attempt re-answered this" from "nothing ever answered it",
+    // which are the same word in the summary today.
+    const red = states
+      .filter(([, st]) => st.state === 'failed')
+      .map(([n, st]) => {
+        if (!/cancelled/i.test(st.reason ?? '')) return `${n}: ${st.reason}`;
+        const runsForName = ledger.byName[n] ?? [];
+        const target = runsForName.find((r) => r.state === 'cancelled');
+        const why = target ? cancellationReason(runsForName, target) : null;
+        return `${n}: ${st.reason} [${why ?? 'unattributed'}]`;
+      });
     const skippedNow = states.filter(([, st]) => st.state === 'skipped').map(([n]) => n);
     const unfinished = byState('pending');
     const missing = states.filter(([, st]) => st.state === 'absent').map(([n, st]) => `${n}: ${st.reason}`);
