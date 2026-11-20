@@ -313,6 +313,10 @@ export const GATE_OWNERSHIP = {
  * for them - an unlisted file is the blind spot, not an unlisted check.
  */
 export const NON_GATE_WORKFLOWS = {
+  // Certification, not a merge criterion. It runs on a tag or an explicit
+  // dispatch, produces a receipt, and decides nothing about whether code may
+  // merge - a commit that fails certification can still be merged (ADR-029).
+  'release-certification.yml': 'certification only; never a merge criterion',
 };
 
 /**

@@ -373,6 +373,40 @@ for (const file of files) {
   // workflow with its own transaction lock and a different contract, checked
   // separately (see docs/ci/staging-concurrency.md).
   if (file === 'staging-preview.yml') continue;
+
+  // `release-certification.yml` is the OPPOSITE requirement, and it is the only
+  // file where superseding is wrong (ADR-029).
+  //
+  // Its automatic trigger is `push` on tags, not branches: each tag names a
+  // different commit, and each certification is evidence about that commit. Two
+  // certifications of one SHA must both survive, because the second is a second
+  // record rather than a correction of the first.
+  //
+  // So the expectation is inverted - two pushes must BOTH survive - and it is
+  // checked explicitly rather than left as an unregistered exception. A workflow
+  // that quietly opts out of the matrix is how the matrix stops meaning anything.
+  if (file === 'release-certification.yml') {
+    const conc = parseConcurrency(readFileSync(WF + file, 'utf8'));
+    const problems = [];
+    if (!conc) problems.push(`${file}: no concurrency: block`);
+    else {
+      let a, b;
+      try {
+        a = evaluate(conc.group, ctxFor(file, { event: 'push', ref: 'refs/tags/v1', runId: 1 }));
+        b = evaluate(conc.group, ctxFor(file, { event: 'push', ref: 'refs/tags/v1', runId: 2 }));
+      } catch (error) {
+        problems.push(`${file}: cannot evaluate the group (${error.message})`);
+      }
+      if (a !== undefined && a === b) {
+        problems.push(`${file}: two certifications share group "${a}"; a second one would displace the first, and both are evidence`);
+      }
+      if (a !== undefined && !/run_id/.test(conc.group ?? '')) {
+        problems.push(`${file}: the group does not contain run_id, so certifications are not per-run`);
+      }
+    }
+    for (const p of problems) { errors += 1; process.stdout.write(`ERROR ${p}\n`); }
+    continue;
+  }
   for (const p of inspect(file, readFileSync(WF + file, 'utf8'))) {
     errors += 1;
     process.stdout.write(`ERROR ${p}\n`);

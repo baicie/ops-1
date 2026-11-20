@@ -1,0 +1,176 @@
+name: release-certification
+
+# Certify ONE commit, by tag or by explicit dispatch, in a run that no push can
+# take away. TASK-08.
+#
+# WHY THIS EXISTS, and it is not "run the tests again".
+#
+# Every suite in this repository is triggered by `push` and `pull_request`, and
+# every one of them uses `concurrency` with `cancel-in-progress` on those events -
+# deliberately, because six merges in one minute should not run six copies of
+# `data-foundation`. The cost of that choice, stated plainly in
+# `docs/ci/concurrency-isolation.md`: for all but the last commit of a rapid
+# series, the CI result is `cancelled`. A cancelled check is not a pass, and there
+# is nothing in a later run's green that says anything about an earlier commit.
+#
+# So "every commit on main is verified" is FALSE today, and no amount of reading
+# `main`'s latest green run makes it true. This workflow is the alternative: pick
+# a commit explicitly, certify THAT commit, and keep the evidence.
+#
+# WHAT MAKES IT UNSURPERSEDABLE
+#
+# The group contains `github.run_id`, so every certification is its own group. No
+# push can cancel it, no pending run can displace it, and a repeated certification
+# of one SHA queues rather than replacing the earlier one - which is what you want
+# from an evidence-producing run: two certifications of one SHA are two records,
+# not one record and a gap.
+#
+# `check-concurrency-supersede.mjs` asserts exactly this shape for every workflow,
+# so the guarantee is enforced rather than intended.
+#
+# WHAT THIS DOES NOT DO
+#
+# No promotion, no tag creation, no deployment. It produces a receipt
+# (`scripts/release-receipt.mjs`) and uploads it. Deciding to release is a separate
+# action with its own authority - see ADR-029.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full 40-character commit SHA to certify (must be on main)
+        required: true
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  checks: read
+  actions: read
+
+concurrency:
+  # Per certification, never shared. See the header.
+  group: release-certification-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: resolve the commit to certify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.pick.outputs.sha }}
+      ref: ${{ steps.pick.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: pick
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
+          TAG_REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "push" ]; then
+            # A tag names a commit; certify what the tag points at, not HEAD.
+            sha="$(git rev-parse "refs/tags/${TAG_REF#refs/tags/}^{commit}")"
+            ref="$TAG_REF"
+          else
+            sha="$INPUT_SHA"
+            ref="refs/heads/main"
+          fi
+          case "$sha" in
+            *[!0-9a-f]*|'') echo "::error::sha must be 40 lowercase hex characters, got '$sha'"; exit 1 ;;
+          esac
+          [ "${#sha}" -eq 40 ] || { echo "::error::sha must be 40 characters, got ${#sha}"; exit 1; }
+          git cat-file -e "${sha}^{commit}" 2>/dev/null \
+            || { echo "::error::$sha is not a commit in this repository"; exit 1; }
+          # Certification is about what shipped. A commit that never reached main
+          # is not certifiable, and saying so here is clearer than certifying a
+          # branch tip that will be force-pushed away.
+          git merge-base --is-ancestor "$sha" origin/main \
+            || { echo "::error::$sha is not an ancestor of origin/main"; exit 1; }
+          echo "certifying $sha (ref $ref)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+  certify:
+    name: certify ${{ needs.resolve.outputs.sha }}
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Wait for the suites this commit produced
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # A certification does NOT re-run the suites. It reads what they
+          # produced on this exact commit, and refuses if they have not finished
+          # or did not run at all - re-running them under a different run id would
+          # produce evidence that is about a different process than the one the
+          # merge gate used.
+          #
+          # Bounded: a suite that has not answered within the budget is UNKNOWN,
+          # which is not a pass.
+          BUDGET="${CERTIFY_WAIT_SECONDS:-2400}"
+          started=$SECONDS
+          while :; do
+            states="$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
+              --jq '[.check_runs[] | {name, s: (.conclusion // .status)}] | unique_by(.name) | .[] | "\(.name)=\(.s)"' 2>/dev/null || echo "")"
+            if [ -z "$states" ]; then
+              echo "::error::the check-run API returned nothing for $SHA; refusing to certify blind"
+              exit 1
+            fi
+            pending="$(printf '%s\n' "$states" | grep -cE '=(queued|in_progress|waiting|requested|pending)$' || true)"
+            if [ "${pending:-0}" -eq 0 ]; then
+              printf '%s\n' "$states" | sort
+              break
+            fi
+            if [ $((SECONDS - started)) -ge "$BUDGET" ]; then
+              echo "::error::$pending check(s) still unfinished after ${BUDGET}s; UNKNOWN is not CERTIFIED"
+              exit 1
+            fi
+            sleep 30
+          done
+
+      - name: Write the receipt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          REF: ${{ needs.resolve.outputs.ref }}
+        run: |
+          set -euo pipefail
+          # The run id recorded in the receipt is the LATEST ci.yml run for this
+          # commit, which is the run whose `ci-gate` verdict the merge gate would
+          # have consulted. Recording this certification run instead would make
+          # the receipt cite a run that decided nothing.
+          RUN="$(gh api "repos/$REPO/actions/runs?head_sha=$SHA&per_page=50" \
+            --jq '[.workflow_runs[] | select(.path | endswith("/ci.yml"))] | .[0].id' 2>/dev/null || echo "")"
+          if [ -z "$RUN" ] || [ "$RUN" = "null" ]; then
+            echo "::error::no ci.yml run exists for $SHA; there is nothing to certify"
+            exit 1
+          fi
+          node scripts/release-receipt.mjs write \
+            --repo "$REPO" --run "$RUN" --sha "$SHA" --ref "$REF" \
+            --image-digest "${IMAGE_DIGEST:-}" \
+            --out "release-receipt-${SHA}.json"
+
+      - name: Upload the receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-receipt-${{ needs.resolve.outputs.sha }}
+          path: release-receipt-*.json
+          retention-days: 90
+          if-no-files-found: error
