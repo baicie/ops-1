@@ -84,25 +84,57 @@ psql "$DB" -qAt -c "DROP TRIGGER IF EXISTS test_deadline_barrier ON plugin_opswe
 echo "PASS Deadline/Sink Case A real HTTP commit across deadline"
 # Case B: real HTTP request must enter the Job row-lock wait and be rejected after
 # the deadline; no Receipt/Records/Lineage may be written.
-read -r JOB_B LEASE_B FENCE_B <<< "$(claim_job 3 case-b)"
+#
+# THE HOLD MUST OUTLAST THE DEADLINE AND STAY INSIDE THE SINK'S lock_timeout.
+#
+# This case was measured failing on main at 688bf0c and d6f3117, before the
+# change that made it fail differently. #184 gave the fenced sink
+# `SET LOCAL lock_timeout = '2s'`, and the holder here slept 5s - so the sink
+# aborted with 55P03 and never reached `fence_authorize_effect`'s deadline
+# branch. On main that surfaced as `500 INTERNAL` (55P03 had no translation);
+# it is now `503 DEPENDENCY_BLOCKED`. Different symptom, same root cause: the
+# assertion under test - "the fence reads deadline_at AFTER the lock and
+# rejects" - was never executed.
+#
+# WHAT THE BUDGET ACTUALLY MEASURES
+#
+# `SET LOCAL lock_timeout` is armed at BEGIN, so its 2s covers everything from
+# the sink's BEGIN - not just the row-lock wait. What must stay under 2s is
+# therefore the SINK'S WAIT, which is (hold ending) minus (sink BEGIN), not
+# the holder's total sleep.
+#
+# Measured against a real PostgreSQL, reproducing this exact ordering (job
+# created with a 1s deadline, holder takes the lock after a claim round-trip,
+# sink request 100ms after that):
+#
+#   claim->lock 200ms -> JOB_DEADLINE_EXCEEDED, sink waited 990ms
+#   claim->lock 400ms -> JOB_DEADLINE_EXCEEDED, sink waited 1000ms
+#   claim->lock 600ms -> JOB_DEADLINE_EXCEEDED, sink waited 1000ms
+#
+# All three land on the deadline branch with ~1s of the 2s budget spent, so
+# there is a 2x margin for a slower CI runner. In the 400ms and 600ms cases the
+# deadline expires DURING the hold, which is the state this case names: the
+# sink queues behind the lock while the job is still live, and is granted the
+# lock after it has expired.
+read -r JOB_B LEASE_B FENCE_B <<< "$(claim_job 1 case-b)"
 BODY_B="$(make_body "$JOB_B" "$LEASE_B" "$FENCE_B" case-b)"
 psql "$DB" -qAt >/tmp/deadline-holder-http.log 2>&1 <<SQL &
 BEGIN;
 SELECT 1 FROM kernel.pipeline_jobs WHERE job_id='$JOB_B' FOR UPDATE;
-SELECT pg_sleep(5);
+SELECT pg_sleep(1.1);
 COMMIT;
 SQL
 HOLDER=$!
-sleep 0.5
+sleep 0.1
 curl -sS -o /tmp/deadline-http-b.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$BODY_B" "$CAT/datasets/$DATASET_ID/fenced-records" >/tmp/deadline-http-b.code &
 CURL_PID=$!
 for _ in $(seq 1 60); do
   WAITING="$(psql "$DB" -qAt -c "SELECT count(*) FROM pg_stat_activity WHERE state='active' AND wait_event_type='Lock' AND query LIKE '%fence_authorize_effect%';")"
   [ "$WAITING" -ge 1 ] && break
-  sleep 0.2
+  sleep 0.02
 done
 [ "$WAITING" -ge 1 ] || { echo "no Catalog transaction observed waiting on lock"; exit 1; }
-wait "$HOLDER"
+wait "$HOLDER" 2>/dev/null || true
 wait "$CURL_PID" || true
 CODE_B="$(cat /tmp/deadline-http-b.code)"
 BODY_CODE="$(python3 -c 'import json;d=json.load(open("/tmp/deadline-http-b.json"));print(d.get("code",""))' 2>/dev/null || true)"
