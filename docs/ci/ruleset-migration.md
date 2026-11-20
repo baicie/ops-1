@@ -311,10 +311,10 @@ $ node --test tests/ci/ci-gate.api-failure.test.mjs 2>&1 | grep -E '# (pass|fail
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | 一 | 九项不变，`ci-gate` 已在跑 | 已完成 |
-| 二 | 修正归属边界（#159），扩展反例（#160） | 已完成 |
-| 三 | 在真实 PR 上验证 gate 正确 | **待做** |
+| 二 | 修正归属边界（#159），扩展反例（#160、#163、#166） | 已完成 |
+| 三 | 在真实 PR 上验证 gate 正确 | **已完成**，见 §10.5 |
 | 四 | 提交十项方案与回滚（本文件） | 本轮完成 |
-| 五 | 获得授权后执行 ruleset 变更 | **未执行** |
+| 五 | 获得授权后执行 ruleset 变更 | **未执行，等待授权** |
 
 ## 10.4 回滚
 
@@ -324,16 +324,33 @@ $ node --test tests/ci/ci-gate.api-failure.test.mjs 2>&1 | grep -E '# (pass|fail
 回滚**不**撤销 `ci-gate` job 本身：它继续运行并输出结论，只是不再被 GitHub 强制。这与
 迁移前的状态完全一致。
 
-## 10.5 迁移后必须验证的四件事
+## 10.5 迁移前的真实验收 —— 五项全部 VERIFIED（2026-11-20）
+
+详细 Run id、Check Run id 与日志原文见 `gate-acceptance-evidence.md`。摘录：
+
+| 验证 | 证据 | 结果 |
+|---|---|---|
+| 正常 PR 可以合并 | #160，`ci-gate` run `135686444568`，合并 `ca257fd` | **绿，可合并** |
+| L2 PR 上 gate 等待 delegated suite | #161，`ci-gate` run `135704357805` | **等待 773 s / 15 次读取** |
+| 必需 CI 失败无法合并 | `web-unit` run `135737408618` 红 | `9 of 9 required status checks have not succeeded: 1 failing` |
+| **Staging 失败不阻止合并** | main `ca257fd`，`ci-gate` run `135717628317` | **PASS + `deploymentFailures` 非空** |
+| 依赖被取消不能 PASS | `rust` cancelled，`ci-gate` run `135740305258` | **FAIL，逐条点名** |
+
+**第三条与第五条是这次迁移独有的**，也是 #159 与 #163 存在的理由。
+
+迁移后还需要补的两条（只能在变更之后测）：
 
 | 验证 | 方法 | 期望 |
 |---|---|---|
-| 正常 PR 可以合并 | docs-only PR | `ci-gate` 绿，合并可用 |
-| 必需 CI 失败无法合并 | 让 `rust` 红 | 合并被拒，错误里出现 `10 of 10` |
-| **Staging 失败不阻止合并** | 观察一次 staging 部署失败的 run | `ci-gate` 仍绿（`deploymentFailures` 非空） |
-| 无永久 Expected | 任一 PR 的 check 列表 | `ci-gate` 总是出现 |
+| 十项一起强制 | 任一 PR 的 check 列表 | `10 of 10`，且 `ci-gate` 总在 |
+| 失败消息出现 `10 of 10` | 让 `rust` 红 | 拒绝原文含 `10 of 10 ... have not succeeded` |
 
-**第三条是这次迁移独有的**，也是 #159 存在的理由。
+### 一条已记录但未修的观测缺口
+
+`gate()` 用开跑时的 ledger 快照判决，`awaitDelegated` 只重读 delegated suite。因此在 gate 启动**之后**
+才结束的部署失败不会进入 `deploymentFailures`。本次样本恰好满足时序；不是每次都会。
+它不会放行任何东西（部署失败本就不是合并条件），但会让「这次 push 的部署为什么红」
+无法从 gate 摘要里回答。
 
 ## 10.6 时间代价（实测）
 
@@ -381,4 +398,5 @@ diff <(jq -S . /tmp/ruleset-before.json) <(jq -S . /tmp/ruleset-after.json)
    让所有 PR 变红——这是刻意的取舍。
 4. **九项里有若干项与 gate 读的是同一批 check。** 一份结果被两份规则使用；如果 GitHub
    的 check-run API 与实际强制结果出现分歧，两份规则会同时错。
-5. **阶段三尚未进行。** §10.5 的四项验证全部是待做项。
+5. ~~阶段三尚未进行。~~ **已完成**：§10.5 的五项在真实 PR 上验证过。
+   剩余的两条只能在 Ruleset 变更**之后**才有意义，见 §10.5 后半。
