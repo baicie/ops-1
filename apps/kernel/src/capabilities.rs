@@ -735,6 +735,38 @@ pub async fn service_catalog_get(
     Ok(body)
 }
 
+/// Why this workload token may not be used for this capability, or `None`.
+///
+/// Extracted so the two refusals can be asserted by CODE. Before this they were
+/// both `AppError::forbidden(&str)` - status only, no code - so a caller could not
+/// tell "your token is for another capability" from "your token was minted for
+/// another audience", and TASK-25's audit found the capability-mismatch case had
+/// no distinct code to assert at all.
+fn token_binding_error(
+    claims: &WorkloadClaims,
+    name: &str,
+    major: i64,
+) -> Option<AppError> {
+    if claims.capability_name != name || claims.capability_major != major {
+        return Some(AppError::new(
+            StatusCode::FORBIDDEN,
+            "CAPABILITY_TOKEN_MISMATCH",
+            format!(
+                "workload token names {} v{}, not {name} v{major}",
+                claims.capability_name, claims.capability_major
+            ),
+        ));
+    }
+    if claims.audience != format!("plugin:{name}") {
+        return Some(AppError::new(
+            StatusCode::FORBIDDEN,
+            "CAPABILITY_AUDIENCE_INVALID",
+            "workload token audience is not this capability",
+        ));
+    }
+    None
+}
+
 pub async fn invoke(
     State(state): State<AppState>,
     Path((name, major, path)): Path<(String, i64, String)>,
@@ -747,13 +779,8 @@ pub async fn invoke(
     let token =
         bearer(&headers).ok_or_else(|| AppError::unauthorized("workload token required"))?;
     let claims = verify_claims(&state, &token)?;
-    if claims.capability_name != name || claims.capability_major != major {
-        return Err(AppError::forbidden(
-            "workload token is for a different capability",
-        ));
-    }
-    if claims.audience != format!("plugin:{name}") {
-        return Err(AppError::forbidden("workload token audience is invalid"));
+    if let Some(error) = token_binding_error(&claims, &name, major) {
+        return Err(error);
     }
     let live: Option<LiveInstanceRow> = sqlx::query_as(
         r#"
@@ -1262,6 +1289,62 @@ mod tests {
             Some("provider-a"),
             "provider-b"
         ));
+    }
+
+    /// The two refusals carry distinct codes, and a matching token carries none.
+    ///
+    /// Before this they were both generic FORBIDDEN, so an operator could not tell
+    /// a misrouted request (right token, wrong path) from a forged one (right
+    /// path, token minted elsewhere) - and no test could assert the difference,
+    /// which is why TASK-25 recorded capability-mismatch as untestable.
+    #[test]
+    fn a_token_for_one_capability_is_refused_by_code_for_another() {
+        let base = super::WorkloadClaims {
+            v: 1,
+            sub: "instance".into(),
+            plugin_id: "opsweave.data-integration".into(),
+            instance_id: uuid::Uuid::new_v4(),
+            node_id: uuid::Uuid::new_v4(),
+            node_generation: 1,
+            capability_name: "data.catalog.v1".into(),
+            capability_major: 1,
+            audience: "plugin:data.catalog.v1".into(),
+            scope: vec!["dataset:write".into()],
+            issued_at: chrono::Utc::now().timestamp(),
+            expires_at: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp(),
+            jti: uuid::Uuid::new_v4(),
+        };
+
+        // The matching case must produce NO error, or the two below would pass on
+        // a function that refuses everything.
+        assert!(
+            super::token_binding_error(&base, "data.catalog.v1", 1).is_none(),
+            "a token for the requested capability must be accepted"
+        );
+
+        // Right shape, wrong capability.
+        let mismatch = super::token_binding_error(&base, "data.catalog.v2", 2)
+            .expect("a token naming another capability must be refused");
+        assert_eq!(mismatch.status, axum::http::StatusCode::FORBIDDEN);
+        assert_eq!(mismatch.code, "CAPABILITY_TOKEN_MISMATCH");
+        assert!(
+            mismatch.message.contains("data.catalog.v1"),
+            "the refusal must name what the token is for: {}",
+            mismatch.message
+        );
+
+        // Same capability, audience minted for something else.
+        let forged = super::WorkloadClaims {
+            audience: "plugin:some.other".into(),
+            ..base.clone()
+        };
+        let audience = super::token_binding_error(&forged, "data.catalog.v1", 1)
+            .expect("a token whose audience is elsewhere must be refused");
+        assert_eq!(audience.code, "CAPABILITY_AUDIENCE_INVALID");
+        assert_ne!(
+            audience.code, mismatch.code,
+            "the two refusals must be distinguishable by code"
+        );
     }
 
     #[test]
