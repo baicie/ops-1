@@ -13,10 +13,88 @@ const CONTEXT_KEY = process.env.OPSWEAVE_CALLER_CONTEXT_KEY || '';
 const PORT = Number(process.env.PORT || 8080);
 
 const { Pool } = pg;
-const pool = new Pool({ connectionString: DATABASE_URL, max: 5 });
+
+// THE POOL IS THE PLUGIN'S WHOLE CAPACITY, SO EVERY WAIT ON IT IS BOUNDED.
+//
+// Measured, not assumed (2026-11-20, PostgreSQL 17.10, real server process):
+//
+//   1. `max: 5` with no acquire bound. Five blocked ingests park five clients;
+//      the sixth request waits in `pool.connect()` FOREVER. There is no timeout
+//      on pg's acquire path by default - `connectionTimeoutMillis` is the only
+//      knob and it was unset, so it fell back to 0 (wait indefinitely).
+//
+//   2. While those five were parked, `/health/live`, `/health/ready` AND
+//      `/health/startup` all answered 200 - they are served before any database
+//      work, from a boolean latched at boot. So the Node runtime saw a READY
+//      instance, the Kernel kept routing to it, and every request after the
+//      fifth hung until the client gave up. A wedged plugin that advertises
+//      READY is worse than a dead one: nothing fails over.
+//
+//   3. The lock waits themselves were unbounded on three of six transactions,
+//      and the two that had a lock_timeout still had no acquire bound - so the
+//      bound was on the wrong half of the wait.
+//
+// The three settings below are the bound, applied by the SERVER on every
+// connection rather than by each transaction. `options` is passed in the
+// startup packet, so a connection is already bounded before the first query -
+// including the ones inside `initDb`, which run before any request exists.
+//
+// `lock_timeout` bounds waiting for a lock; `statement_timeout` bounds the
+// statement (which a lock wait is part of, so the tighter of the two wins);
+// `idle_in_transaction_session_timeout` is the one that matters when a client
+// is killed mid-transaction: without it a `COMMIT` that never arrives holds
+// row locks until the TCP connection dies, which on a dropped network can be
+// hours. Per-transaction `SET LOCAL` is still used where a path wants a
+// tighter bound than this floor; nothing may loosen it.
+const DB_LOCK_TIMEOUT_MS = Number(process.env.OPSWEAVE_DB_LOCK_TIMEOUT_MS || 2000);
+const DB_STATEMENT_TIMEOUT_MS = Number(process.env.OPSWEAVE_DB_STATEMENT_TIMEOUT_MS || 30000);
+const DB_IDLE_TX_TIMEOUT_MS = Number(process.env.OPSWEAVE_DB_IDLE_TX_TIMEOUT_MS || 30000);
+// How long a request may wait for a FREE pool slot. This is the bound that was
+// missing entirely: without it the request queue is unbounded.
+const DB_ACQUIRE_TIMEOUT_MS = Number(process.env.OPSWEAVE_DB_ACQUIRE_TIMEOUT_MS || 5000);
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  max: 5,
+  connectionTimeoutMillis: DB_ACQUIRE_TIMEOUT_MS,
+  idleTimeoutMillis: 30000,
+  options: `-c lock_timeout=${DB_LOCK_TIMEOUT_MS} -c statement_timeout=${DB_STATEMENT_TIMEOUT_MS}`
+    + ` -c idle_in_transaction_session_timeout=${DB_IDLE_TX_TIMEOUT_MS}`,
+});
 let ready = false;
 let stopping = false;
 const startedAt = Date.now();
+
+// Readiness that cannot see a wedged pool is not readiness. See the note above
+// the pool for the measurement that motivated this.
+//
+// The probe is deliberately NOT a query through the ordinary pool: a probe that
+// queues behind the five parked requests is itself the sixth victim, and it
+// times out the same way the traffic does - so it would report "unhealthy" for
+// a reason it cannot distinguish from "the database is slow". Instead it takes
+// its own short-lived client with a hard 1.5s ceiling:
+//
+//   - it is never starved by the request queue, so a slow database and an
+//     exhausted pool produce different answers;
+//   - a failure here means the PLUGIN cannot reach its database, which is
+//     exactly the condition that should remove the instance from routing.
+//
+// `ready` stays as the boot latch: until initDb has finished, the schema may
+// not exist and no probe can succeed for the right reason.
+async function databaseReachable() {
+  let probe;
+  try {
+    probe = new pg.Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 1500 });
+    await probe.connect();
+    await probe.query("SET statement_timeout = '1500ms'");
+    await probe.query('SELECT 1');
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (probe) await probe.end().catch(() => {});
+  }
+}
 
 function rid(req) {
   const value = req.headers['x-opsweave-request-id'];
@@ -686,7 +764,18 @@ async function handle(req, res) {
   const url = new URL(req.url || '/', 'http://localhost');
   if (url.pathname === '/_opsweave/runtime/v1/info') return send(res, 200, { pluginId: PLUGIN_ID, version: VERSION, runtimeProtocol: 'http-json-v1', capabilityDigest: CAPABILITY_DIGEST, buildDigest: BUILD_DIGEST }, requestId);
   if (url.pathname === '/_opsweave/health/live') return send(res, stopping ? 503 : 200, { status: stopping ? 'stopping' : 'live' }, requestId);
-  if (url.pathname === '/_opsweave/health/ready') return send(res, ready && !stopping ? 200 : 503, { status: ready && !stopping ? 'ready' : 'not_ready' }, requestId);
+  if (url.pathname === '/_opsweave/health/ready') {
+    // MEASURED 2026-11-20: this endpoint answered 200 {"status":"ready"} while
+    // five ingested requests were parked on a held table lock and a sixth hung
+    // in pool.connect() indefinitely. The Node runtime reported the instance
+    // Ready and the Kernel kept routing to it, so the failure was silent.
+    //
+    // It now depends on whether the database is actually reachable.
+    let db = false;
+    if (ready && !stopping) db = await databaseReachable();
+    return send(res, ready && !stopping && db ? 200 : 503,
+      { status: ready && !stopping ? (db ? 'ready' : 'database unreachable') : 'not_ready' }, requestId);
+  }
   if (url.pathname === '/_opsweave/health/startup') return send(res, 200, { status: 'started' }, requestId);
   const who = identity(req.headers);
   if (!who) return fail(res, 401, 'UNAUTHENTICATED', 'caller identity required', requestId);
@@ -1258,6 +1347,31 @@ const server = http.createServer((req, res) => {
   handle(req, res).catch((error) => {
     console.error('catalog request failed', error);
     const requestId = rid(req);
+    // A BOUNDED WAIT THAT EXPIRED IS NOT AN INTERNAL ERROR.
+    //
+    // Every timeout below used to leave this handler as 500 INTERNAL with
+    // retryable=false - a permanent-looking failure for a condition that is
+    // transient by construction. The caller's correct response to all three is
+    // "come back", and they are separated because the operator's next move
+    // differs: a lock timeout means someone else holds the row (look at the
+    // holder), an acquire timeout means THIS instance is saturated (look at the
+    // pool), and a cancelled statement means the server gave up on a query.
+    //
+    // 55P03 lock_not_available  - lock_timeout expired
+    // 57014 query_canceled      - statement_timeout expired
+    // 40001 serialization_failure - the transaction was aborted to preserve
+    //                               serialisability; the read-only quality scan
+    //                               is REPEATABLE READ and can see this
+    // 08xxx connection errors    - the database went away mid-request
+    const code = error.code;
+    if (code === '55P03' || code === '57014' || code === '40001' || /^08/.test(String(code || ''))) {
+      return fail(res, 503, 'DEPENDENCY_BLOCKED', 'the database could not be reached in time; retry', requestId, true);
+    }
+    // pg-pool's acquire timeout is a plain Error with this message and no code.
+    // Matched on the message because that is the only signal it gives.
+    if (/timeout exceeded when trying to connect/i.test(String(error.message || ''))) {
+      return fail(res, 503, 'RESOURCE_EXHAUSTED', 'this instance has no free database connection; retry', requestId, true);
+    }
     const status = error.status || 500;
     fail(res, status, status === 400 ? 'INVALID_REQUEST' : status === 413 ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL', status >= 500 ? 'internal catalog error' : error.message, requestId);
   });
