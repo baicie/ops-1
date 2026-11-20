@@ -1695,6 +1695,12 @@ jobs:
           # when someone "simplifies" the first to `cancel-in-progress: true`.
           node tests/ci/check-concurrency-supersede.mjs --selftest
           node tests/ci/check-concurrency-supersede.mjs
+          # The staging host is a deployment workflow with a different contract:
+          # transaction serialisation across runs, and a fail-closed identity
+          # check on every certifying job. Checked separately rather than folded
+          # into the suite matrix, which models cancellations and not locks.
+          node tests/ci/check-staging-concurrency.mjs --selftest
+          node tests/ci/check-staging-concurrency.mjs
           # The analyzer's output is what the gate judges, so its own tests run
           # here too - including the cases that pin the analyzer to the suites a
           # workflow can actually start.
