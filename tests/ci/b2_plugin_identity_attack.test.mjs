@@ -68,16 +68,23 @@ function freePort() {
   });
 }
 
-async function waitReady(base, child) {
+async function waitReady(base, child, logs = []) {
+  // The logs are threaded through because "plugin exited with 1" with no
+  // reason is what made B-38 take three attempts to diagnose: the cause was a
+  // port the sibling suite had already bound, and the plugin's own stderr said
+  // so (`EADDRINUSE`) but was collected and then dropped on the throw.
+  const detail = () => logs.join('').trim();
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`plugin exited with ${child.exitCode}`);
+    if (child.exitCode !== null) {
+      throw new Error(`plugin exited with ${child.exitCode} at ${base}: ${detail()}`);
+    }
     try {
       const response = await fetch(`${base}/_opsweave/health/ready`);
       if (response.ok) return;
     } catch { /* not up yet */ }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`plugin at ${base} never became ready`);
+  throw new Error(`plugin at ${base} never became ready: ${detail()}`);
 }
 
 /** Start one plugin as a real OS process, exactly as the Node runtime does. */
@@ -99,7 +106,7 @@ async function startPlugin(name, extraEnv = {}) {
   child.stdout.on('data', (chunk) => logs.push(chunk.toString()));
   child.stderr.on('data', (chunk) => logs.push(chunk.toString()));
   const base = `http://127.0.0.1:${port}`;
-  await waitReady(base, child);
+  await waitReady(base, child, logs);
   return {
     base,
     logs,
@@ -155,12 +162,35 @@ async function counts(pool, tables) {
   return out;
 }
 
-const CATALOG_TABLES = [
-  'catalog_datasets', 'catalog_schema_revisions', 'catalog_records',
-  'catalog_receipts', 'catalog_lineage', 'catalog_quality_rules',
-  'catalog_quality_runs', 'catalog_quality_results', 'catalog_entity_types',
-];
-const INTEGRATION_TABLES = ['integration_sources', 'integration_specs', 'integration_runs'];
+// THE TABLES A REFUSED `POST /datasets` COULD POSSIBLY WRITE.
+//
+// The refusals below are asserted with "and no rows appeared". Counting all
+// nine catalog tables makes that assertion depend on nothing else touching the
+// database, which is false when two suites share one: `b2_workspace_isolation`
+// creates datasets in the same database, and it is a separate `node --test`
+// file that may run concurrently.
+//
+// MEASURED 2026-11-21, both files in one `node --test` invocation:
+//
+//   not ok - data-catalog: a signed viewer cannot be raised by a forged
+//            admin header
+//     the refused write left no rows
+//     { catalog_datasets: 1, ... } vs { catalog_datasets: 0, ... }
+//
+// The row was the sibling suite's, not the refused write's. The test was
+// measuring the world, not the request - the same shape as the hollow
+// assertions fixed in #185 and #186.
+//
+// So the scope is the write path being refused. `POST /datasets` inserts the
+// dataset and its first schema revision; it touches no other table. A refusal
+// that wrote to any of the other seven would be a different bug, and the
+// suites that own those tables assert their own invariants.
+const DATASET_CREATE_TABLES = ['catalog_datasets', 'catalog_schema_revisions'];
+// The same narrowing for the integration plugin: `POST /sources` writes one
+// row in one table. Counting `integration_specs` and `integration_runs` made
+// these assertions depend on no other suite creating a pipeline, which is the
+// same false assumption as the catalog side.
+const INTEGRATION_CREATE_TABLES = ['integration_sources'];
 
 // ---------------------------------------------------------------------------
 // Data Catalog
@@ -170,7 +200,7 @@ test('data-catalog: an unsigned role header is not an identity', async (t) => {
   const plugin = await startPlugin('data-catalog');
   t.after(async () => { await plugin.close(); await pool.end(); });
 
-  const before = await counts(pool, CATALOG_TABLES);
+  const before = await counts(pool, DATASET_CREATE_TABLES);
   for (const role of ['admin', 'operator', 'viewer', 'superadmin', '']) {
     const response = await call(plugin.base, '/api/data-catalog/datasets', {
       headers: { 'x-opsweave-user-role': role, 'x-opsweave-user-id': USER_ID },
@@ -184,8 +214,8 @@ test('data-catalog: an unsigned role header is not an identity', async (t) => {
     body: { name: 'forged', fields: [{ name: 'id', type: 'string', nullable: false, ordinal: 0 }], retentionPolicy: { mode: 'RETAIN', maxRecords: 10, maxBytes: 1024 } },
   });
   assert.equal(create.status, 401, 'a forged write must not reach the handler');
-  assert.deepEqual(await counts(pool, CATALOG_TABLES), before, 'refusals left no rows behind');
-  t.diagnostic(`no rows written across ${CATALOG_TABLES.length} catalog tables`);
+  assert.deepEqual(await counts(pool, DATASET_CREATE_TABLES), before, 'refusals left no rows behind');
+  t.diagnostic(`no rows written across ${DATASET_CREATE_TABLES.length} dataset-create tables`);
 });
 
 test('data-catalog: a signed viewer cannot be raised by a forged admin header', async (t) => {
@@ -199,7 +229,7 @@ test('data-catalog: a signed viewer cannot be raised by a forged admin header', 
   });
   assert.equal(read.status, 200, 'the signed viewer context is accepted for a read');
 
-  const before = await counts(pool, CATALOG_TABLES);
+  const before = await counts(pool, DATASET_CREATE_TABLES);
   const write = await call(plugin.base, '/api/data-catalog/datasets', {
     method: 'POST',
     headers: { 'x-opsweave-user-context': viewer, 'x-opsweave-user-role': 'admin' },
@@ -207,7 +237,7 @@ test('data-catalog: a signed viewer cannot be raised by a forged admin header', 
   });
   assert.equal(write.status, 403, 'the forged header must not widen a viewer to writer');
   assert.equal(write.body.code, 'FORBIDDEN');
-  assert.deepEqual(await counts(pool, CATALOG_TABLES), before, 'the refused write left no rows');
+  assert.deepEqual(await counts(pool, DATASET_CREATE_TABLES), before, 'the refused write left no rows');
 });
 
 test('data-catalog: cross-plugin, re-signed, expired and malformed contexts are refused', async (t) => {
@@ -295,7 +325,7 @@ test('data-integration: an unsigned role header is not an identity', async (t) =
   const plugin = await startPlugin('data-integration');
   t.after(async () => { await plugin.close(); await pool.end(); });
 
-  const before = await counts(pool, INTEGRATION_TABLES);
+  const before = await counts(pool, INTEGRATION_CREATE_TABLES);
   for (const role of ['admin', 'operator', 'viewer']) {
     const response = await call(plugin.base, '/api/data-integration/sources', {
       headers: { 'x-opsweave-user-role': role },
@@ -308,7 +338,7 @@ test('data-integration: an unsigned role header is not an identity', async (t) =
     body: { name: 'forged', connectorType: 'http-json', endpoint: 'https://example.com/x', credential: { credentialRef: 'secret://local/x' } },
   });
   assert.equal(create.status, 401);
-  assert.deepEqual(await counts(pool, INTEGRATION_TABLES), before, 'refusals left no rows behind');
+  assert.deepEqual(await counts(pool, INTEGRATION_CREATE_TABLES), before, 'refusals left no rows behind');
 });
 
 test('data-integration: a signed viewer cannot write, and a foreign context is refused', async (t) => {
@@ -317,14 +347,15 @@ test('data-integration: a signed viewer cannot write, and a foreign context is r
   t.after(async () => { await plugin.close(); await pool.end(); });
 
   const viewer = context({ pluginId: 'opsweave.data-integration', role: 'viewer' });
-  const before = await counts(pool, INTEGRATION_TABLES);
+  const before = await counts(pool, INTEGRATION_CREATE_TABLES);
   const write = await call(plugin.base, '/api/data-integration/sources', {
     method: 'POST',
     headers: { 'x-opsweave-user-context': viewer, 'x-opsweave-user-role': 'admin' },
     body: { name: 'viewer-write', connectorType: 'http-json', endpoint: 'https://example.com/x', credential: { credentialRef: 'secret://local/x' } },
   });
   assert.equal(write.status, 403);
-  assert.deepEqual(await counts(pool, INTEGRATION_TABLES), before);
+  assert.deepEqual(await counts(pool, INTEGRATION_CREATE_TABLES), before,
+    'the refused source write left no row behind');
 
   // A catalog context presented to integration is a cross-plugin replay.
   const foreign = context({ pluginId: 'opsweave.data-catalog', role: 'operator' });

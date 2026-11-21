@@ -90,16 +90,25 @@ async function startPlugin(name) {
     env: { ...process.env, PORT: String(port), DATABASE_URL, OPSWEAVE_PLUGIN_DATABASE_URL: DATABASE_URL, OPSWEAVE_CALLER_CONTEXT_KEY: PLUGIN_KEY },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  child.stdout.on('data', () => {});
-  child.stderr.on('data', () => {});
+  // KEEP THE OUTPUT. Discarding it (`on('data', () => {})`) costs nothing until
+  // the plugin fails to start, and then the failure is `plugin exited with 1`
+  // with no reason at all - measured 2026-11-21 while diagnosing B-38, where
+  // the cause turned out to be a port already in use by the sibling suite.
+  const logs = [];
+  child.stdout.on('data', (chunk) => logs.push(chunk.toString()));
+  child.stderr.on('data', (chunk) => logs.push(chunk.toString()));
   const base = `http://127.0.0.1:${port}`;
+  let up = false;
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`plugin exited with ${child.exitCode}`);
+    if (child.exitCode !== null) {
+      throw new Error(`plugin ${name} exited with ${child.exitCode} on port ${port}: ${logs.join('').trim()}`);
+    }
     try {
-      if ((await fetch(`${base}/_opsweave/health/ready`)).ok) break;
+      if ((await fetch(`${base}/_opsweave/health/ready`)).ok) { up = true; break; }
     } catch { /* not up yet */ }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  if (!up) throw new Error(`plugin ${name} never became ready on port ${port}: ${logs.join('').trim()}`);
   return {
     base,
     async close() {
@@ -258,14 +267,21 @@ test('data-integration: a source and its runs are scoped to their workspace', as
   }
 
   // Cross-workspace spec creation must not be possible either.
-  const rowsBefore = (await pool.query('SELECT count(*)::int AS n FROM integration_specs').then((r) => r.rows[0].n));
+  // Scoped to THIS source. Unfiltered `count(*) FROM integration_specs` makes
+  // the assertion depend on no other suite creating a spec in the same
+  // database - the false assumption measured in `b2_plugin_identity_attack`
+  // on 2026-11-21 when both files ran in one `node --test`.
+  const specCount = async () => (await pool.query(
+    'SELECT count(*)::int AS n FROM integration_specs WHERE source_id=$1', [sourceId],
+  )).rows[0].n;
+  const rowsBefore = await specCount();
   const crossSpec = await call(plugin.base, `/api/data-integration/sources/${sourceId}/ingestion-specs`, {
     method: 'POST',
     headers: { 'x-opsweave-user-context': inB },
     body: { sourceRevision: 1, schemaRevision: 1, targetDatasetId: datasetless(), mappings: [{ sourcePath: 'id', targetField: 'id', required: true, errorPolicy: 'REJECT_RECORD' }] },
   });
   assert.equal(crossSpec.status, 404);
-  const rowsAfter = (await pool.query('SELECT count(*)::int AS n FROM integration_specs').then((r) => r.rows[0].n));
+  const rowsAfter = await specCount();
   assert.equal(rowsAfter, rowsBefore, 'a refused cross-workspace spec left no row');
 
   await pool.query('DELETE FROM integration_sources WHERE source_id=$1', [sourceId]);

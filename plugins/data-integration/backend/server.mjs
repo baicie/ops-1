@@ -306,7 +306,29 @@ async function callCatalog(datasetId, body, idempotencyKey, workspaceId) {
 }
 function sourceView(row) { return { sourceId: row.source_id, name: row.name, connectorType: row.connector_type, endpoint: row.endpoint, credential: row.credential, status: row.status, lastTestAt: row.last_test_at?.toISOString?.(), createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString() }; }
 function runView(row) { return { runId: row.run_id, specId: row.spec_id, sourceBatchKey: row.source_batch_key, status: row.status, inputCount: row.input_count, accepted: row.accepted, rejected: row.rejected, unknown: row.unknown, startedAt: row.started_at.toISOString(), finishedAt: row.finished_at?.toISOString?.(), receiptId: row.receipt_id, failureCode: row.failure_code, failureMessage: row.failure_message }; }
-async function initDb() { await pool.query(`
+// MIGRATION MUST BE SERIALISED ACROSS INSTANCES - `IF NOT EXISTS` is not
+// atomic. Two processes starting against one database both read "table absent"
+// and both try to create it; the loser dies on
+// `duplicate key value violates unique constraint "pg_type_typname_nsp_index"`
+// and exits during startup. Measured on the sibling plugin 2026-11-21 (see the
+// note on `initDb` in data-catalog); this file has the same shape and the same
+// exposure.
+async function initDb() {
+  const client = await pool.connect();
+  try {
+    // Session-scoped, so taken and released on ONE connection - a pool.query
+    // would release it on whichever connection ran the unlock, which is not
+    // necessarily the one holding it.
+    await client.query("SELECT pg_advisory_lock(hashtext('opsweave.data-integration.migrations'))");
+    await migrateSchema(client);
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtext('opsweave.data-integration.migrations'))").catch(() => {});
+    client.release();
+  }
+  ready = true;
+}
+
+async function migrateSchema(client) { await client.query(`
   CREATE TABLE IF NOT EXISTS integration_sources (source_id uuid PRIMARY KEY, name text NOT NULL, connector_type text NOT NULL, endpoint text NOT NULL, credential jsonb NOT NULL, status text NOT NULL, last_test_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
   CREATE TABLE IF NOT EXISTS integration_specs (spec_id uuid PRIMARY KEY, source_id uuid NOT NULL, source_revision integer NOT NULL, schema_revision integer NOT NULL, target_dataset_id uuid NOT NULL, mappings jsonb NOT NULL, batch_size integer NOT NULL, timeout_seconds integer NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
   CREATE TABLE IF NOT EXISTS integration_runs (run_id uuid PRIMARY KEY, spec_id uuid NOT NULL, source_batch_key text NOT NULL UNIQUE, request_digest text NOT NULL DEFAULT '', status text NOT NULL, input_count integer NOT NULL DEFAULT 0, accepted integer NOT NULL DEFAULT 0, rejected integer NOT NULL DEFAULT 0, unknown integer NOT NULL DEFAULT 0, started_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz, receipt_id uuid, failure_code text, failure_message text);
@@ -316,7 +338,7 @@ async function initDb() { await pool.query(`
   // Pre-existing sources land in the 'legacy' workspace the Kernel created for
   // pre-scoping rows (migration 0022), so an installation that already granted
   // that membership keeps seeing its sources and nobody gains a new one.
-  await pool.query(`
+  await client.query(`
     ALTER TABLE integration_sources ADD COLUMN IF NOT EXISTS workspace_id uuid;
     UPDATE integration_sources
        SET workspace_id = '00000000-0000-4000-8000-000000000001'
@@ -325,7 +347,7 @@ async function initDb() { await pool.query(`
     CREATE INDEX IF NOT EXISTS integration_sources_workspace_idx
       ON integration_sources (workspace_id, created_at DESC);
   `);
-  ready = true; }
+}
 async function handle(req, res) {
   const id = rid(req); const url = new URL(req.url || '/', 'http://localhost');
   if (url.pathname === '/_opsweave/runtime/v1/info') return send(res, 200, { pluginId: PLUGIN_ID, version: VERSION, runtimeProtocol: 'http-json-v1', capabilityDigest: CAPABILITY_DIGEST, buildDigest: BUILD_DIGEST }, id);
