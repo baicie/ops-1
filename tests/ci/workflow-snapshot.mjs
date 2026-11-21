@@ -128,10 +128,27 @@ export function parseJobs(text) {
     if (!current) continue;
     if (/^    steps:\s*$/.test(line)) { inSteps = true; continue; }
     if (inSteps) {
-      const run = /^\s+- run:\s*(.*)$/.exec(line)?.[1]?.trim();
-      const uses = /^\s+- uses:\s*(\S+)/.exec(line)?.[1];
-      if (run) jobs[current].steps.push({ run: run.split('\n')[0].slice(0, 120) });
-      else if (uses) jobs[current].steps.push({ uses });
+      // A step may begin with `- name:`, `- uses:`, `- run:`, or `- id:` and
+      // carry `run:` on a LATER line inside the same item. Recognising only
+      // `- run:` and `- uses:` made a step that starts with a name invisible -
+      // measured: after folding a step into `spec-coverage`, the parser still
+      // reported its original three steps, so the change it was supposed to
+      // gate went unreported.
+      const itemStart = /^\s+-\s+([a-zA-Z_-]+):\s*(.*)$/.exec(line);
+      if (itemStart) {
+        const [, field, value] = itemStart;
+        if (field === 'run') jobs[current].steps.push({ run: value.trim().slice(0, 120) });
+        else if (field === 'uses') jobs[current].steps.push({ uses: value.trim() });
+        else jobs[current].steps.push({ [field]: value.trim().slice(0, 120) });
+        continue;
+      }
+      // A `run:` (or `uses:`) on its own line continues the step above.
+      const cont = /^\s+(run|uses):\s*(.*)$/.exec(line);
+      if (cont && jobs[current].steps.length) {
+        const last = jobs[current].steps[jobs[current].steps.length - 1];
+        if (cont[1] === 'run' && !last.run) last.run = cont[2].trim().slice(0, 120);
+        if (cont[1] === 'uses' && !last.uses) last.uses = cont[2].trim();
+      }
       continue;
     }
     const needs = /^    needs:\s*(.+)$/.exec(line)?.[1];

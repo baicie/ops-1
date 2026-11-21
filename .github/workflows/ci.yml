@@ -53,7 +53,7 @@ jobs:
   # WHY A JOB AND NOT A `paths:` FILTER
   #
   # `paths:` is workflow-level, and ci.yml holds both the jobs that must run on
-  # every change (contracts, spec-coverage, artifact-budget - all seconds) and the
+  # every change (contracts, spec-coverage - all seconds) and the
   # ones that cost minutes (two image builds, four g13/g13b acceptance jobs). A
   # workflow-level filter cannot separate them.
   #
@@ -862,13 +862,6 @@ jobs:
   # them as the only way off the runner. This job is the gate: tests/ci/tracked-png-budget.json
   # holds the budget, and the guard also fails on a dangling doc reference, because a screenshot a
   # document cites is an evidence link. It needs no pnpm install - it only reads the git index.
-  artifact-budget:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: node tests/ci/check-tracked-png-budget.mjs
   # A spec that no workflow executes guarantees nothing, however correct it is; two defects
   # reached main through exactly that hole (tests/ui/g11-incident-slice.spec.ts asserted both and
   # was referenced by nothing). This job reads the command lines the workflows actually run and
@@ -889,6 +882,22 @@ jobs:
       # that case where it is introduced rather than after a wasted round trip.
       - name: The impact analyzer and the workflow path filters agree
         run: node tests/ci/check-impact-consistency.mjs
+      # WAS ITS OWN JOB. It ran for 7 seconds and, in one measured run, waited
+      # 480 seconds for a runner: 19 jobs were dispatched in the same fanout and
+      # this one was last in line. GitHub gives no priority control inside a
+      # workflow, so the only lever is to dispatch fewer jobs - and this check
+      # needs exactly what `spec-coverage` already has (checkout, node 22).
+      #
+      # It stays in this job rather than merging with `contracts`, which needs
+      # Python and a Rust toolchain: pulling those in would make this job
+      # slower than the one it absorbed.
+      #
+      # `ci-gate` maps both names to the `spec-coverage` suite, so folding them
+      # changes no verdict - but it does remove one check run, and
+      # `spec-coverage` is the name that has to keep existing. It does, because
+      # this is that job.
+      - name: Tracked PNGs are the curated baseline and within budget
+        run: node tests/ci/check-tracked-png-budget.mjs
   contracts:
     runs-on: ubuntu-latest
     steps:
@@ -1583,7 +1592,8 @@ jobs:
       - g13b14-claim
       - g13b16-effect
       - g13b17-principal
-      - artifact-budget
+    # `artifact-budget` was removed from this list when its step folded into
+    # `spec-coverage`; the suite is still represented, by `spec-coverage`.
     steps:
       - uses: actions/checkout@v4
         with:

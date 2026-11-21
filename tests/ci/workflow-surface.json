@@ -25,6 +25,10 @@
         "steps": [
           {
             "uses": "actions/checkout@v4"
+          },
+          {
+            "name": "Decide the scope",
+            "run": "|"
           }
         ]
       },
@@ -37,6 +41,14 @@
         "steps": [
           {
             "uses": "actions/checkout@v4"
+          },
+          {
+            "name": "actionlint (workflow YAML and embedded shell)",
+            "uses": "raven-actions/actionlint@v2"
+          },
+          {
+            "name": "shellcheck at error severity",
+            "run": "|"
           }
         ]
       },
@@ -63,7 +75,15 @@
             "run": "cargo fmt --all -- --check"
           },
           {
+            "name": "DB-backed kernel tests are armed",
+            "run": "|"
+          },
+          {
             "run": "cargo test --locked --workspace"
+          },
+          {
+            "name": "DB-backed kernel tests really connected",
+            "run": "|"
           },
           {
             "run": "cargo clippy --locked --workspace --all-targets -- -D warnings"
@@ -127,6 +147,10 @@
           },
           {
             "run": "node --test tests/ci/check-retired-paths.test.mjs"
+          },
+          {
+            "name": "staging deploy gate (no host, no daemon, no root)",
+            "run": "bash tests/scripts/deploy-served-sha.test.sh"
           },
           {
             "run": "node tests/ci/check-path-integrity.mjs"
@@ -235,6 +259,14 @@
           },
           {
             "run": "npm ci --prefix plugins/zabbix-source/backend"
+          },
+          {
+            "name": "unit tests and the real HTTP socket suite",
+            "run": "node --test plugins/zabbix-source/backend/zabbix.test.mjs plugins/zabbix-source/backend/server.test.mjs tests/ci/g13a2_e"
+          },
+          {
+            "name": "source and collection persistence against real PostgreSQL",
+            "run": "node --test plugins/zabbix-source/backend/storage.test.mjs"
           }
         ]
       },
@@ -252,10 +284,22 @@
             "uses": "actions/setup-node@v4"
           },
           {
+            "name": "plugin identity modules match the canonical source",
+            "run": "node scripts/sync-plugin-identity.mjs --check"
+          },
+          {
             "run": "npm ci --prefix plugins/data-catalog/backend"
           },
           {
             "run": "npm ci --prefix plugins/data-integration/backend"
+          },
+          {
+            "name": "identity attack and regression suite",
+            "run": "|"
+          },
+          {
+            "name": "plugin readiness, pool bounds and the receipt endpoint",
+            "run": "|"
           }
         ]
       },
@@ -288,6 +332,10 @@
           },
           {
             "run": "npm ci --prefix plugins/zabbix-source/backend"
+          },
+          {
+            "name": "plugin bytes -> Kernel verification -> content read-back",
+            "run": "node tests/ci/g13a_evidence_roundtrip.mjs"
           }
         ]
       },
@@ -332,6 +380,18 @@
           },
           {
             "run": "pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium"
+          },
+          {
+            "name": "build the UI under test from this commit",
+            "run": "|"
+          },
+          {
+            "name": "local registry",
+            "run": "|"
+          },
+          {
+            "name": "browser -> Gateway -> Node -> OCI plugin -> fixture",
+            "run": "bash tests/ci/g13a1_gateway_e2e.sh"
           }
         ]
       },
@@ -375,7 +435,19 @@
             "run": "cargo build --locked -p opsweave-kernel"
           },
           {
+            "name": "start the kernel on the throw-away database",
+            "run": "|"
+          },
+          {
+            "name": "operator claim queue over real HTTP",
+            "run": "bash tests/acceptance/g13_b14_claim.sh"
+          },
+          {
             "run": "pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium"
+          },
+          {
+            "name": "claim queue in a real browser at 1440 / 1024 / 390, light and dark",
+            "run": "pnpm --filter @opsweave/ui-tests exec playwright test g13b14-claim.spec.ts"
           }
         ]
       },
@@ -402,6 +474,14 @@
           },
           {
             "run": "cargo build --locked -p opsweave-kernel"
+          },
+          {
+            "name": "start the kernel (its worker loop is the system under test)",
+            "run": "|"
+          },
+          {
+            "name": "committed evidence survives the crash window",
+            "run": "bash tests/acceptance/g13_b16_effect.sh"
           }
         ]
       },
@@ -428,6 +508,14 @@
           },
           {
             "run": "cargo build --locked -p opsweave-kernel"
+          },
+          {
+            "name": "start the kernel (its worker loop is the system under test)",
+            "run": "|"
+          },
+          {
+            "name": "persisted jobs vs credential and authorization lifetime",
+            "run": "bash tests/acceptance/g13_b17_principal.sh"
           }
         ]
       },
@@ -464,6 +552,10 @@
           },
           {
             "run": "node tests/ci/check-spec-coverage.mjs"
+          },
+          {
+            "name": "The impact analyzer and the workflow path filters agree",
+            "run": "node tests/ci/check-impact-consistency.mjs"
           }
         ]
       },
@@ -490,7 +582,15 @@
             "run": "pip install jsonschema pyyaml"
           },
           {
+            "name": "Build a bundle, so the bundle checks actually run",
+            "run": "scripts/contract-bundle-fixture.sh"
+          },
+          {
             "run": "python3 tests/contract/validate_contracts.py"
+          },
+          {
+            "name": "The bundle checks can fail",
+            "run": "python3 tests/contract/test_bundle_validation.py"
           }
         ]
       },
@@ -521,6 +621,42 @@
           },
           {
             "run": "|"
+          },
+          {
+            "name": "Build both feature sets",
+            "run": "|"
+          },
+          {
+            "name": "Lint both feature sets",
+            "run": "|"
+          },
+          {
+            "name": "Installer credential handling",
+            "run": "bash tests/ci/p001_credential_argv.sh"
+          },
+          {
+            "name": "Installer upgrade behaviour",
+            "run": "bash tests/ci/p001_upgrade_behaviour.sh"
+          },
+          {
+            "name": "Rollback must activate, or say it did not",
+            "run": "bash tests/ci/p001c_rollback_activates.sh"
+          },
+          {
+            "name": "Test both feature sets",
+            "run": "|"
+          },
+          {
+            "name": "Boot the platform-only binary and probe its boundary",
+            "run": "|"
+          },
+          {
+            "name": "The Linux acceptance workflow must run on every pull request",
+            "run": "|"
+          },
+          {
+            "name": "Boot the full product binary and prove the Ops prefix is served",
+            "run": "|"
           }
         ]
       },
@@ -533,6 +669,22 @@
         "steps": [
           {
             "uses": "actions/checkout@v4"
+          },
+          {
+            "name": "Build the platform-only image",
+            "run": "|"
+          },
+          {
+            "name": "Assert the image boundary",
+            "run": "|"
+          },
+          {
+            "name": "The image boots and serves the console",
+            "run": "|"
+          },
+          {
+            "name": "The platform target does not depend on the business build",
+            "run": "|"
           }
         ]
       },
@@ -547,6 +699,18 @@
         "steps": [
           {
             "uses": "actions/checkout@v4"
+          },
+          {
+            "name": "Build the full runtime image",
+            "run": "|"
+          },
+          {
+            "name": "Assert the image contains the whole product",
+            "run": "|"
+          },
+          {
+            "name": "The image boots and serves both applications",
+            "run": "|"
           }
         ]
       },
@@ -559,6 +723,14 @@
         "steps": [
           {
             "uses": "actions/checkout@v4"
+          },
+          {
+            "name": "Decide",
+            "run": "|"
+          },
+          {
+            "name": "The gate's own selftest",
+            "run": "|"
           }
         ]
       }
@@ -677,6 +849,10 @@
           },
           {
             "run": "|"
+          },
+          {
+            "name": "0.0.1 E2E",
+            "run": "|"
           }
         ]
       }
@@ -793,7 +969,71 @@
             "uses": "actions/checkout@v4"
           },
           {
+            "name": "Record the environment",
+            "run": "|"
+          },
+          {
+            "name": "Build the platform-only image",
+            "run": "|"
+          },
+          {
+            "name": "Node state directory is writable by the container uid",
+            "run": "|"
+          },
+          {
+            "name": "Install the platform",
+            "run": "|"
+          },
+          {
+            "name": "The install left no node restart loop",
+            "run": "|"
+          },
+          {
+            "name": "Assert the installed platform",
+            "run": "|"
+          },
+          {
+            "name": "One installation cannot take over another's container",
+            "run": "|"
+          },
+          {
+            "name": "ExecStopPost cleanup owns only this installation's containers",
+            "run": "|"
+          },
+          {
+            "name": "An interrupted reinitialize cannot keep the original's installation id",
+            "run": "|"
+          },
+          {
+            "name": "Teardown never reports cleanup it did not perform",
+            "run": "|"
+          },
+          {
+            "name": "Node reaches the docker socket as an unprivileged user",
+            "run": "|"
+          },
+          {
+            "name": "The node enrolled, reports health, and can create a container",
+            "run": "|"
+          },
+          {
+            "name": "Upgrade and roll back between two real image versions",
+            "run": "|"
+          },
+          {
+            "name": "An unhealthy node makes the upgrade DEGRADED, not complete",
+            "run": "|"
+          },
+          {
+            "name": "Collect what failed",
+            "run": "|"
+          },
+          {
             "uses": "actions/upload-artifact@v4"
+          },
+          {
+            "name": "Tear down",
+            "run": "|"
           }
         ]
       }
@@ -866,6 +1106,54 @@
           },
           {
             "uses": "actions/setup-java@v4"
+          },
+          {
+            "name": "Install Maven",
+            "run": "sudo apt-get update && sudo apt-get install -y maven"
+          },
+          {
+            "name": "Install workspace",
+            "run": "pnpm install --frozen-lockfile"
+          },
+          {
+            "name": "Install PostgreSQL client tools",
+            "run": "sudo apt-get update && sudo apt-get install -y postgresql-client"
+          },
+          {
+            "name": "Require a working Docker daemon",
+            "run": "|"
+          },
+          {
+            "name": "Build the binaries the acceptance drives",
+            "run": "|"
+          },
+          {
+            "name": "Generate the publisher signing key",
+            "run": "|"
+          },
+          {
+            "name": "Prepare PostgreSQL for the harness",
+            "run": "|"
+          },
+          {
+            "name": "Full TypeScript plugin lifecycle",
+            "run": "|"
+          },
+          {
+            "name": "The suite can fail - injected negatives",
+            "run": "|"
+          },
+          {
+            "name": "Go and Java get the same lifecycle (P001-C3)",
+            "run": "|"
+          },
+          {
+            "name": "Upload the acceptance evidence",
+            "uses": "actions/upload-artifact@v4"
+          },
+          {
+            "name": "State the result",
+            "run": "|"
           }
         ]
       }
@@ -1018,6 +1306,10 @@
         "steps": [
           {
             "uses": "actions/checkout@v4"
+          },
+          {
+            "id": "pick",
+            "run": "|"
           }
         ]
       },
@@ -1032,6 +1324,18 @@
         "steps": [
           {
             "uses": "actions/checkout@v4"
+          },
+          {
+            "name": "Wait for the suites this commit produced",
+            "run": "|"
+          },
+          {
+            "name": "Write the receipt",
+            "run": "|"
+          },
+          {
+            "name": "Upload the receipt",
+            "uses": "actions/upload-artifact@v4"
           }
         ]
       }
@@ -1067,6 +1371,18 @@
           },
           {
             "uses": "actions/setup-node@v4"
+          },
+          {
+            "name": "Install catalog backend dependencies",
+            "run": "npm ci --omit=dev --no-audit --no-fund"
+          },
+          {
+            "name": "Response bodies are bounded while read, not after buffering",
+            "run": "|"
+          },
+          {
+            "name": "Run isolated quality fault harness",
+            "run": "./tests/reliability/run.sh --all"
           },
           {
             "uses": "actions/upload-artifact@v4"
@@ -1136,6 +1452,34 @@
           },
           {
             "uses": "actions/setup-java@v4"
+          },
+          {
+            "name": "Install Maven",
+            "run": "sudo apt-get update && sudo apt-get install -y maven"
+          },
+          {
+            "name": "Install workspace",
+            "run": "pnpm install --frozen-lockfile"
+          },
+          {
+            "name": "Install PostgreSQL client tools",
+            "run": "sudo apt-get update && sudo apt-get install -y postgresql-client"
+          },
+          {
+            "name": "Require a working Docker daemon",
+            "run": "|"
+          },
+          {
+            "name": "Runtime conformance for TypeScript, Go and Java",
+            "run": "|"
+          },
+          {
+            "name": "Upload the conformance evidence",
+            "uses": "actions/upload-artifact@v4"
+          },
+          {
+            "name": "State the result",
+            "run": "|"
           }
         ]
       }
@@ -1170,7 +1514,16 @@
         "if": null,
         "runsOn": "ubuntu-24.04",
         "environment": null,
-        "steps": []
+        "steps": [
+          {
+            "name": "Require the commit that verify_only certifies",
+            "run": "|"
+          },
+          {
+            "name": "Choose the acceptance tier",
+            "run": "|"
+          }
+        ]
       },
       "build": {
         "needs": [],
@@ -1183,10 +1536,34 @@
             "uses": "actions/checkout@v4"
           },
           {
+            "name": "Resolve the target commit",
+            "run": "|"
+          },
+          {
+            "name": "The requested commit is one this repository published",
+            "run": "|"
+          },
+          {
+            "name": "Decide whether this run must build",
+            "run": "|"
+          },
+          {
+            "name": "Verify the staging Dockerfile is present",
+            "run": "|"
+          },
+          {
             "uses": "docker/setup-buildx-action@v3"
           },
           {
             "uses": "docker/login-action@v3"
+          },
+          {
+            "name": "Build and push the SHA-tagged image",
+            "uses": "docker/build-push-action@v6"
+          },
+          {
+            "name": "Verify the published image for a re-deploy",
+            "run": "|"
           }
         ]
       },
@@ -1203,10 +1580,54 @@
             "uses": "actions/checkout@v4"
           },
           {
+            "name": "Validate the required configuration",
+            "run": "|"
+          },
+          {
+            "name": "Configure strict SSH",
+            "run": "bash scripts/ci-ssh-setup.sh"
+          },
+          {
+            "name": "Record the previous release",
+            "run": "|"
+          },
+          {
+            "name": "Install the deploy script and compose contract on the host",
+            "run": "|"
+          },
+          {
+            "name": "Authenticate the host to ghcr.io",
+            "run": "|"
+          },
+          {
+            "name": "Deploy the release and verify health",
+            "run": "|"
+          },
+          {
+            "name": "Hand the image over SSH after a failed host pull, then deploy again",
+            "run": "|"
+          },
+          {
             "uses": "pnpm/action-setup@v4"
           },
           {
             "uses": "actions/setup-node@v4"
+          },
+          {
+            "name": "Install workspace dependencies for the plugin web bundles",
+            "run": "pnpm install --frozen-lockfile"
+          },
+          {
+            "name": "Publish the data plugin bundles",
+            "run": "|"
+          },
+          {
+            "name": "Collect host status",
+            "run": "|"
+          },
+          {
+            "name": "Upload deploy evidence",
+            "uses": "actions/upload-artifact@v4"
           }
         ]
       },
@@ -1225,10 +1646,50 @@
             "uses": "actions/checkout@v4"
           },
           {
+            "name": "Choose the smoke strategy",
+            "run": "|"
+          },
+          {
             "uses": "pnpm/action-setup@v4"
           },
           {
             "uses": "actions/setup-node@v4"
+          },
+          {
+            "name": "Install workspace and Chromium",
+            "run": "|"
+          },
+          {
+            "name": "Measure the runner-side network path",
+            "run": "|"
+          },
+          {
+            "name": "Playwright core paths (staging smoke, dual surface, admin shell)",
+            "run": "|"
+          },
+          {
+            "name": "Playwright admin, plugin, i18n and g08 surfaces",
+            "run": "|"
+          },
+          {
+            "name": "Inline HTTP smoke (fallback)",
+            "run": "|"
+          },
+          {
+            "name": "Table geometry audit (table-spec §4.1, writes _metrics_*.json)",
+            "run": "|"
+          },
+          {
+            "name": "Table geometry gate (table-spec §4.2)",
+            "run": "|"
+          },
+          {
+            "name": "Record Playwright wall-clock durations",
+            "run": "|"
+          },
+          {
+            "name": "Upload smoke evidence",
+            "uses": "actions/upload-artifact@v4"
           }
         ]
       },
@@ -1252,6 +1713,22 @@
           },
           {
             "uses": "actions/setup-node@v4"
+          },
+          {
+            "name": "Install workspace and Chromium",
+            "run": "|"
+          },
+          {
+            "name": "Playwright seeded-data suite - studio (host-metrics-pipeline) [known-flaky]",
+            "run": "|"
+          },
+          {
+            "name": "Name the outcome in the run summary",
+            "run": "|"
+          },
+          {
+            "name": "Upload the seeded-data evidence",
+            "uses": "actions/upload-artifact@v4"
           }
         ]
       },
@@ -1275,6 +1752,22 @@
           },
           {
             "uses": "actions/setup-node@v4"
+          },
+          {
+            "name": "Install workspace and Chromium",
+            "run": "|"
+          },
+          {
+            "name": "Playwright seeded-data suite - visual layout (host-metrics-pipeline) [known-flaky]",
+            "run": "|"
+          },
+          {
+            "name": "Name the outcome in the run summary",
+            "run": "|"
+          },
+          {
+            "name": "Upload the seeded-data evidence",
+            "uses": "actions/upload-artifact@v4"
           }
         ]
       },
@@ -1298,6 +1791,34 @@
           },
           {
             "uses": "actions/setup-node@v4"
+          },
+          {
+            "name": "Install workspace and Chromium",
+            "run": "|"
+          },
+          {
+            "name": "Install the Rust toolchain for opsctl (the installer's only API client)",
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "name": "Seed the demo hello plugin (idempotent)",
+            "run": "|"
+          },
+          {
+            "name": "Name the demo plugin seed outcome in the run summary",
+            "run": "|"
+          },
+          {
+            "name": "Playwright seeded-data suite - visual (demo plugin, live instance) [known-flaky]",
+            "run": "|"
+          },
+          {
+            "name": "Name the outcome in the run summary",
+            "run": "|"
+          },
+          {
+            "name": "Upload the seeded-data evidence",
+            "uses": "actions/upload-artifact@v4"
           }
         ]
       },
@@ -1315,7 +1836,16 @@
         "if": "always()",
         "runsOn": "ubuntu-24.04",
         "environment": "staging",
-        "steps": []
+        "steps": [
+          {
+            "name": "Compose health.json",
+            "run": "|"
+          },
+          {
+            "name": "Upload the acceptance record",
+            "uses": "actions/upload-artifact@v4"
+          }
+        ]
       },
       "report": {
         "needs": [
@@ -1328,7 +1858,20 @@
         "if": "always()",
         "runsOn": "ubuntu-24.04",
         "environment": "staging",
-        "steps": []
+        "steps": [
+          {
+            "name": "Download evidence",
+            "uses": "actions/download-artifact@v4"
+          },
+          {
+            "name": "Compose the single preview comment",
+            "run": "|"
+          },
+          {
+            "name": "Update or create the single PR comment",
+            "run": "|"
+          }
+        ]
       }
     }
   },

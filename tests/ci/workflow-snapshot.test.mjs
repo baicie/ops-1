@@ -120,3 +120,42 @@ test('a changed step command is reported, a comment is not', () => {
   assert.deepEqual(compare({ 'x.yml': a }, { 'x.yml': addedComment }), [],
     'a comment is formatting, not surface');
 });
+
+
+test('a step that starts with a name is not invisible', () => {
+  // Measured: folding a step into `spec-coverage` left the parser reporting the
+  // original three steps, because it only recognised `- run:` and `- uses:` at
+  // the start of an item. A step written as `- name: ...` followed by `run:`
+  // disappeared, so the change the snapshot exists to gate went unreported.
+  const wf = `name: x
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: a named step
+        run: node a.mjs
+      - name: another
+        run: node b.mjs
+`;
+  const s = snapshotWorkflow(wf);
+  assert.equal(s.jobs.a.steps.length, 3, JSON.stringify(s.jobs.a.steps));
+  assert.equal(s.jobs.a.steps[1].run, 'node a.mjs', 'the run inside a named step must be captured');
+});
+
+test('adding a named step changes the surface', () => {
+  const before = `name: x
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo one
+`;
+  const after = before + `      - name: two
+        run: echo two
+`;
+  const diffs = compare({ 'x.yml': snapshotWorkflow(before) }, { 'x.yml': snapshotWorkflow(after) });
+  assert.ok(diffs.some((d) => /steps changed/.test(d)), JSON.stringify(diffs));
+});

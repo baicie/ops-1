@@ -122,7 +122,15 @@ export const JOB_TO_SUITE = {
   'g13b14-claim': 'data-foundation',
   'g13b16-effect': 'data-foundation',
   'g13b17-principal': 'data-foundation',
-  'artifact-budget': 'spec-coverage',
+  // `artifact-budget` is GONE AS A JOB, not as a check. Its step folded into the
+  // `spec-coverage` job (a 7-second check that waited 480s for a runner in a
+  // 19-job fanout); the suite is still produced, by `spec-coverage` itself.
+  //
+  // Deleting the entry is required rather than tidy: the gate asserts that every
+  // mapped job appears in its own `needs:` list, so a mapping for a job that no
+  // longer exists reports `not wired: spec-coverage (job artifact-budget is
+  // mapped but absent from needs)` - which is exactly what this change hit on
+  // its first CI run.
 };
 
 /** Suite -> the workflow outside ci.yml that produces it. */
