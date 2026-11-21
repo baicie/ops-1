@@ -24,7 +24,12 @@ on:
       - 'packages/**'
       - 'contracts/**'
       - 'tests/acceptance/g12_*.sh'
-      - 'tests/acceptance/g11_*.sh'
+      # `tests/acceptance/g11_*.sh` was here and NEVER MATCHED ANYTHING. Measured
+      # 2026-11-21: the tree has no such file, and `git log --all --diff-filter=A`
+      # shows none was ever added. A paths filter naming a file that does not
+      # exist fails silently - the workflow simply does not run for a change it
+      # was meant to cover, and nothing anywhere goes red. Removed rather than
+      # left as reassurance.
       - 'tests/ui/dual-surface.spec.ts'
       - 'tests/ui/overview-matrix.spec.ts'
       - 'tests/ui/overview-partial.spec.ts'
@@ -54,7 +59,6 @@ on:
       - 'apps/platform-console/**'
       - 'apps/ops-web/**'
       - 'packages/**'
-      - 'tests/acceptance/g11_*.sh'
       - 'tests/acceptance/g12_*.sh'
       # The suite now includes g11-incident-slice.spec.ts and reads tests/ui/support/**, and the
       # harness itself decides which specs run - so a change to any of the three must rerun it on

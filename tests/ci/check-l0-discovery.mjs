@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 /** Directories that hold shell scripts a maintainer would expect to be linted. */
-export const SHELL_DIRS = ['tests/acceptance', 'tests/ci', 'scripts'];
+export const SHELL_DIRS = ['tests/acceptance', 'tests/ci', 'tests/scripts', 'scripts'];
 
 /** Walk a directory for `*.sh`, skipping node_modules and target. */
 export function shellScriptsUnder(root, dirs = SHELL_DIRS) {
