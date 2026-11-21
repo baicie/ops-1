@@ -519,24 +519,6 @@
           }
         ]
       },
-      "artifact-budget": {
-        "needs": [],
-        "timeout": null,
-        "if": null,
-        "runsOn": "ubuntu-latest",
-        "environment": null,
-        "steps": [
-          {
-            "uses": "actions/checkout@v4"
-          },
-          {
-            "uses": "actions/setup-node@v4"
-          },
-          {
-            "run": "node tests/ci/check-tracked-png-budget.mjs"
-          }
-        ]
-      },
       "spec-coverage": {
         "needs": [],
         "timeout": null,
@@ -556,6 +538,10 @@
           {
             "name": "The impact analyzer and the workflow path filters agree",
             "run": "node tests/ci/check-impact-consistency.mjs"
+          },
+          {
+            "name": "Tracked PNGs are the curated baseline and within budget",
+            "run": "node tests/ci/check-tracked-png-budget.mjs"
           }
         ]
       },
