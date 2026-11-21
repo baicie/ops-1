@@ -22,24 +22,37 @@
  *
  * Usage: node tests/ci/check-paths-filters.mjs [--json]
  */
-import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, relative } from 'node:path';
 
 const ROOT = process.cwd();
 
-function walk(dir, out = []) {
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
-  for (const entry of entries) {
-    if (['node_modules', 'target', 'dist', '.git', '.blueprint', 'test-results', 'artifacts'].includes(entry.name)) continue;
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) walk(full, out);
-    else out.push(full);
-  }
-  return out;
+/**
+ * THE AUTHORITY IS THE GIT INDEX, NOT THE WORKING TREE.
+ *
+ * The first version walked the filesystem. That is wrong in both directions:
+ *
+ *   - a stale local file (an untracked screenshot, a build output) matches a
+ *     filter whose file was deleted from the repository, so a DEAD filter looks
+ *     alive on the machine where it is being checked;
+ *   - a directory that exists but holds no tracked file satisfies `dir/**`, so
+ *     moving every file out of a directory leaves the filter passing.
+ *
+ * `git ls-files` answers the question the filter actually asks: "will this
+ * change be part of a push". It is also stable under a fresh clone, which is
+ * where CI runs.
+ *
+ * Directories that contain at least one tracked file are derived from the file
+ * list; a directory with no tracked file does not exist for this purpose.
+ */
+const FILES = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' })
+  .split('\n').filter(Boolean);
+const DIRS = new Set();
+for (const f of FILES) {
+  const parts = f.split('/');
+  for (let i = 1; i < parts.length; i += 1) DIRS.add(parts.slice(0, i).join('/'));
 }
-
-const FILES = walk(ROOT).map((f) => relative(ROOT, f));
 
 /** Does a filter pattern match at least one path in the tree? */
 export function matchesAnything(pattern, files) {
@@ -50,9 +63,9 @@ export function matchesAnything(pattern, files) {
     const prefix = p.slice(0, -3);
     // The PREFIX ITSELF must exist: `scripts/gone/**` matches nothing when
     // `scripts/gone/` was moved, even though the glob is syntactically fine.
-    if (files.some((f) => f.startsWith(prefix + '/'))) return true;
-    // A directory may exist and be empty of tracked files; accept it then.
-    return existsSync(join(ROOT, prefix));
+    // A directory counts only if it holds tracked files. `existsSync` accepted
+    // an empty leftover directory, which is exactly the state after a move.
+    return files.some((f) => f.startsWith(prefix + '/'));
   }
   if (p.includes('*')) {
     const re = new RegExp(`^${p.replace(/[.+^${}()|[\]\\]/g, '\\$&')
@@ -61,7 +74,10 @@ export function matchesAnything(pattern, files) {
       .replace(/\u0000/g, '.*')}$`);
     return files.some((f) => re.test(f));
   }
-  return files.includes(p) || existsSync(join(ROOT, p));
+  // A literal path counts only if it is a tracked file or a directory that
+  // holds tracked files. An untracked leftover on this machine must not make a
+  // dead filter look alive.
+  return files.includes(p) || DIRS.has(p);
 }
 
 /** Every `paths:` entry in a workflow file. */

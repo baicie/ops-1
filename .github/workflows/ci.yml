@@ -349,7 +349,14 @@ jobs:
       # lines; a `paths:` entry is not an invocation and never appeared there.
       # Its first run found two real entries: `tests/acceptance/g11_*.sh`,
       # a file `git log --all --diff-filter=A` proves was never added.
+      - run: node --test tests/ci/check-paths-filters.test.mjs
       - run: node tests/ci/check-paths-filters.mjs
+      # The CI measurement tool names every performance number this repository
+      # publishes. Its first version grouped runs by the MINUTE they were created,
+      # which merged two PRs, two pushes of one PR, a workflow_dispatch and a
+      # rerun into one fanout - and every published critical-path number came
+      # from that grouping.
+      - run: node --test scripts/ci/ci-cost.test.mjs
       # Root hygiene: the top level stays legible, build output stays out of the
       # index, and one ecosystem keeps one lockfile. An unapproved directory is
       # reported WITH how to approve it - a project that cannot add a top-level

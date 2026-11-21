@@ -102,10 +102,49 @@ export function inspectRoot(tracked) {
     }
   }
 
-  // One lockfile per ecosystem.
-  const locks = tracked.filter((p) => !p.includes('/') && /lock/i.test(p.split('/').pop()));
-  if (locks.length > 2) {
-    problems.push(`more than one lockfile per ecosystem: ${locks.join(', ')}`);
+  // One lockfile per ecosystem AT THE ROOT, and nested lockfiles only where a
+  // package is genuinely its own workspace.
+  //
+  // The first version counted lockfiles whose name contains "lock" at the root
+  // and allowed up to two. That is both too loose (any third root lockfile
+  // passed) and blind to the real question: a nested `package-lock.json` is
+  // legitimate when that directory is its own npm project - `plugins/*/backend`
+  // are three of those, each built by its own Dockerfile - and illegitimate
+  // when it is a second resolution of the same pnpm workspace.
+  //
+  // The rule below names each root lockfile with the ecosystem it belongs to,
+  // and requires a nested npm lockfile to sit in a directory that also has its
+  // own `package.json` (which is what makes it a separate project rather than a
+  // stray copy).
+  // The ecosystem is what a lockfile RESOLVES, not what it is called. npm, yarn
+  // and pnpm all resolve the node tree, so two of them at the root is a
+  // conflict even though the filenames differ.
+  const ROOT_LOCKS = new Map([
+    ['Cargo.lock', 'rust'],
+    ['pnpm-lock.yaml', 'node'],
+    ['package-lock.json', 'node'],
+    ['yarn.lock', 'node'],
+    ['go.sum', 'go'],
+  ]);
+  const rootLocks = tracked.filter((p) => !p.includes('/') && ROOT_LOCKS.has(p));
+  const byEcosystem = new Map();
+  for (const lock of rootLocks) {
+    const eco = ROOT_LOCKS.get(lock);
+    if (byEcosystem.has(eco)) {
+      problems.push(`two root lockfiles for ${eco}: ${byEcosystem.get(eco)} and ${lock}`);
+    }
+    byEcosystem.set(eco, lock);
+  }
+  // A nested npm lockfile must belong to a directory that declares its own
+  // project. Otherwise it is a second resolution of the parent workspace.
+  for (const lock of tracked.filter((p) => p.endsWith('/package-lock.json'))) {
+    const dir = lock.slice(0, -'/package-lock.json'.length);
+    if (!tracked.includes(`${dir}/package.json`)) {
+      problems.push(`${lock} has no package.json beside it; it is a stray lockfile, not a project`);
+    }
+    if (tracked.includes(`${dir}/pnpm-lock.yaml`)) {
+      problems.push(`${dir} has both a package-lock.json and a pnpm-lock.yaml; one resolution per directory`);
+    }
   }
 
   return {

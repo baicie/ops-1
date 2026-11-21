@@ -27,10 +27,30 @@ tracked blobs            1436 个对象，78.58 MB
 | `artifacts/ui-baseline` | 9 | 受跟踪 |
 | `docs/assets/**` 下的 PNG | — | 文档截图 |
 
-`git ls-files` 里有 **28 个索引项没有对应对象**（`docs/assets/0.0.4/**`），
-`git cat-file` 对它们报 `Not a valid object name`。这是索引污染，不影响检出
-（这些路径在工作树里不存在），但会让任何按索引统计体积的工具得出错误结论。
-**未修复**——它需要一次 `git rm --cached` 且要确认没有别的地方依赖这些路径。
+### 已撤回：所谓「28 个索引项没有对应对象」是测量错误
+
+本文初版说 `docs/assets/0.0.4/**` 有 28 个索引项缺少对象，并建议
+`git rm --cached`。**这个说法是错的，不要执行任何清理。**
+
+2026-11-22 在两个干净 clone（浅克隆与完整克隆各一）里复核：
+
+```
+git ls-tree HEAD docs/assets/0.0.4/hardening/job-detail.png
+  100644 blob faa9be10...  docs/assets/0.0.4/hardening/job-detail.png
+git cat-file -t faa9be10...   -> blob            # 对象存在
+工作树文件                      -> 148997 bytes   # 文件存在
+```
+
+全树扫描（1461 条路径，逐条 `git cat-file -e HEAD:<path>`）：**零缺失**，
+且索引条目数与 tree 条目数一致（1461 = 1461）。
+
+**原始错误的原因**：那条命令在 clone 内部用 `git ls-files` 的输出喂给
+`git cat-file --batch-check`，而 `ls-files` 读的是本地索引；索引里的 mtime
+与对象库状态在一棵刚克隆的树上并不保证同步，路径被当成「不是对象名」交给
+batch-check，于是全部报 `missing`。**这是把「我查错了」写成了「仓库坏了」。**
+
+教训与 §6 的其他条目同类：一个测量结论必须能在干净环境里复现，否则它只是
+一次观察，不是事实。
 
 ### 一级目录
 
@@ -158,7 +178,7 @@ Makefile 调用、Rust `include_str!/include_bytes!`、rules 索引。
 ## 5. 本 PR 未做的事
 
 - **没有移动任何文件。** 迁移必须先有守卫，守卫现在有了（本 PR），迁移在后续 PR。
-- **28 个悬空索引项未清理**，需要单独确认后 `git rm --cached`。
+- ~~28 个悬空索引项~~ **已撤回**：见上，那是测量错误，仓库没有损坏。
 - **没有提出任何 CI 提速方案**：`golden-path` 的 52% 是系统时间常数，其余 48% 里
   多数 step 已在 10s 以下。任何提速要先证明不降覆盖。
 - **PNG 的 66.18 MB 未动。** 移动目录不会减少任何字节，删除基线会关掉 UI 断言，
