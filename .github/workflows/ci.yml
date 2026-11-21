@@ -316,6 +316,17 @@ jobs:
       # this gate reported zero references. The staging image only broke at merge
       # time, because no PR job builds it. One case here is that exact file shape.
       - run: node --test tests/ci/check-retired-paths.test.mjs
+      # Path integrity: every path a build, script or config names must exist.
+      #
+      # This is the other half of the retired-path gate. That one catches a live
+      # file naming something we REMOVED; this one catches a reference that never
+      # resolved - a moved directory, a renamed script, a COPY of a deleted file.
+      # A migration leaves the second kind behind for hours before anyone writes
+      # the RETIRED entry, and nothing else in this repository looks for it.
+      #
+      # It prints its file count and the number of Dockerfile contexts it could
+      # not resolve, so a pass cannot mean "I read nothing".
+      - run: node tests/ci/check-path-integrity.mjs
       # The geometry gate's own fail-closed properties: empty passes, dropped routes, missing
       # matrix combinations and duplicate passes.
       - run: node --test scripts/check-ui-metrics.test.mjs
