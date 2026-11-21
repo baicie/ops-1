@@ -42,6 +42,10 @@ import { dirname, join, normalize, relative, resolve } from 'node:path';
 
 const ROOT = process.cwd();
 const problems = [];
+/** References that were parsed and resolved. Zero here means the run proved nothing. */
+let checkedRefs = 0;
+/** Files deliberately excluded by rule (history, artifacts, build output). */
+let skippedFiles = 0;
 const skippedContexts = [];
 
 /**
@@ -110,13 +114,17 @@ function isBuildOutput(full) {
  */
 function resolves(base, target) {
   const full = resolve(base, target);
-  if (!full.startsWith(ROOT)) return true; // outside the repo: not ours to check
-  if (existsSync(full)) return true;
+  if (!full.startsWith(ROOT)) { checkedRefs += 1; return true; } // outside the repo
+  if (existsSync(full)) { checkedRefs += 1; return true; }
   if (target.includes('*')) {
     const prefix = target.slice(0, target.indexOf('*'));
-    return existsSync(resolve(base, prefix));
+    const ok = existsSync(resolve(base, prefix));
+    if (ok) checkedRefs += 1;
+    return ok;
   }
-  return isBuildOutput(full);
+  const buildOutput = isBuildOutput(full);
+  if (buildOutput) checkedRefs += 1;
+  return buildOutput;
 }
 
 function walk(dir, out = []) {
@@ -129,7 +137,7 @@ function walk(dir, out = []) {
   for (const entry of entries) {
     // `artifacts/` holds run output and is mostly untracked; scanning it
     // reported nine skipped contexts that are not part of the tree.
-    if (['node_modules', 'target', 'dist', '.git', '.blueprint', 'test-results', 'artifacts'].includes(entry.name)) continue;
+    if (['node_modules', 'target', 'dist', '.git', '.blueprint', 'test-results', 'artifacts'].includes(entry.name)) { skippedFiles += 1; continue; }
     const full = join(dir, entry.name);
     if (entry.isDirectory()) walk(full, out);
     else out.push(full);
@@ -392,17 +400,46 @@ for (const file of walk(join(ROOT, 'crates')).concat(walk(join(ROOT, 'apps'))).f
 
 // ---------------------------------------------------------------------------
 
-const payload = { problems, scannedFiles: repoFiles.size };
+/**
+ * FOUR STATES, NOT ONE NUMBER.
+ *
+ * "0 problems" was ambiguous: it read the same whether every reference was
+ * checked, or half of them were skipped because a Docker build context was a
+ * shell variable. The distinction the reader needs is:
+ *
+ *   CHECKED   a reference was parsed and resolves.
+ *   UNKNOWN   a reference-shaped construct could not be resolved (a `$var`
+ *             build context). NOT a pass, and counted.
+ *   SKIPPED   a file was deliberately excluded by rule (artifacts/, history).
+ *   REFUSED   a reference was parsed and does NOT resolve. Exits non-zero.
+ *
+ * A run that checked nothing now prints `CHECKED 0`, which cannot be mistaken
+ * for "everything is fine".
+ */
+const payload = {
+  states: {
+    CHECKED: checkedRefs,
+    UNKNOWN: skippedContexts.length,
+    SKIPPED: skippedFiles,
+    REFUSED: problems.length,
+  },
+  problems,
+  scannedFiles: repoFiles.size,
+};
 if (process.argv.includes('--json')) {
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
 } else {
   for (const p of problems) {
-    process.stdout.write(`ERROR ${p.where}: ${p.what} -> ${p.target}\n`);
+    process.stdout.write(`REFUSED ${p.where}: ${p.what} -> ${p.target}\n`);
   }
   for (const s of skippedContexts) {
-    process.stdout.write(`SKIP  ${s}: build context is a shell variable; COPY sources not checked\n`);
+    process.stdout.write(`UNKNOWN ${s}: build context is a shell variable; COPY sources not checked\n`);
   }
-  process.stdout.write(`path integrity: ${problems.length} problem(s) across ${repoFiles.size} files`
-    + ` (${skippedContexts.length} Dockerfile context(s) unresolvable)\n`);
+  process.stdout.write(`path integrity: CHECKED ${checkedRefs} reference(s) resolved,`
+    + ` UNKNOWN ${skippedContexts.length}, SKIPPED ${skippedFiles} file(s),`
+    + ` REFUSED ${problems.length}, across ${repoFiles.size} files\n`);
+  if (checkedRefs === 0) {
+    process.stdout.write('REFUSED: no reference was checked at all; this run proves nothing\n');
+  }
 }
-process.exit(problems.length === 0 ? 0 : 1);
+process.exit(problems.length === 0 && checkedRefs > 0 ? 0 : 1);

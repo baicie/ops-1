@@ -53,9 +53,51 @@ test('an editor leftover is reported', () => {
   assert.ok(problems.some((p) => /leftover is tracked/.test(p)));
 });
 
-test('a second top-level lockfile is reported', () => {
-  const { problems } = inspectRoot(['Cargo.lock', 'package-lock.json', 'pnpm-lock.yaml', 'apps/a']);
-  assert.ok(problems.some((p) => /more than one lockfile/.test(p)));
+test('two root lockfiles for the same ecosystem are reported', () => {
+  // npm and yarn are both "a node resolution". Having both at the root means one
+  // of them is stale, and nobody can tell which by looking.
+  const { problems } = inspectRoot(['Cargo.lock', 'pnpm-lock.yaml', 'yarn.lock',
+    'package.json', 'pnpm-workspace.yaml', 'apps/a']);
+  assert.ok(problems.some((p) => /two root lockfiles for node/.test(p)),
+    `expected the conflicting node lockfiles to be named, got ${JSON.stringify(problems)}`);
+});
+
+test('Cargo.lock plus pnpm-lock.yaml alone is NOT a duplicate', () => {
+  // Different ecosystems, one lockfile each: the normal monorepo shape.
+  const { problems } = inspectRoot(['Cargo.lock', 'pnpm-lock.yaml', 'Cargo.toml',
+    'package.json', 'pnpm-workspace.yaml', 'apps/a']);
+  assert.ok(!problems.some((p) => /lockfile/.test(p)), JSON.stringify(problems));
+});
+
+test('a plugin with its own package.json and package-lock.json is legitimate', () => {
+  // `plugins/*/backend` are three separate npm projects, each built by its own
+  // Dockerfile. Calling them "duplicate lockfiles" would be a false finding on
+  // correct structure.
+  const { problems } = inspectRoot([
+    'Cargo.lock', 'pnpm-lock.yaml', 'Cargo.toml', 'package.json', 'pnpm-workspace.yaml',
+    'apps/a',
+    'plugins/x/backend/package.json', 'plugins/x/backend/package-lock.json',
+  ]);
+  assert.ok(!problems.some((p) => /lockfile/.test(p)), JSON.stringify(problems));
+});
+
+test('a nested lockfile with no package.json beside it is reported', () => {
+  const { problems } = inspectRoot([
+    'Cargo.lock', 'pnpm-lock.yaml', 'Cargo.toml', 'package.json', 'pnpm-workspace.yaml',
+    'apps/a', 'plugins/x/backend/package-lock.json',
+  ]);
+  assert.ok(problems.some((p) => /no package.json beside it/.test(p)),
+    `expected the stray lockfile to be named, got ${JSON.stringify(problems)}`);
+});
+
+test('a directory with both npm and pnpm lockfiles is reported', () => {
+  const { problems } = inspectRoot([
+    'Cargo.lock', 'pnpm-lock.yaml', 'Cargo.toml', 'package.json', 'pnpm-workspace.yaml',
+    'apps/a', 'plugins/x/backend/package.json',
+    'plugins/x/backend/package-lock.json', 'plugins/x/backend/pnpm-lock.yaml',
+  ]);
+  assert.ok(problems.some((p) => /one resolution per directory/.test(p)),
+    `expected the double resolution to be named, got ${JSON.stringify(problems)}`);
 });
 
 test('the real repository satisfies it', () => {

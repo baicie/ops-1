@@ -1,0 +1,1378 @@
+{
+  "ci.yml": {
+    "triggers": {
+      "pull_request": {
+        "paths": null
+      },
+      "push": {
+        "paths": null
+      }
+    },
+    "concurrency": {
+      "group": "${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && format('protected-{0}', github.run_id) || format('auto-{0}', github.ref) }}",
+      "cancelInProgress": "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
+    },
+    "permissions": [
+      "contents: read"
+    ],
+    "jobs": {
+      "scope": {
+        "needs": [],
+        "timeout": 5,
+        "if": null,
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          }
+        ]
+      },
+      "lint": {
+        "needs": [],
+        "timeout": 5,
+        "if": null,
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          }
+        ]
+      },
+      "rust": {
+        "needs": [],
+        "timeout": null,
+        "if": null,
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "run": "sudo apt-get update && sudo apt-get install -y postgresql-client"
+          },
+          {
+            "run": "cargo fmt --all -- --check"
+          },
+          {
+            "run": "cargo test --locked --workspace"
+          },
+          {
+            "run": "cargo clippy --locked --workspace --all-targets -- -D warnings"
+          }
+        ]
+      },
+      "web": {
+        "needs": [],
+        "timeout": null,
+        "if": null,
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "run": "pnpm install --frozen-lockfile"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/platform-client typecheck"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/ui typecheck"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/platform-console typecheck"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/ops-web typecheck"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/hello-web typecheck"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/data-catalog-web typecheck"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/data-integration-web typecheck"
+          },
+          {
+            "run": "node scripts/check-i18n.mjs"
+          },
+          {
+            "run": "node scripts/check-status-vocabulary.mjs"
+          },
+          {
+            "run": "node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json"
+          },
+          {
+            "run": "node --test scripts/check-ui-tokens.test.mjs"
+          },
+          {
+            "run": "node tests/ci/check-retired-paths.mjs"
+          },
+          {
+            "run": "node --test tests/ci/check-retired-paths.test.mjs"
+          },
+          {
+            "run": "node tests/ci/check-path-integrity.mjs"
+          },
+          {
+            "run": "node --test tests/ci/check-paths-filters.test.mjs"
+          },
+          {
+            "run": "node tests/ci/check-paths-filters.mjs"
+          },
+          {
+            "run": "node --test scripts/ci/ci-cost.test.mjs"
+          },
+          {
+            "run": "node --test tests/ci/check-root-hygiene.test.mjs"
+          },
+          {
+            "run": "node tests/ci/check-root-hygiene.mjs"
+          },
+          {
+            "run": "node --test tests/ci/check-standards-location.test.mjs"
+          },
+          {
+            "run": "node tests/ci/check-standards-location.mjs"
+          },
+          {
+            "run": "node --test scripts/check-ui-metrics.test.mjs"
+          },
+          {
+            "run": "node scripts/check-ui-metrics.mjs --manifest docs/design/ui-visual-v3/spec/route-manifest.json artifacts/ui/visual-v3/au"
+          },
+          {
+            "run": "node scripts/check-ui-metrics.mjs --matrix docs/design/ui-visual-v3/spec/matrix-manifest.json artifacts/ui/observability"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/platform-console build"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/ops-web build"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/hello-web build"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/data-catalog-web build"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/data-integration-web build"
+          },
+          {
+            "run": "node --check plugins/data-catalog/backend/server.mjs"
+          },
+          {
+            "run": "node --check plugins/data-integration/backend/server.mjs"
+          }
+        ]
+      },
+      "web-unit": {
+        "needs": [],
+        "timeout": null,
+        "if": null,
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "run": "pnpm install --frozen-lockfile"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/platform-client test"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/ui test"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/platform-console test"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/ops-web test"
+          }
+        ]
+      },
+      "zabbix-plugin": {
+        "needs": [],
+        "timeout": null,
+        "if": null,
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "run": "npm ci --prefix plugins/zabbix-source/backend"
+          }
+        ]
+      },
+      "b2-plugin-identity": {
+        "needs": [],
+        "timeout": null,
+        "if": null,
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "run": "npm ci --prefix plugins/data-catalog/backend"
+          },
+          {
+            "run": "npm ci --prefix plugins/data-integration/backend"
+          }
+        ]
+      },
+      "g13a-roundtrip": {
+        "needs": [
+          "scope"
+        ],
+        "timeout": null,
+        "if": "${{ needs.scope.outputs.acceptance == 'true' }}",
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "run": "sudo apt-get update && sudo apt-get install -y postgresql-client"
+          },
+          {
+            "run": "cargo build --locked -p opsweave-kernel"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "run": "npm ci --prefix plugins/zabbix-source/backend"
+          }
+        ]
+      },
+      "g13a1-gateway": {
+        "needs": [
+          "scope"
+        ],
+        "timeout": null,
+        "if": "${{ needs.scope.outputs.acceptance == 'true' }}",
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "run": "sudo apt-get update && sudo apt-get install -y postgresql-client"
+          },
+          {
+            "run": "cargo build --locked -p opsweave-kernel -p opsweave-node -p opsweave-opsctl"
+          },
+          {
+            "run": "./target/debug/opsctl keygen --out-dir keys"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "run": "npm ci --prefix plugins/zabbix-source/backend"
+          },
+          {
+            "run": "pnpm install --frozen-lockfile"
+          },
+          {
+            "run": "pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium"
+          }
+        ]
+      },
+      "g13b14-claim": {
+        "needs": [
+          "scope"
+        ],
+        "timeout": null,
+        "if": "${{ needs.scope.outputs.acceptance == 'true' }}",
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "run": "sudo apt-get update && sudo apt-get install -y postgresql-client"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "run": "pnpm install --frozen-lockfile"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/platform-console build"
+          },
+          {
+            "run": "pnpm --fail-if-no-match --filter @opsweave/ops-web build"
+          },
+          {
+            "run": "cargo build --locked -p opsweave-kernel"
+          },
+          {
+            "run": "pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium"
+          }
+        ]
+      },
+      "g13b16-effect": {
+        "needs": [
+          "scope"
+        ],
+        "timeout": null,
+        "if": "${{ needs.scope.outputs.acceptance == 'true' }}",
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "run": "sudo apt-get update && sudo apt-get install -y postgresql-client"
+          },
+          {
+            "run": "cargo build --locked -p opsweave-kernel"
+          }
+        ]
+      },
+      "g13b17-principal": {
+        "needs": [
+          "scope"
+        ],
+        "timeout": null,
+        "if": "${{ needs.scope.outputs.acceptance == 'true' }}",
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "run": "sudo apt-get update && sudo apt-get install -y postgresql-client"
+          },
+          {
+            "run": "cargo build --locked -p opsweave-kernel"
+          }
+        ]
+      },
+      "artifact-budget": {
+        "needs": [],
+        "timeout": null,
+        "if": null,
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "run": "node tests/ci/check-tracked-png-budget.mjs"
+          }
+        ]
+      },
+      "spec-coverage": {
+        "needs": [],
+        "timeout": null,
+        "if": null,
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "run": "node tests/ci/check-spec-coverage.mjs"
+          }
+        ]
+      },
+      "contracts": {
+        "needs": [],
+        "timeout": null,
+        "if": null,
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "actions/setup-python@v5"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "run": "pip install jsonschema pyyaml"
+          },
+          {
+            "run": "python3 tests/contract/validate_contracts.py"
+          }
+        ]
+      },
+      "platform-only": {
+        "needs": [],
+        "timeout": null,
+        "if": null,
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "run": "pnpm install --frozen-lockfile"
+          },
+          {
+            "run": "|"
+          }
+        ]
+      },
+      "platform-image-build": {
+        "needs": [],
+        "timeout": null,
+        "if": null,
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          }
+        ]
+      },
+      "runtime-image-build": {
+        "needs": [
+          "scope"
+        ],
+        "timeout": 40,
+        "if": "${{ needs.scope.outputs.image-build == 'true' }}",
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          }
+        ]
+      },
+      "ci-gate": {
+        "needs": [],
+        "timeout": 45,
+        "if": "always()",
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          }
+        ]
+      }
+    }
+  },
+  "data-foundation.yml": {
+    "triggers": {
+      "workflow_dispatch": {
+        "paths": null
+      },
+      "push": {
+        "paths": [
+          "apps/kernel/**",
+          "apps/node/**",
+          "apps/pipeline-worker/**",
+          "contracts/**",
+          "plugins/**",
+          "scripts/**",
+          "tests/acceptance/**",
+          "tests/ci/**",
+          "tests/runtime/**",
+          "tests/ui/**",
+          ".github/workflows/data-foundation.yml"
+        ]
+      },
+      "pull_request": {
+        "paths": [
+          "apps/kernel/**",
+          "apps/node/**"
+        ]
+      }
+    },
+    "concurrency": {
+      "group": "${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && format('protected-{0}', github.run_id) || format('auto-{0}', github.ref) }}",
+      "cancelInProgress": "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
+    },
+    "permissions": [
+      "contents: read"
+    ],
+    "jobs": {
+      "golden-path": {
+        "needs": [],
+        "timeout": 45,
+        "if": null,
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "run": "pnpm install --frozen-lockfile"
+          },
+          {
+            "run": "sudo apt-get update && sudo apt-get install -y postgresql-client"
+          },
+          {
+            "run": "pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium"
+          },
+          {
+            "run": "RUN_BROWSER_SMOKE=1 OPSWEAVE_CI_ALLOW_SHARED_DAEMON=1 tests/ci/data_foundation_ci.sh"
+          },
+          {
+            "uses": "actions/upload-artifact@v4"
+          },
+          {
+            "uses": "actions/upload-artifact@v4"
+          }
+        ]
+      },
+      "legacy-regression": {
+        "needs": [],
+        "timeout": 45,
+        "if": null,
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "uses": "actions/setup-go@v5"
+          },
+          {
+            "uses": "actions/setup-java@v4"
+          },
+          {
+            "run": "sudo apt-get update && sudo apt-get install -y maven"
+          },
+          {
+            "run": "pnpm install --frozen-lockfile"
+          },
+          {
+            "run": "|"
+          }
+        ]
+      }
+    }
+  },
+  "g12-acceptance.yml": {
+    "triggers": {
+      "workflow_dispatch": {
+        "paths": null
+      },
+      "pull_request": {
+        "paths": [
+          "apps/kernel/**",
+          "apps/platform-console/**",
+          "apps/ops-web/**",
+          "packages/**",
+          "contracts/**",
+          "tests/acceptance/g12_*.sh"
+        ]
+      },
+      "push": {
+        "paths": [
+          "apps/kernel/**",
+          "apps/platform-console/**",
+          "apps/ops-web/**",
+          "packages/**",
+          "tests/acceptance/g12_*.sh"
+        ]
+      }
+    },
+    "concurrency": {
+      "group": "${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && format('protected-{0}', github.run_id) || format('auto-{0}', github.ref) }}",
+      "cancelInProgress": "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
+    },
+    "permissions": [
+      "# Supersede the previous run for the same ref - but keep protected runs (a",
+      "contents: read"
+    ],
+    "jobs": {
+      "acceptance": {
+        "needs": [],
+        "timeout": 45,
+        "if": null,
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "run": "pnpm install --frozen-lockfile"
+          },
+          {
+            "run": "sudo apt-get update && sudo apt-get install -y postgresql-client"
+          },
+          {
+            "run": "bash tests/ci/g12_acceptance_ci.sh"
+          },
+          {
+            "uses": "actions/upload-artifact@v4"
+          },
+          {
+            "uses": "actions/upload-artifact@v4"
+          }
+        ]
+      }
+    }
+  },
+  "platform-linux-acceptance.yml": {
+    "triggers": {
+      "pull_request": {
+        "paths": null
+      },
+      "push": {
+        "paths": [
+          "apps/kernel/**",
+          "apps/node/**",
+          "deployments/**",
+          "tests/ci/**",
+          "tests/runtime/**",
+          ".github/workflows/platform-linux-acceptance.yml"
+        ]
+      },
+      "workflow_dispatch": {
+        "paths": null
+      }
+    },
+    "concurrency": {
+      "group": "${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && format('protected-{0}', github.run_id) || format('auto-{0}', github.ref) }}",
+      "cancelInProgress": "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
+    },
+    "permissions": null,
+    "jobs": {
+      "linux-runtime": {
+        "needs": [],
+        "timeout": 60,
+        "if": null,
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "actions/upload-artifact@v4"
+          }
+        ]
+      }
+    }
+  },
+  "plugin-lifecycle.yml": {
+    "triggers": {
+      "workflow_dispatch": {
+        "paths": null
+      },
+      "push": {
+        "paths": [
+          "apps/kernel/src/capabilities.rs",
+          "apps/node/**",
+          "apps/opsctl/**",
+          "plugins/**",
+          "scripts/assemble_plugin.py",
+          "scripts/build-plugins.sh",
+          "scripts/demo_common.sh",
+          "scripts/demo_up.sh",
+          "tests/ci/p001c13_*.sh",
+          "tests/ci/p001c_multilang_lifecycle.sh",
+          ".github/workflows/plugin-lifecycle.yml"
+        ]
+      },
+      "pull_request": {
+        "paths": [
+          "apps/kernel/**",
+          "apps/node/**",
+          "apps/opsctl/**",
+          "crates/**",
+          "contracts/**",
+          "plugins/**"
+        ]
+      }
+    },
+    "concurrency": {
+      "group": "${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && format('protected-{0}', github.run_id) || format('auto-{0}', github.ref) }}",
+      "cancelInProgress": "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
+    },
+    "permissions": [
+      "# Supersede the previous run for the same ref - but keep protected runs (a",
+      "contents: read"
+    ],
+    "jobs": {
+      "lifecycle": {
+        "needs": [],
+        "timeout": 45,
+        "if": null,
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "uses": "actions/setup-go@v5"
+          },
+          {
+            "uses": "actions/setup-java@v4"
+          }
+        ]
+      }
+    }
+  },
+  "release-certification.yml": {
+    "triggers": {
+      "workflow_dispatch": {
+        "paths": null
+      },
+      "push": {
+        "paths": null
+      }
+    },
+    "concurrency": {
+      "group": "release-certification-${{ github.run_id }}",
+      "cancelInProgress": "false"
+    },
+    "permissions": [
+      "#",
+      "# A certification does NOT re-run the suites. It reads what they",
+      "# A tag names a commit; certify what the tag points at, not HEAD.",
+      "# Bounded: a suite that has not answered within the budget is UNKNOWN,",
+      "# Certification is about what shipped. A commit that never reached main",
+      "# Per certification, never shared. See the header.",
+      "# The run id recorded in the receipt is the LATEST ci.yml run for this",
+      "# branch tip that will be force-pushed away.",
+      "# commit, which is the run whose `ci-gate` verdict the merge gate would",
+      "# have consulted. Recording this certification run instead would make",
+      "# is not certifiable, and saying so here is clearer than certifying a",
+      "# merge gate used.",
+      "# or did not run at all - re-running them under a different run id would",
+      "# produce evidence that is about a different process than the one the",
+      "# produced on this exact commit, and refuses if they have not finished",
+      "# the receipt cite a run that decided nothing.",
+      "# which is not a pass.",
+      "*[!0-9a-f]*|'') echo \"::error::sha must be 40 lowercase hex characters, got '$sha'\"; exit 1 ;;",
+      "- id: pick",
+      "- name: Upload the receipt",
+      "- name: Wait for the suites this commit produced",
+      "- name: Write the receipt",
+      "- uses: actions/checkout@v4",
+      "- uses: actions/checkout@v4",
+      "--image-digest \"${IMAGE_DIGEST:-}\" \\",
+      "--jq '[.check_runs[] | {name, s: (.conclusion // .status)}] | unique_by(.name) | .[] | \"\\(.name)=\\(.s)\"' 2>/dev/null || echo \"\")\"",
+      "--jq '[.workflow_runs[] | select(.path | endswith(\"/ci.yml\"))] | .[0].id' 2>/dev/null || echo \"\")\"",
+      "--out \"release-receipt-${SHA}.json\"",
+      "--repo \"$REPO\" --run \"$RUN\" --sha \"$SHA\" --ref \"$REF\" \\",
+      "BUDGET=\"${CERTIFY_WAIT_SECONDS:-2400}\"",
+      "EVENT: ${{ github.event_name }}",
+      "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
+      "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
+      "INPUT_SHA: ${{ inputs.sha }}",
+      "REF: ${{ needs.resolve.outputs.ref }}",
+      "REPO: ${{ github.repository }}",
+      "REPO: ${{ github.repository }}",
+      "RUN=\"$(gh api \"repos/$REPO/actions/runs?head_sha=$SHA&per_page=50\" \\",
+      "SHA: ${{ needs.resolve.outputs.sha }}",
+      "SHA: ${{ needs.resolve.outputs.sha }}",
+      "TAG_REF: ${{ github.ref }}",
+      "[ \"${#sha}\" -eq 40 ] || { echo \"::error::sha must be 40 characters, got ${#sha}\"; exit 1; }",
+      "actions: read",
+      "break",
+      "cancel-in-progress: false",
+      "case \"$sha\" in",
+      "certify:",
+      "checks: read",
+      "concurrency:",
+      "contents: read",
+      "done",
+      "echo \"::error::$pending check(s) still unfinished after ${BUDGET}s; UNKNOWN is not CERTIFIED\"",
+      "echo \"::error::no ci.yml run exists for $SHA; there is nothing to certify\"",
+      "echo \"::error::the check-run API returned nothing for $SHA; refusing to certify blind\"",
+      "echo \"certifying $sha (ref $ref)\"",
+      "echo \"ref=$ref\" >> \"$GITHUB_OUTPUT\"",
+      "echo \"sha=$sha\" >> \"$GITHUB_OUTPUT\"",
+      "else",
+      "env:",
+      "env:",
+      "env:",
+      "esac",
+      "exit 1",
+      "exit 1",
+      "exit 1",
+      "fetch-depth: 0",
+      "fetch-depth: 0",
+      "fi",
+      "fi",
+      "fi",
+      "fi",
+      "fi",
+      "git cat-file -e \"${sha}^{commit}\" 2>/dev/null \\",
+      "git merge-base --is-ancestor \"$sha\" origin/main \\",
+      "group: release-certification-${{ github.run_id }}",
+      "if [ \"$EVENT\" = \"push\" ]; then",
+      "if [ \"${pending:-0}\" -eq 0 ]; then",
+      "if [ $((SECONDS - started)) -ge \"$BUDGET\" ]; then",
+      "if [ -z \"$RUN\" ] || [ \"$RUN\" = \"null\" ]; then",
+      "if [ -z \"$states\" ]; then",
+      "if-no-files-found: error",
+      "jobs:",
+      "name: certify ${{ needs.resolve.outputs.sha }}",
+      "name: release-receipt-${{ needs.resolve.outputs.sha }}",
+      "name: resolve the commit to certify",
+      "needs: resolve",
+      "node scripts/release-receipt.mjs write \\",
+      "outputs:",
+      "path: release-receipt-*.json",
+      "pending=\"$(printf '%s\\n' \"$states\" | grep -cE '=(queued|in_progress|waiting|requested|pending)$' || true)\"",
+      "printf '%s\\n' \"$states\" | sort",
+      "ref: ${{ needs.resolve.outputs.sha }}",
+      "ref: ${{ steps.pick.outputs.ref }}",
+      "ref=\"$TAG_REF\"",
+      "ref=\"refs/heads/main\"",
+      "resolve:",
+      "retention-days: 90",
+      "run: |",
+      "run: |",
+      "run: |",
+      "runs-on: ubuntu-24.04",
+      "runs-on: ubuntu-24.04",
+      "set -euo pipefail",
+      "set -euo pipefail",
+      "set -euo pipefail",
+      "sha: ${{ steps.pick.outputs.sha }}",
+      "sha=\"$(git rev-parse \"refs/tags/${TAG_REF#refs/tags/}^{commit}\")\"",
+      "sha=\"$INPUT_SHA\"",
+      "sleep 30",
+      "started=$SECONDS",
+      "states=\"$(gh api \"repos/$REPO/commits/$SHA/check-runs?per_page=100\" \\",
+      "steps:",
+      "steps:",
+      "timeout-minutes: 5",
+      "timeout-minutes: 90",
+      "uses: actions/upload-artifact@v4",
+      "while :; do",
+      "with:",
+      "with:",
+      "with:",
+      "|| { echo \"::error::$sha is not a commit in this repository\"; exit 1; }",
+      "|| { echo \"::error::$sha is not an ancestor of origin/main\"; exit 1; }"
+    ],
+    "jobs": {
+      "resolve": {
+        "needs": [],
+        "timeout": 5,
+        "if": null,
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          }
+        ]
+      },
+      "certify": {
+        "needs": [
+          "resolve"
+        ],
+        "timeout": 90,
+        "if": null,
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          }
+        ]
+      }
+    }
+  },
+  "reliability.yml": {
+    "triggers": {
+      "pull_request": {
+        "paths": null
+      },
+      "push": {
+        "paths": [
+          "tests/reliability/**",
+          ".github/workflows/reliability.yml"
+        ]
+      }
+    },
+    "concurrency": {
+      "group": "${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && format('protected-{0}', github.run_id) || format('auto-{0}', github.ref) }}",
+      "cancelInProgress": "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
+    },
+    "permissions": null,
+    "jobs": {
+      "quality-faults": {
+        "needs": [],
+        "timeout": null,
+        "if": null,
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "uses": "actions/upload-artifact@v4"
+          }
+        ]
+      }
+    }
+  },
+  "runtime-conformance.yml": {
+    "triggers": {
+      "workflow_dispatch": {
+        "paths": null
+      },
+      "push": {
+        "paths": [
+          "apps/kernel/src/capabilities.rs",
+          "contracts/**",
+          "plugins/**",
+          "tests/ci/p001c_multilang_lifecycle.sh",
+          "tests/contract/**",
+          ".github/workflows/runtime-conformance.yml"
+        ]
+      },
+      "pull_request": {
+        "paths": [
+          "plugins/**",
+          "tests/contract/**",
+          "tests/ci/p001c_conformance.sh",
+          "contracts/**",
+          "apps/kernel/src/gateway.rs",
+          "apps/kernel/src/capabilities.rs",
+          "apps/node/src/runtime.rs",
+          ".github/workflows/runtime-conformance.yml"
+        ]
+      }
+    },
+    "concurrency": {
+      "group": "runtime-conformance-${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && format('protected-{0}', github.run_id) || format('auto-{0}', github.ref) }}",
+      "cancelInProgress": "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
+    },
+    "permissions": null,
+    "jobs": {
+      "conformance": {
+        "needs": [],
+        "timeout": 40,
+        "if": null,
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "dtolnay/rust-toolchain@stable"
+          },
+          {
+            "uses": "Swatinem/rust-cache@v2"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          },
+          {
+            "uses": "actions/setup-go@v5"
+          },
+          {
+            "uses": "actions/setup-java@v4"
+          }
+        ]
+      }
+    }
+  },
+  "staging-preview.yml": {
+    "triggers": {
+      "push": {
+        "paths": null
+      },
+      "schedule": {
+        "paths": null
+      },
+      "workflow_dispatch": {
+        "paths": null
+      }
+    },
+    "concurrency": {
+      "group": "\"staging-preview-${{ (inputs.verify_only == true) && format('verify-{0}', inputs.sha || github.sha) || (github.event_name == 'schedule' && 'nightly') || 'deploy' }}\"",
+      "cancelInProgress": "true"
+    },
+    "permissions": [
+      "# Two buckets, one staging host. The group is keyed by what the run does, not by the workflow name:",
+      "contents: read",
+      "packages: write",
+      "pull-requests: write"
+    ],
+    "jobs": {
+      "plan": {
+        "needs": [],
+        "timeout": 5,
+        "if": null,
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": []
+      },
+      "build": {
+        "needs": [],
+        "timeout": 60,
+        "if": "${{ inputs.verify_only != true }}",
+        "runsOn": "ubuntu-24.04",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "docker/setup-buildx-action@v3"
+          },
+          {
+            "uses": "docker/login-action@v3"
+          }
+        ]
+      },
+      "deploy": {
+        "needs": [
+          "build"
+        ],
+        "timeout": 40,
+        "if": "${{ inputs.verify_only != true }}",
+        "runsOn": "ubuntu-24.04",
+        "environment": "staging",
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          }
+        ]
+      },
+      "smoke": {
+        "needs": [
+          "build",
+          "deploy",
+          "plan"
+        ],
+        "timeout": 70,
+        "if": "always() && needs.plan.result == 'success' && (inputs.verify_only == true || needs.deploy.result == 'success')",
+        "runsOn": "ubuntu-24.04",
+        "environment": "staging",
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          }
+        ]
+      },
+      "seeded_studio": {
+        "needs": [
+          "build",
+          "deploy",
+          "plan",
+          "smoke"
+        ],
+        "timeout": 20,
+        "if": "${{ always() && needs.plan.outputs.tier == 'full' && needs.smoke.outputs.mode == 'playwright' && (inputs.verify_only == true || needs.deploy.result == 'success') }}",
+        "runsOn": "ubuntu-24.04",
+        "environment": "staging",
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          }
+        ]
+      },
+      "seeded_visual_layout": {
+        "needs": [
+          "build",
+          "deploy",
+          "plan",
+          "smoke"
+        ],
+        "timeout": 20,
+        "if": "${{ always() && needs.plan.outputs.tier == 'full' && needs.smoke.outputs.mode == 'playwright' && (inputs.verify_only == true || needs.deploy.result == 'success') }}",
+        "runsOn": "ubuntu-24.04",
+        "environment": "staging",
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          }
+        ]
+      },
+      "seeded_visual": {
+        "needs": [
+          "build",
+          "deploy",
+          "plan",
+          "smoke"
+        ],
+        "timeout": 30,
+        "if": "${{ always() && needs.plan.outputs.tier == 'full' && needs.smoke.outputs.mode == 'playwright' && (inputs.verify_only == true || needs.deploy.result == 'success') }}",
+        "runsOn": "ubuntu-24.04",
+        "environment": "staging",
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "pnpm/action-setup@v4"
+          },
+          {
+            "uses": "actions/setup-node@v4"
+          }
+        ]
+      },
+      "record": {
+        "needs": [
+          "build",
+          "deploy",
+          "plan",
+          "seeded_studio",
+          "seeded_visual",
+          "seeded_visual_layout",
+          "smoke"
+        ],
+        "timeout": 10,
+        "if": "always()",
+        "runsOn": "ubuntu-24.04",
+        "environment": "staging",
+        "steps": []
+      },
+      "report": {
+        "needs": [
+          "build",
+          "deploy",
+          "record",
+          "smoke"
+        ],
+        "timeout": 10,
+        "if": "always()",
+        "runsOn": "ubuntu-24.04",
+        "environment": "staging",
+        "steps": []
+      }
+    }
+  },
+  "typed-pipeline-contracts.yml": {
+    "triggers": {
+      "push": {
+        "paths": [
+          "contracts/**",
+          "tests/contract/**",
+          "docs/architecture/0.0.3-typed-pipeline-rfc.md",
+          "docs/adr/ADR-013-typed-pipeline-and-durable-jobs.md"
+        ]
+      },
+      "pull_request": {
+        "paths": [
+          "contracts/**",
+          "tests/contract/**"
+        ]
+      }
+    },
+    "concurrency": {
+      "group": "${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && format('protected-{0}', github.run_id) || format('auto-{0}', github.ref) }}",
+      "cancelInProgress": "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
+    },
+    "permissions": null,
+    "jobs": {
+      "typed-pipeline-contracts": {
+        "needs": [],
+        "timeout": null,
+        "if": null,
+        "runsOn": "ubuntu-latest",
+        "environment": null,
+        "steps": [
+          {
+            "uses": "actions/checkout@v4"
+          },
+          {
+            "uses": "actions/setup-python@v5"
+          },
+          {
+            "run": "python -m pip install 'jsonschema>=4.20,<5' 'cryptography>=42,<46'"
+          },
+          {
+            "run": "python tests/contract/validate_typed_pipeline.py"
+          }
+        ]
+      }
+    }
+  }
+}

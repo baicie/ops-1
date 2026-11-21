@@ -63,19 +63,43 @@ TASK-04 假设 `artifacts/ui*` 是「正式视觉回归基线」。**这个前�
 
 ## 4. CI 效率：测量结果与任务书假设相反
 
-### 决定性数字
+> **本节 2026-11-22 已更正。** 原文写「排队开销为零，因此 PR 端到端时间 ≡
+> `golden-path` 时长」。前半句是错的，后半句只在 workflow 粒度成立。见下。
 
-按 push 分组，比较 fanout 跨度与最长单条 workflow：
+### Workflow 级：没有启动偏差（OBSERVED）
+
+按 `headSha + event` 分组（原版按分钟分组，会把同一分钟的两次 push 混成一组）：
 
 ```text
-span=1701s  longest=1701s  queue-overhead=0s
-span=1426s  longest=1426s  queue-overhead=0s
-span= 482s  longest= 482s  queue-overhead=0s
+span=1701s  longest=1701s  startSkew=0s
+span=1426s  longest=1426s  startSkew=0s
+span= 482s  longest= 482s  startSkew=0s
 ```
 
-**六条 workflow 同时启动，排队开销为零。因此 PR 端到端时间 ≡ `golden-path` 的时长。**
+`startSkew` 是同一 push 内各 workflow 创建时间的跨度。**它测的不是 runner 队列**：
+一个 job 在队列里等 90 秒，它的 workflow 的 `created_at` 仍然早于它，所以
+`span - longest` 完全看不到排队。
 
-这一条否决了大部分提案：**任何不缩短 `golden-path` 的优化，对完成时间的影响是零。**
+### Job 级：排队是真实的，最长超过 10 分钟（OBSERVED）
+
+`node scripts/ci/ci-cost.mjs queue --limit 40`（`started_at - created_at`）：
+
+| job | n | p50 | p90 | max |
+|---|---:|---:|---:|---:|
+| `zabbix-plugin` | 8 | 41s | 627s | 627s |
+| `web-unit` | 8 | 19s | 494s | 494s |
+| `artifact-budget` | 9 | 12s | 480s | 480s |
+| `spec-coverage` | 8 | 6s | 468s | 468s |
+
+（这个区间还包含 `needs:` 等待，所以它是排队的**上界**。）
+
+### 所以「不可能更快」这个结论被撤回
+
+原文说「任何不缩短 `golden-path` 的优化，对完成时间的影响都是零」。正确的说法是：
+
+- `golden-path` 仍是**最长**的那条 workflow，所以它决定 PR 的完成时刻；
+- 但**是 workflow 级别的结论**，不是「其他优化没用」；
+- job 排队本身是真实成本，减少 job 数或缩短 job 时长都可能改变实际等待。
 
 ### `golden-path` 的构成
 
