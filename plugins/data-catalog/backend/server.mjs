@@ -260,8 +260,49 @@ function validateRecord(fields, record) {
   return null;
 }
 
+// MIGRATION MUST BE SERIALISED ACROSS INSTANCES, BECAUSE IF NOT EXISTS IS NOT
+// ATOMIC.
+//
+// Two `data-catalog` processes starting against one database run this function
+// concurrently. `CREATE TABLE IF NOT EXISTS` reads the catalog and then creates
+// the table; two transactions that both read "absent" both try to create it,
+// and the loser fails with:
+//
+//   duplicate key value violates unique constraint "pg_type_typname_nsp_index"
+//
+// MEASURED 2026-11-21: `b2_plugin_identity_attack` and
+// `b2_workspace_isolation` started simultaneously produce exactly that, and
+// the plugin exits 1 during `initDb` - so the instance never becomes READY.
+// The finding was registered as a port race (B-38); it is not one. The port
+// allocator was measured clean over 200 concurrent rounds, and the plugin's own
+// stderr named the pg_type index.
+//
+// This is a production defect, not a test artifact: two replicas of a
+// data-catalog deployment starting at once have the same failure, and the one
+// that loses exits rather than retrying.
+//
+// `zabbix-source` already did this (`storage.mjs`, advisory lock around its
+// migrations). This is the same technique on the same hook: `pg_advisory_lock`
+// is session-scoped, so it is taken and released on one client rather than
+// through the pool, which would hand the release to a different connection.
 async function initDb() {
-  await pool.query(`
+  const client = await pool.connect();
+  try {
+    // The key is namespace-wide per plugin. `hashtext` keeps it a stable int
+    // without inventing a second constant to keep in sync.
+    await client.query("SELECT pg_advisory_lock(hashtext('opsweave.data-catalog.migrations'))");
+    await migrateSchema(client);
+  } finally {
+    // Released before the client goes back to the pool, and failure to release
+    // is not worth masking the migration error with.
+    await client.query("SELECT pg_advisory_unlock(hashtext('opsweave.data-catalog.migrations'))").catch(() => {});
+    client.release();
+  }
+  ready = true;
+}
+
+async function migrateSchema(client) {
+  await client.query(`
     CREATE TABLE IF NOT EXISTS catalog_datasets (
       dataset_id uuid PRIMARY KEY,
       name text NOT NULL UNIQUE,
@@ -428,7 +469,10 @@ async function initDb() {
   // (which migration 0022 did for every account that existed then) keeps seeing
   // its data. It grants nobody anything new: a caller that was not a member of
   // legacy could not read business rows before this change either.
-  await pool.query(`
+  // needs the SAME connection the advisory lock is held on, or the lock
+  // protects nothing. This was `pool.query` and the lock would have been a
+  // decoration.
+  await client.query(`
     ALTER TABLE catalog_datasets ADD COLUMN IF NOT EXISTS workspace_id uuid;
     UPDATE catalog_datasets
        SET workspace_id = '00000000-0000-4000-8000-000000000001'
@@ -481,7 +525,6 @@ async function initDb() {
       END IF;
     END $ing$;
   `);
-  ready = true;
 }
 
 function publicSourceSummary(source) {
