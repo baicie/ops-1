@@ -167,7 +167,7 @@ jobs:
           # these scripts live one level down (`scripts/tests/`,
           # `tests/acceptance/lib/`) and a bare `dir/*.sh` silently skips them:
           # measured, both existed and neither had ever been linted.
-          find tests/acceptance tests/ci scripts -name '*.sh' -type f -print0 \
+          find tests/acceptance tests/ci tests/scripts scripts -name '*.sh' -type f -print0 \
             | xargs -0 shellcheck --severity=error -x
 
   rust:
@@ -316,6 +316,22 @@ jobs:
       # this gate reported zero references. The staging image only broke at merge
       # time, because no PR job builds it. One case here is that exact file shape.
       - run: node --test tests/ci/check-retired-paths.test.mjs
+      # WRITTEN, PASSING, AND RUN BY NOTHING.
+      #
+      # `deploy-served-sha.test.sh` stubs docker/curl/flock/stat on PATH and
+      # drives `scripts/deploy-staging.sh` end to end - 26 assertions covering
+      # the served-commit gate, the rollback path and `--status` being
+      # read-only. It needs no host, no daemon and no root, so there was never a
+      # reason it could not run here.
+      #
+      # Measured 2026-11-21: it passed 26/26 the first time anyone ran it, and a
+      # repository-wide grep found exactly one mention - a dated design document
+      # that says "不可假定尚未修复" about this very file. A passing guard that
+      # runs nowhere is a gate that is off. Moved from `scripts/tests/` to
+      # `tests/scripts/` so production and test code are separated, which is the
+      # shape `tests/acceptance` and `tests/ci` already use.
+      - name: staging deploy gate (no host, no daemon, no root)
+        run: bash tests/scripts/deploy-served-sha.test.sh
       # Path integrity: every path a build, script or config names must exist.
       #
       # This is the other half of the retired-path gate. That one catches a live
@@ -327,6 +343,13 @@ jobs:
       # It prints its file count and the number of Dockerfile contexts it could
       # not resolve, so a pass cannot mean "I read nothing".
       - run: node tests/ci/check-path-integrity.mjs
+      # A paths filter naming a file that does not exist fails SILENTLY: the
+      # workflow does not run, no check appears, and ci-gate reports
+      # delegated-absent far from the cause. `check-path-integrity` reads `run:`
+      # lines; a `paths:` entry is not an invocation and never appeared there.
+      # Its first run found two real entries: `tests/acceptance/g11_*.sh`,
+      # a file `git log --all --diff-filter=A` proves was never added.
+      - run: node tests/ci/check-paths-filters.mjs
       # Root hygiene: the top level stays legible, build output stays out of the
       # index, and one ecosystem keeps one lockfile. An unapproved directory is
       # reported WITH how to approve it - a project that cannot add a top-level
