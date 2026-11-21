@@ -141,6 +141,9 @@
             "run": "node --test scripts/ci/ci-cost.test.mjs"
           },
           {
+            "run": "node --test tests/ci/workflow-snapshot.test.mjs"
+          },
+          {
             "run": "node --test tests/ci/check-root-hygiene.test.mjs"
           },
           {
