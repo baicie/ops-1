@@ -3,7 +3,7 @@
 - 状态：Accepted（G13-A.2）
 - 日期：2026-11-06
 - 基线：#40 `b2d635b`（基于 #38 `99fd9b2`）
-- 前置：[ADR-015](ADR-015-evidence-attestation-and-telemetry-sources.md)、[ADR-016](ADR-016-g13-source-persistence-scoped-identity-and-evidence-content.md)、`rules/03-security.md`
+- 前置：[ADR-015](ADR-015-evidence-attestation-and-telemetry-sources.md)、[ADR-016](ADR-016-g13-source-persistence-scoped-identity-and-evidence-content.md)、`docs/standards/03-security.md`
 - 相关实现：`plugins/zabbix-source/backend/credential-binding.mjs`、`server.mjs`、`apps/kernel/src/config.rs`、`apps/kernel/src/capabilities.rs`
 
 ## 1. 背景

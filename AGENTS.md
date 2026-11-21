@@ -1,6 +1,6 @@
 # OpsWeave 项目协作总规约（平台无关）
 
-本规约适用于人类研发者与任何代码生成/执行助手，不依赖某一编辑器、Agent 产品或云厂商。严格程度：**MUST** 不可违反；**SHOULD** 默认遵循，例外须 ADR；**MAY** 可选。所有实现必须遵循 `rules/` 及 `docs/` 的架构基线。
+本规约适用于人类研发者与任何代码生成/执行助手，不依赖某一编辑器、Agent 产品或云厂商。严格程度：**MUST** 不可违反；**SHOULD** 默认遵循，例外须 ADR；**MAY** 可选。所有实现必须遵循 `docs/standards/` 及 `docs/` 的架构基线。
 
 ## 工作步骤（MUST）
 1. 读取相关设计文档/ADR，先列出受影响的契约、模块、权限与迁移。
@@ -9,7 +9,7 @@
 4. 测试必须覆盖成功、拒绝、超时、失联、升级失败、恢复、权限变更；报告真实运行过的命令与结果。
 5. 若 UI 有变化，必须提交交互状态矩阵和真实浏览器截图，手工审查 1440/1024/390 宽度与明暗主题。
 6. 完成后更新实现状态、风险清单、迁移说明和变更摘要；不得伪造通过率、生产就绪声明。
-7. **每次 PR 合入后必须清理分支与 worktree**（MUST）：删除**所有已合入**的本地与远端分支，不止当次那一条；移除已合入的 worktree 并 `git worktree prune`。判定"已合入"**不得**用 `git rev-list --count` 或 `git log --grep`——本仓库只允许 squash 合入，分支永远显示 `ahead=0` 而树仍不同。正确做法：取该分支相对 `git merge-base origin/main <branch>` 的每个改动文件，比对 `git rev-parse <branch>:<file>` 与 `git rev-parse origin/main:<file>`，全部一致才可删；并确认对应 PR 为 `MERGED` 而非 `CLOSED`。详见 `rules/08-docs-and-workflow.md`。
+7. **每次 PR 合入后必须清理分支与 worktree**（MUST）：删除**所有已合入**的本地与远端分支，不止当次那一条；移除已合入的 worktree 并 `git worktree prune`。判定"已合入"**不得**用 `git rev-list --count` 或 `git log --grep`——本仓库只允许 squash 合入，分支永远显示 `ahead=0` 而树仍不同。正确做法：取该分支相对 `git merge-base origin/main <branch>` 的每个改动文件，比对 `git rev-parse <branch>:<file>` 与 `git rev-parse origin/main:<file>`，全部一致才可删；并确认对应 PR 为 `MERGED` 而非 `CLOSED`。详见 `docs/standards/08-docs-and-workflow.md`。
 
 ## 前端与国际化（MUST）
 - 前端统一 **Vite + React + TypeScript + Tailwind CSS + shadcn/ui**；组件以开源 `shadcn-admin` 模板的既有实现为参考，按 shadcn 的 copy-in 模式进仓库（**G14.2 起为共享包 `packages/ui/src/`**，平台控制台与运维应用共同引用），不引运行时组件包；禁止并列引入 MUI/AntD/Chakra 等第二套 UI 框架。
@@ -38,7 +38,7 @@
 - 所有依赖与容器制品通过锁文件/摘要/可重复构建管理，升级单独审查。
 
 ## 规则索引
-- `rules/01-architecture.md`；`02-plugin-runtime.md`；`03-security.md`；`04-distributed.md`；`05-data.md`；`06-ui-ux.md`；`07-testing-release.md`；`08-docs-and-workflow.md`；`11-refactor-retirement-and-cleanup.md`。
+- `docs/standards/01-architecture.md`；`02-plugin-runtime.md`；`03-security.md`；`04-distributed.md`；`05-data.md`；`06-ui-ux.md`；`07-testing-release.md`；`08-docs-and-workflow.md`；`11-refactor-retirement-and-cleanup.md`。
 - 任务专用流程位于 `docs/blueprint/skills/*/SKILL.md`，任何团队成员均可手工遵循。
 
 ## 2026-10-22 OCI 多语言增补（与原规约同等效力）
@@ -47,4 +47,4 @@
 - 发布包 Backend Image、Web 静态资产索引、Registry ZIP Bundle 属于不同受信内容；禁止自引用 ZIP 哈希或误用 Tag。
 - Rootless Docker Node Adapter 是 0.0.1 参考实现，不能被业务容器获取 socket；cgroup 资源/用户权限与网络隔离必须实测。
 - 发布到真实两节点前必须通过 [OCI Release Review](docs/blueprint/skills/oci-release-review/SKILL.md) 和 [Multi-language Conformance](docs/blueprint/skills/multilang-conformance/SKILL.md)。
-- 新增平台无关强制 Rules：`rules/09-oci-supply-chain.md` 与 `rules/10-language-agnostic.md`；新增 0.0.1 子任务见 `plan/04-001-oci-multilang-acceptance.md`。
+- 新增平台无关强制 Rules：`docs/standards/09-oci-supply-chain.md` 与 `docs/standards/10-language-agnostic.md`；新增 0.0.1 子任务见 `plan/04-001-oci-multilang-acceptance.md`。

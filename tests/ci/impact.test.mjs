@@ -25,7 +25,7 @@ function on(files) {
 test('A low-risk documentation change runs no acceptance suite', () => {
   assert.deepEqual(on(['docs/adr/ADR-023.md']), []);
   assert.deepEqual(on(['README.md']), []);
-  assert.deepEqual(on(['docs/ci/baseline.md', 'rules/03-security.md']), []);
+  assert.deepEqual(on(['docs/ci/baseline.md', 'docs/standards/03-security.md']), []);
 });
 
 test('BUT the gate still exists: a docs change is ignored, not unmapped', () => {

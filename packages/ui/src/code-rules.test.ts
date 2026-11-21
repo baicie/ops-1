@@ -97,7 +97,7 @@ function sourceText(): Map<string, string> {
       }
     })(root);
   }
-  // A gate that scanned nothing is a failure, not a pass (rules/11).
+  // A gate that scanned nothing is a failure, not a pass (docs/standards/11-refactor-retirement-and-cleanup.md).
   if (files.size === 0) throw new Error('sourceText: scanned 0 files');
   return files;
 }

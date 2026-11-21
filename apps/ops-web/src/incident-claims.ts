@@ -65,7 +65,7 @@ export function claimQueueState(input: {
 
 /**
  * The stable error code decides the sentence; the kernel's English message is never
- * rendered (rules/06). A code with no copy is reported as the code plus a generic
+ * rendered (docs/standards/06-ui-ux.md). A code with no copy is reported as the code plus a generic
  * sentence, which is true and translatable, instead of a server sentence in one language.
  */
 export function claimFailureKey(code: string | null): MessageKey | null {

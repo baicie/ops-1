@@ -17,7 +17,7 @@ import { adminSeed, createAccount as createSeededAccount } from './support/accou
  *   * every account it needs is created through the admin API, so it needs only the admin
  *     credentials below. Nothing is read from a fixture and no response is intercepted.
  *
- * Selectors are data attributes and roles only - never localized copy (rules/06) - so the same
+ * Selectors are data attributes and roles only - never localized copy (docs/standards/06-ui-ux.md) - so the same
  * spec runs with the shell in English or Chinese.
  */
 

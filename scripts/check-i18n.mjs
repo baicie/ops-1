@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Message-catalog gate for the Web shell (AGENTS.md「前端与国际化」, rules/06-ui-ux.md).
+ * Message-catalog gate for the Web shell (AGENTS.md「前端与国际化」, docs/standards/06-ui-ux.md).
  *
  * Checks, in this order:
  *   1. every catalog is valid JSON with `<namespace>.<key>` style keys and non-empty values;
@@ -28,7 +28,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
  * The gate previously scanned one application. Now that the design system, the
  * shared client and two applications are separate packages, scanning only one of
  * them would let a hardcoded string ship in any of the others - the exact hole
- * rules/06 exists to close, made bigger by splitting the codebase. A new
+ * docs/standards/06-ui-ux.md exists to close, made bigger by splitting the codebase. A new
  * workspace package must be added here, and the list is deliberately explicit so
  * forgetting is a visible omission rather than a silent one.
  */
@@ -39,7 +39,7 @@ const SOURCE_ROOTS = [
   join(ROOT, 'packages', 'platform-client', 'src'),
 ];
 
-// Fail closed (rules/11): a `.filter(existsSync)` here would silently drop a renamed package,
+// Fail closed (docs/standards/11-refactor-retirement-and-cleanup.md): a `.filter(existsSync)` here would silently drop a renamed package,
 // and the keys used only in that package would then be reported "unused" - a wrong failure at
 // best, and at worst a whole application exempt from the gate with nothing saying so.
 const missingRoots = SOURCE_ROOTS.filter((dir) => !statSync(dir, { throwIfNoEntry: false })?.isDirectory());

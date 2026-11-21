@@ -76,7 +76,7 @@
 
 两个刻意的设计约束：
 
-1. **`content_ref` 不允许是内联正文。** §12.4 要求 Evidence 带 `digest`/`provenance`；把 payload 写进 Kernel 会让证据无界增长，且 D1 没有配额与保留策略。同时 **Kernel 永不解析/抓取 `content_ref`**：没有任何 `reqwest` 调用，所以不存在 SSRF 面（`rules/03-security.md`）。
+1. **`content_ref` 不允许是内联正文。** §12.4 要求 Evidence 带 `digest`/`provenance`；把 payload 写进 Kernel 会让证据无界增长，且 D1 没有配额与保留策略。同时 **Kernel 永不解析/抓取 `content_ref`**：没有任何 `reqwest` 调用，所以不存在 SSRF 面（`docs/standards/03-security.md`）。
 2. **`trust` 是防造假字段。** 没有它，一条手写 `OPERATOR_NOTE` 与一条来源系统盖章的指标快照在库里完全等价，UI 无法区分，§12.5"缺失状态要体现，不可伪造"就不成立。
 
 ### 2.3 Verdict（`kernel.incident_verdicts`）

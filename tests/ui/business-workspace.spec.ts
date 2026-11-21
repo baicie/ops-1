@@ -11,7 +11,7 @@ import { expect, test, type Page } from '@playwright/test';
 //     / 404 are driven below by real HTTP statuses and real payloads (the extension list and
 //     the kernel version probe are the two business-safe interfaces that exist).
 //
-// Selectors are hrefs, data-attributes and data-testids only - never localized copy (rules/06).
+// Selectors are hrefs, data-attributes and data-testids only - never localized copy (docs/standards/06-ui-ux.md).
 
 const EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';

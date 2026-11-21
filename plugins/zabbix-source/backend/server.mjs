@@ -1,13 +1,13 @@
 // OpsWeave Zabbix telemetry source - Plugin Runtime HTTP/JSON v1.
 //
 // The plugin owns everything Zabbix-specific; the Kernel never learns what
-// Zabbix is (ADR-006, rules/01). The surface is contracts/openapi/
+// Zabbix is (ADR-006, docs/standards/01-architecture.md). The surface is contracts/openapi/
 // zabbix-source-v1.yaml and the data semantics are in zabbix.mjs.
 //
 // Secrets: a source stores a secretref, never a token. The token is resolved
 // per call from the plugin secret store and lives in a local variable for the
 // duration of that call. It is not stored, not logged, not echoed in an error
-// body and not accepted in a URL (rules/03).
+// body and not accepted in a URL (docs/standards/03-security.md).
 //
 // Identity: only Kernel-signed contexts are accepted (identity.mjs). The bare
 // x-opsweave-user-role header is not read: G10's R1 showed that trusting it is
@@ -379,7 +379,7 @@ export function createPlugin(options) {
     }
     if (url.username || url.password) {
       // A credential in a URL ends up in logs and metrics labels. Refused at the
-      // boundary rather than stripped silently (rules/03).
+      // boundary rather than stripped silently (docs/standards/03-security.md).
       throw Object.assign(
         new Error('endpoint must not carry credentials; use a credential reference'),
         { status: 400, code: 'CREDENTIAL_IN_URL' },

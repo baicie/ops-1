@@ -17,7 +17,7 @@ module.exports = {
   darkMode: ['class', '[data-theme="dark"]'],
   // preflight is disabled on purpose: src/styles.css already ships the global reset plus
   // control typography for the 20 pages that have not been migrated yet. Re-normalising
-  // headings/lists/tables/forms in one shot would be the big-bang rewrite rules/06 forbids.
+  // headings/lists/tables/forms in one shot would be the big-bang rewrite docs/standards/06-ui-ux.md forbids.
   // Copy-in components therefore carry their own border-style/border-width classes.
   corePlugins: { preflight: false },
   theme: {

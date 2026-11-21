@@ -6,7 +6,7 @@ import { expect, test, type Page } from '@playwright/test';
 // entries it points at - the application is never modified for a test, and the payload has
 // exactly the shape the server contract defines (`navigation.item.v2` / `route.page.v2`,
 // with `navigation.item.v1` kept in the same response). Selectors are hrefs and
-// data-testids only, never localized copy (rules/06).
+// data-testids only, never localized copy (docs/standards/06-ui-ux.md).
 
 const EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';

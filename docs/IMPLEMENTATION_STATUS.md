@@ -321,7 +321,7 @@ application holds the ops grant; the existing surface gate is unchanged.
 
 ## G14.2 cleanup and the console route regression (2026-11-09)
 
-Authority: [ADR-022](adr/ADR-022-platform-core-and-applications.md), [rules/11](../rules/11-refactor-retirement-and-cleanup.md).
+Authority: [ADR-022](adr/ADR-022-platform-core-and-applications.md), [docs/standards/11-refactor-retirement-and-cleanup.md](../docs/standards/11-refactor-retirement-and-cleanup.md).
 
 The split (`461d4da`) moved the code but left references to the deleted path and, in
 two gates, left checks that pass while reading nothing. Rules 11 now requires the
@@ -340,7 +340,7 @@ first of them in CI.
 | `tests/ci/g13a1_gateway_e2e.sh` | hand-run instructions named the deleted package | names `@opsweave/platform-console` |
 | `scripts/check-i18n.mjs` | stale comment; missing root silently filtered out | comment fixed; missing root now **fails** |
 | `packages/ui/src/code-rules.test.ts` | A5 scanned `pages/`, which no longer exists | scans page modules of both apps |
-| `README.md`, `rules/06-ui-ux.md` | described the deleted app | describe the two apps and two packages |
+| `README.md`, `docs/standards/06-ui-ux.md` | described the deleted app | describe the two apps and two packages |
 
 **Fixed — gates that passed without reading anything.**
 

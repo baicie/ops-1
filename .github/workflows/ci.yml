@@ -305,7 +305,7 @@ jobs:
       # on-scale one stays legal (code-rules B6), a budget key no rule emits is an error, and a
       # stylesheet that matches zero spacing declarations fails rather than passing.
       - run: node --test scripts/check-ui-tokens.test.mjs
-      # No live file may name a retired path (rules/11). The pre-G14.2 web package was deleted in
+      # No live file may name a retired path (docs/standards/11-refactor-retirement-and-cleanup.md). The pre-G14.2 web package was deleted in
       # 461d4da and eight executables kept building or serving it; pnpm exits 0 on a filter that
       # matches nothing, so four harnesses were green while building zero bundles. This check
       # fails closed on a missing scan root and prints its file count, so a pass cannot be vacuous.
@@ -327,6 +327,12 @@ jobs:
       # It prints its file count and the number of Dockerfile contexts it could
       # not resolve, so a pass cannot mean "I read nothing".
       - run: node tests/ci/check-path-integrity.mjs
+      # The standards moved to docs/standards/. This asserts the three things
+      # path integrity cannot see: every rule is indexed, the two entry
+      # documents name the new location, and no stale rules/ copy was left
+      # behind (two copies drift - docs/standards/11 forbids it by name).
+      - run: node --test tests/ci/check-standards-location.test.mjs
+      - run: node tests/ci/check-standards-location.mjs
       # The geometry gate's own fail-closed properties: empty passes, dropped routes, missing
       # matrix combinations and duplicate passes.
       - run: node --test scripts/check-ui-metrics.test.mjs

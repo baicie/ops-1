@@ -3,7 +3,7 @@
 - 状态：Accepted（0.0.5 内增量）
 - 日期：2026-11-06
 - 基线：`main@79cb084`
-- 前置：[ADR-012](ADR-012-capability-fabric-and-plugin-storage.md)、[ADR-015](ADR-015-evidence-attestation-and-telemetry-sources.md)、`rules/01`、`rules/03`、`rules/05`
+- 前置：[ADR-012](ADR-012-capability-fabric-and-plugin-storage.md)、[ADR-015](ADR-015-evidence-attestation-and-telemetry-sources.md)、`docs/standards/01-architecture.md`、`docs/standards/03-security.md`、`docs/standards/05-data.md`
 - 相关实现：`apps/kernel/src/gateway.rs`、`apps/kernel/src/incidents.rs`、`plugins/zabbix-source/backend/`、`contracts/openapi/zabbix-source-v1.yaml`
 
 ## 1. 背景

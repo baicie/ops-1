@@ -3,7 +3,7 @@
 - 状态：Accepted
 - 日期：2026-11-01
 - 版本状态：本 ADR **不**改变 `0.0.5_PARTIAL`；新增能力按 `0.0.5` 内增量记录
-- 前置：`AGENTS.md`、`rules/01-architecture.md`、`rules/03-security.md`、`rules/05-data.md`、`docs/blueprint/adr/ADR-006-data-as-plugins.md`
+- 前置：`AGENTS.md`、`docs/standards/01-architecture.md`、`docs/standards/03-security.md`、`docs/standards/05-data.md`、`docs/blueprint/adr/ADR-006-data-as-plugins.md`
 - 相关实现：`apps/kernel/src/incidents.rs`、`apps/kernel/migrations/0017_g12_evidence_trust.sql`、`plugins/zabbix-source/`、`contracts/openapi/zabbix-source-v1.yaml`
 
 ## 1. 目标
@@ -25,9 +25,9 @@
 | C2 | `AGENTS.md` MUST NOT：「让用户、插件或模型自报的 tenant/subject/permissions 代替可信身份」——C1 正是这条的违反 | `AGENTS.md` 绝对禁止章 |
 | C3 | 判决（verdict）引用证据集合；若证据信任等级可伪造，判决的证明链同样可伪造 | `kernel.incident_verdicts`、`0016_g11_incidents.sql:71-80` |
 | C4 | Kernel 已有 `hmac`/`sha2`/`base64` 依赖，无需引入新密码学库 | `apps/kernel/Cargo.toml` |
-| C5 | 业务插件不得作为 Rust dylib 注入 Kernel，后端插件只经跨进程版本化 API | `rules/01-architecture.md` MUST |
-| C6 | 插件凭据必须是引用 + 短期访问许可，禁止进入日志/Manifest/URL/错误响应 | `rules/03-security.md` MUST |
-| C7 | `EMPTY`/`NO_DATA`/`PARTIAL`/`UNKNOWN` 必须与成功区分，缺数据不能转为 0 | `rules/05-data.md` MUST |
+| C5 | 业务插件不得作为 Rust dylib 注入 Kernel，后端插件只经跨进程版本化 API | `docs/standards/01-architecture.md` MUST |
+| C6 | 插件凭据必须是引用 + 短期访问许可，禁止进入日志/Manifest/URL/错误响应 | `docs/standards/03-security.md` MUST |
+| C7 | `EMPTY`/`NO_DATA`/`PARTIAL`/`UNKNOWN` 必须与成功区分，缺数据不能转为 0 | `docs/standards/05-data.md` MUST |
 | C8 | 平台当前**没有任何遥测数据源**：`zabbix` 仅出现在测试常量与「尚未接入」文案中；唯一真实遥测是 `kernel.node_resource_samples` | 全仓检索；`apps/kernel/migrations/0014_node_resource_samples.sql` |
 | C9 | 校验必须发生在**写入事务之内**：先校验后落库，否则存在「已落库再降级」的窗口 | `insert_evidence` 事务边界 |
 
@@ -35,7 +35,7 @@ C1 + C3 是最强约束：**信任等级是判决的地基**。地基可自报�
 
 ## 3. 第一件：为什么校验必须在 Kernel 内（而不是插件）
 
-`rules/01-architecture.md` 的 Gate 要求新增 Kernel 能力必须说明「更轻的插件替代方案为何不可行」。逐个排除：
+`docs/standards/01-architecture.md` 的 Gate 要求新增 Kernel 能力必须说明「更轻的插件替代方案为何不可行」。逐个排除：
 
 ### 方案 A：由连接器插件自己声明信任等级
 **被 C1/C2 否决，且这正是缺陷本身。** 插件自报 `SOURCE_ATTESTED` 与调用方自报没有区别——插件也是调用方。把判断权交给被判断者，不是校验。
@@ -47,7 +47,7 @@ C1 + C3 是最强约束：**信任等级是判决的地基**。地基可自报�
 3. C9 要求校验在写入事务内完成。跨进程调用引入网络失败、超时与 `UNKNOWN` 结果，而「校验结果未知」在安全语义上必须等同于拒绝——于是插件不可用就等于证据写入不可用。
 
 ### 方案 C：网关层按来源 IP / 容器身份判定
-**否决。** 网络位置不是身份（`rules/03-security.md`）。容器 IP 可复用、可伪造、且 `rules/10` 明确要求「容器 Node/IP/port 永不成为稳定地址」。
+**否决。** 网络位置不是身份（`docs/standards/03-security.md`）。容器 IP 可复用、可伪造、且 `docs/standards/10-language-agnostic.md` 明确要求「容器 Node/IP/port 永不成为稳定地址」。
 
 ### 方案 D（选定）：Kernel 持有已注册 adapter 凭据，校验签名覆盖证据内容摘要
 - 信任等级拆成两列：`claimed_trust`（调用方说的，永不构成权威）与 `verified_trust`（Kernel 自己的结论，唯一可被读取方和判决依赖的字段）。
@@ -89,7 +89,7 @@ C1 + C3 是最强约束：**信任等级是判决的地基**。地基可自报�
 
 `EMPTY` 与 `NO_DATA` 的区分是重点：前者是「确实没有」，后者是「不知道有没有」。把后者显示成前者，就是把无知伪装成事实。
 
-缺失的读数是 `value: null` **加一个 `absenceReason`**，永不是 0。这条由 contract 的 if/then 结构强制：schema 合法的样本不可能是「无解释的 null」，也不可能是「带缺失原因的数字」——`rules/05` 的「缺数据不能转为 0」由契约保证，而非仅在散文里声明。
+缺失的读数是 `value: null` **加一个 `absenceReason`**，永不是 0。这条由 contract 的 if/then 结构强制：schema 合法的样本不可能是「无解释的 null」，也不可能是「带缺失原因的数字」——`docs/standards/05-data.md` 的「缺数据不能转为 0」由契约保证，而非仅在散文里声明。
 
 超时与不可达是两个不同的 outcome：**端点可能完全健康只是慢**，而「不可达」是另一个运维事实。心跳沉默本身永不改变源状态（`AGENTS.md` MUST NOT）。
 

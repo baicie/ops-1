@@ -1190,7 +1190,7 @@ fn narrow_to_named_workspace(
     })?;
     let holder = format!("workspace:{workspace}");
     if !claims.scope.iter().any(|scope| scope == &holder) {
-        // A stable code, not a sentence: the console localises by code (rules/06).
+        // A stable code, not a sentence: the console localises by code (docs/standards/06-ui-ux.md).
         return Err(AppError::new(
             StatusCode::FORBIDDEN,
             "WORKSPACE_FORBIDDEN",

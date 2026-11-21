@@ -235,7 +235,7 @@ for (const file of tsxFiles) {
   });
 }
 if (spacingDeclarations === 0) {
-  // rules/11: a gate must report its scan volume and fail when that volume is zero. Zero here
+  // docs/standards/11-refactor-retirement-and-cleanup.md: a gate must report its scan volume and fail when that volume is zero. Zero here
   // means the selector above stopped matching, not that the stylesheet has no spacing.
   console.error('check-ui-tokens: R7 scanned 0 spacing declarations in styles.css; the rule is not reading what it thinks it reads.');
   process.exit(2);

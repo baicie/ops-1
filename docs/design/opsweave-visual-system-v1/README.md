@@ -10,7 +10,7 @@
 
 ## 权威与边界
 
-冲突时的权威顺序：`AGENTS.md` → `rules/06-ui-ux.md` → `docs/design/ui-visual-v3/spec/*`（normative）→ 本目录的 ADR/记录 → 设计包与历史验收。
+冲突时的权威顺序：`AGENTS.md` → `docs/standards/06-ui-ux.md` → `docs/design/ui-visual-v3/spec/*`（normative）→ 本目录的 ADR/记录 → 设计包与历史验收。
 
 本 V1 **不**修改 Kernel/Gateway、数据库、权限、证据认证与 readback 语义；**不**引入第二套 UI 框架、第二套 Token、Storybook 或独立 npm UI 包；**不**自动 Ready/Merge/Release/Deploy。
 

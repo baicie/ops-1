@@ -15,7 +15,7 @@ import { maskReference, validateCredentialRef, type CredentialRefResult } from '
  *
  * Two things make this file worth keeping apart from `Sources.tsx`.
  *
- * **It is the security boundary.** `rules/03-security.md` is unconditional: plugin secrets are
+ * **It is the security boundary.** `docs/standards/03-security.md` is unconditional: plugin secrets are
  * references with short-lived access grants, and they must never enter a log, a manifest, a URL
  * or an error response. So this form has no field that accepts secret material. The credential
  * input takes a `secret://…` reference or an environment variable NAME, the validator refuses
@@ -81,7 +81,7 @@ function Field({
       <Label htmlFor={htmlFor}>{label}</Label>
       {children}
       {error ? (
-        // Not colour alone: the glyph and the sentence carry it too (rules/06-ui-ux.md).
+        // Not colour alone: the glyph and the sentence carry it too (docs/standards/06-ui-ux.md).
         <p className="ow-source-field-error" role="alert">
           <Icon name="warning" size={13} /> {error}
         </p>

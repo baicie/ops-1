@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Retired paths: zero live references. See rules/11-refactor-retirement-and-cleanup.md.
+ * Retired paths: zero live references. See docs/standards/11-refactor-retirement-and-cleanup.md.
  *
  * Why this exists. `apps/platform-web` was deleted in G14.2 and eight executables kept
  * naming it. None of them failed loudly:
@@ -48,7 +48,12 @@ const LIVE_ROOTS = [
   'deployments',
   'contracts',
   'crates',
-  'rules',
+  // `rules` moved to `docs/standards`; the new location is scanned and
+  // `check-path-integrity.mjs` asserts every rules/NN file is indexed there.
+  // A bare `rules/` identifier is NOT registered as retired: `quality-rules/`
+  // and `code-rules/` are real paths in this repository, and substring
+  // matching would fire on them.
+  'docs/standards',
 ];
 const LIVE_FILES = [
   'README.md',
@@ -176,7 +181,7 @@ if (process.argv.includes('--json')) {
     console.error(`      ${v.text}`);
   }
   console.error('\nFix each reference, or - if it is a dated record - move it under docs/design, artifacts,');
-  console.error('docs/acceptance or docs/adr, which this check treats as history (rules/11).');
+  console.error('docs/acceptance or docs/adr, which this check treats as history (docs/standards/11-refactor-retirement-and-cleanup.md).');
 }
 
 // A scan that read nothing proves nothing: the same rule as a missing root.

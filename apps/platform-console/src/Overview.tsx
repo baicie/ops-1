@@ -120,7 +120,7 @@ export function OverviewPage() {
   // PARTIAL means a source settled without answering. A source still pending is not a verdict.
   const partialSource = sourceStates.includes('missing');
 
-  // A green verdict on an empty platform is the exact failure rules/05 and AGENTS.md forbid:
+  // A green verdict on an empty platform is the exact failure docs/standards/05-data.md and AGENTS.md forbid:
   // READY with zero nodes and zero plugins has proven nothing, because nothing exists yet. The
   // rule lives in lib/platform-status so the topbar pill and the rail's status field read the
   // same derivation instead of inventing their own (§ P0-2).

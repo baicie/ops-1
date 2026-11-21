@@ -23,7 +23,7 @@ OpsWeave 是**可跨节点部署、全栈热插拔、具备自运维能力的模
 4. `docs/04-security-and-isolation.md`、`docs/05-reliability-and-recovery.md`：高风险边界。
 5. `docs/ui/`：核心功能界面、设计系统、交互和视觉验收。
 6. `plan/`：按 0.0.1、0.0.2、0.0.3+ 拆分、按 Gate 交付。
-7. `AGENTS.md` + `rules/` + `skills/`：平台无关的工程与设计规则。
+7. `AGENTS.md` + `docs/standards/` + `skills/`：平台无关的工程与设计规则。
 8. `contracts/`、`templates/`、`scripts/`：可落地接口示例、规范模板、检查器。
 
 ### 冻结范围与明确非目标
@@ -40,7 +40,7 @@ OpsWeave 是**可跨节点部署、全栈热插拔、具备自运维能力的模
 - 这是设计包和示例，不包括正式可运行 Rust/React 产品。
 - `contracts` 中 JSON、Schema、API 示例须以实现时的 CI 合约测试再次签署；不能将示例解析成功视为服务已上线。
 - 架构内的阈值是实验验收目标或起始缺省值，非经过容量测试的生产承诺。
-- `AGENTS.md` 和 `rules/` 不绑定特定编程助手产品；使用时由人或自动化读取并执行。
+- `AGENTS.md` 和 `docs/standards/` 不绑定特定编程助手产品；使用时由人或自动化读取并执行。
 
 ### 控制面最小表与节点升级
 - `docs/18-control-plane-data-model.md`：控制面 Schema 所有权和事务模型；`examples/db-control-plane.sql` 是概念草案。

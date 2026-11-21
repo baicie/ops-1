@@ -166,27 +166,27 @@ VALUES (..., 'SOURCE_ATTESTED','SOURCE_ATTESTED','NONE', <admin>, ...);
 | 3 | 未配置的 adapter 根本无法签名 | 负向 |
 | 4 | 探活区分 unreachable / timeout / unauthorized / unknown | 失败语义 |
 | 5 | 超时不等于宕机；心跳静默不提升 source 状态 | `AGENTS.md` MUST NOT |
-| 6 | 已确证的「无」是 EMPTY，未确证的是 NO_DATA | `rules/05` |
-| 7 | 缺失读数是 null + 原因，绝不为 0 | `rules/05` |
+| 6 | 已确证的「无」是 EMPTY，未确证的是 NO_DATA | `docs/standards/05-data.md` |
+| 7 | 缺失读数是 null + 原因，绝不为 0 | `docs/standards/05-data.md` |
 | 8 | 单项失败使整体 PARTIAL 且保留其余 | 部分失败 |
 | 9 | 全部失败时报出「是哪一种无」 | 失败语义 |
 | 10 | 请求 0 个 item 是 EMPTY，不是「零项成功」 | 分母诚实 |
-| 11 | 有数据与确证无数据混合是 PARTIAL，不是 OK | `rules/05` |
+| 11 | 有数据与确证无数据混合是 PARTIAL，不是 OK | `docs/standards/05-data.md` |
 | 12 | 超上限的预算被钳制且结果声明 clamped | 预算 |
 | 13 | item 过多时 PARTIAL，分母是完整请求数 | 未知分母 |
 | 14 | 过长时间窗被钳到最近一段并上报 | 预算 |
 | 15 | 触及每项样本上限时 PARTIAL + 可解释的 null | 预算 |
 | 16 | 内容摘要对 key 顺序稳定，随 outcome 改变 | 证据摘要 |
-| 17 | 采集结果任何位置都不含密钥 | `rules/03` |
-| 18 | 脱敏移除密钥与凭据形态文本，但保留普通诊断文本 | `rules/03` |
-| 19 | 清单保留 UNKNOWN 可用性，不与 UNAVAILABLE 合并 | `rules/05` |
+| 17 | 采集结果任何位置都不含密钥 | `docs/standards/03-security.md` |
+| 18 | 脱敏移除密钥与凭据形态文本，但保留普通诊断文本 | `docs/standards/03-security.md` |
+| 19 | 清单保留 UNKNOWN 可用性，不与 UNAVAILABLE 合并 | `docs/standards/05-data.md` |
 | 20 | 清单多取一行以探测裁剪，裁剪时如实上报 `truncated: null` | 分母诚实 |
 | 21 | 恰好等于上限是完整结果，不是裁剪 | 边界 |
-| 22 | 空清单是 EMPTY；无法映射的响应是 NO_DATA | `rules/05` |
+| 22 | 空清单是 EMPTY；无法映射的响应是 NO_DATA | `docs/standards/05-data.md` |
 | 23 | 清单失败复用与采集相同的失败词汇 | 失败语义 |
 | 24 | 按 host 列 item 并映射 value_type；缺失 unit 为 null | 清单 |
 | 25 | 缺 hostId 被拒，而不是静默列出全站 item | 负向 |
-| 26 | SSRF 拦截回环/私网/元数据/userinfo/非法 scheme | `rules/03` |
+| 26 | SSRF 拦截回环/私网/元数据/userinfo/非法 scheme | `docs/standards/03-security.md` |
 
 测试 1 的字节一致性另有独立机器校验（分别运行 Rust 与 Node 实现并逐字节比对）：
 
@@ -302,11 +302,11 @@ null 样本但缺 absenceReason   -> 被拒 (False)
 | # | 项 | 为什么没跑 | 怎么跑 |
 |---|---|---|---|
 | N-2 | **真实 Zabbix 端到端采集** | 没有任何真实 Zabbix 实例。2.4 的 socket 测试用的是本地假 Zabbix，它证明的是插件自身的状态机、预算与 HTTP 层，**不证明真实 Zabbix 的响应形状** | 指向真实实例跑 `POST /sources/{id}/probe` 与 `/collect` |
-| N-4 | **OCI 镜像构建 / digest 固定 / 非 root 实测** | 无 Docker daemon。`rules/09` 要求以真实运行结果验收，不凭 Dockerfile 表面声明推断 | `docker build plugins/zabbix-source/backend` 后核对 digest 与 `USER` |
+| N-4 | **OCI 镜像构建 / digest 固定 / 非 root 实测** | 无 Docker daemon。`docs/standards/09-oci-supply-chain.md` 要求以真实运行结果验收，不凭 Dockerfile 表面声明推断 | `docker build plugins/zabbix-source/backend` 后核对 digest 与 `USER` |
 | N-6 | **`tests/acceptance/g12_trusted_evidence.sh`** | 需运行中的 Kernel + 库。Kernel 已能在真实库上跑单测（2.2），但该脚本要求起完整 Kernel 进程 | 起 Kernel 后执行该脚本 |
 | N-7 | **多语言 conformance / OCI Release Review** | `AGENTS.md` 要求发布到真实两节点前通过；本任务未发布 | 见对应 SKILL.md |
 | N-8 | ~~**`/collections/{id}/attestation` 与 `/runtime-info` 的真实 socket 调用**~~ | **已关闭（2026-11-01）**，见下方「N-8 实测记录」。仍未测的部分只剩：插件进程内的 `/collections/{id}/attestation` 与 `/runtime-info` 两个端点未被单独调用（签名与 `attestationPayload` 已在真实 Kernel 上被接受，见下） | — |
-| N-9 | **插件重启后 source/collection 丢失** | 见 R-11，属已知取舍而非遗漏 | 需要时按 `rules/05` 落插件自有 schema |
+| N-9 | **插件重启后 source/collection 丢失** | 见 R-11，属已知取舍而非遗漏 | 需要时按 `docs/standards/05-data.md` 落插件自有 schema |
 
 ### N-8 实测记录（2026-11-01）
 
@@ -368,6 +368,6 @@ B–F 证明拒绝路径返回的是契约里的稳定错误码，而不是笼�
 2. R-4 的 UI 补丁（不属本任务范围，`apps/platform-web/` 由其他会话持有）。
 3. 非对称签名（Ed25519）替代共享 HMAC 密钥，见 ADR-015 第 7 节。
 4. Adapter 密钥轮换与吊销：当前改配置需重启 Kernel，无在线轮换。
-5. 插件自身的持久化：当前 source 配置存于内存，重启即失。真实部署需按 `rules/05` 落到插件自有 schema（`requires` 已留 `plugin.storage.v1` 的接入位，但未实现）。
+5. 插件自身的持久化：当前 source 配置存于内存，重启即失。真实部署需按 `docs/standards/05-data.md` 落到插件自有 schema（`requires` 已留 `plugin.storage.v1` 的接入位，但未实现）。
 6. 采集结果的留存与按时间查询：当前 `/collect` 同步返回，结果只在内存中保留供 `/attestation` 取用，无历史查询。
 7. **把 2.4 的真实 socket 冒烟测试固化为 CI 步骤**（见 R-12）：目前它是启动路径唯一证据，靠人工执行。

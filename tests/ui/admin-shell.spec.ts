@@ -4,7 +4,7 @@ import * as path from 'node:path';
 
 // G02 acceptance for AdminShell V2.
 //
-// Selectors follow rules/06: stable test ids, roles and hrefs - never localised copy -
+// Selectors follow docs/standards/06-ui-ux.md: stable test ids, roles and hrefs - never localised copy -
 // except where the assertion *is* about the localized label (a zh navigation search).
 // Runs against OPSWEAVE_URL like the rest of the suite.
 const EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';

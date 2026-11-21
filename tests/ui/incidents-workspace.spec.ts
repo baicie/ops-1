@@ -17,7 +17,7 @@ import { expect, test, type Page } from '@playwright/test';
  *     a state the page claims to handle has to be exercised by the page, not asserted in prose.
  *     Each is labelled as forced in its test title.
  *
- * Selectors are data-testids, roles and attributes only, never localized copy (rules/06), so the
+ * Selectors are data-testids, roles and attributes only, never localized copy (docs/standards/06-ui-ux.md), so the
  * same spec runs in English and Chinese.
  *
  *   OPSWEAVE_URL=http://127.0.0.1:18291 \

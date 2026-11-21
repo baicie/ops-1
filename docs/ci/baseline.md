@@ -34,7 +34,7 @@ $ gh api repos/baicie/ops-1 --jq '{allow_merge_commit,allow_squash_merge,allow_r
 ```
 
 只允许 **squash**。这一点影响分支清理：squash 之后分支永远显示 `ahead=0` 而树仍不同，
-`git branch -d` 必然拒绝，必须逐文件比对 blob 才能判定已合入（见 `rules/08`）。
+`git branch -d` 必然拒绝，必须逐文件比对 blob 才能判定已合入（见 `docs/standards/08-docs-and-workflow.md`）。
 
 ## 3. Ruleset
 

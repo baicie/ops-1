@@ -3,10 +3,10 @@
 //
 // Two rules from the repository shape every function here:
 //
-//   rules/05  EMPTY, NO_DATA, PARTIAL, UNKNOWN, UNAVAILABLE and TIMEOUT are six
+//   docs/standards/05-data.md  EMPTY, NO_DATA, PARTIAL, UNKNOWN, UNAVAILABLE and TIMEOUT are six
 //             different facts and missing data never becomes 0. A sample with no
 //             observed number is `value: null` plus an `absenceReason`.
-//   rules/03  A credential is a reference until the moment of use. The resolved
+//   docs/standards/03-security.md  A credential is a reference until the moment of use. The resolved
 //             secret never enters a URL, a log line, an error body or a stored
 //             row, and `redact()` is applied to everything that leaves here.
 //
@@ -180,7 +180,7 @@ function isPrivate(ip) {
  * Validate an endpoint before it is dialled.
  *
  * Rejects a userinfo component outright: a token in the URL would reach every
- * access log and proxy on the path, which rules/03 forbids. DNS is resolved once
+ * access log and proxy on the path, which docs/standards/03-security.md forbids. DNS is resolved once
  * and the resolved address is reused for the connection, so the name cannot
  * resolve to a public address for the check and a private one for the socket.
  */
@@ -355,7 +355,7 @@ export async function rpc({ endpoint, method, params, secret, credentialKind = '
  * Never throws: an unreachable endpoint is an observation, not an error in this
  * plugin, and a caller needs it as queryable evidence. A timeout is TIMEOUT and
  * not UNAVAILABLE, because a healthy-but-slow server and a dead one are
- * different operational facts (rules/05).
+ * different operational facts (docs/standards/05-data.md).
  */
 export async function probe(source, { transport } = {}) {
   const started = Date.now();
@@ -448,7 +448,7 @@ export function statusFromProbe(probeResult, { verifyTls = true, endpoint = '' }
  * with an empty history is EMPTY (the absence is established); an item that is
  * unsupported, disabled, unknown, or whose history was trimmed below the window
  * is NO_DATA (whether anything was recorded cannot be established). Those two
- * are the distinction rules/05 exists to protect, and neither becomes 0.
+ * are the distinction docs/standards/05-data.md exists to protect, and neither becomes 0.
  */
 export async function collect({ source, itemIds, window: requested, budget: requestedBudget, transport, now = () => new Date() }) {
   const { budget, clamped: budgetClamped } = resolveBudget(requestedBudget);
@@ -608,7 +608,7 @@ function toSample(row) {
   const value = Number(raw);
   if (raw === null || raw === undefined || raw === '' || !Number.isFinite(value)) {
     // A non-numeric or absent reading is not a zero. It is an absence with a
-    // reason, which is the whole point of rules/05.
+    // reason, which is the whole point of docs/standards/05-data.md.
     return { occurredAt, value: null, absenceReason: 'NOT_RECORDED' };
   }
   return { occurredAt, value, absenceReason: null };
@@ -685,7 +685,7 @@ export function collectionOutcome({ series, requestedItems, attemptedItems, clam
  * Zabbix reports "0" for unknown, "1" for available and "2" for unavailable.
  * UNKNOWN is preserved rather than folded into UNAVAILABLE: "never checked" and
  * "checked and down" are different operational facts, and collapsing them is how
- * a monitoring gap gets reported as an outage (rules/05).
+ * a monitoring gap gets reported as an outage (docs/standards/05-data.md).
  */
 function availability(raw) {
   const value = String(raw ?? '').trim();
@@ -845,7 +845,7 @@ function digestOf(body) {
  * reduced first, then trailing series are dropped, and `snapshot` records what
  * was left out. A truncated snapshot is PARTIAL by construction - the returned
  * `outcome` is PARTIAL and the signed bytes say so, so a reader can never
- * mistake the snapshot for the complete window (rules/05).
+ * mistake the snapshot for the complete window (docs/standards/05-data.md).
  *
  * The body is built here, once, and the digest is taken over exactly these
  * bytes. The Kernel re-derives the digest from the stored body; if the two ever

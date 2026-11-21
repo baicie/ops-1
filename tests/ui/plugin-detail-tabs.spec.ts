@@ -9,7 +9,7 @@ import { expect, type Page, test } from '@playwright/test';
 // the detail payload is supplied through route interception (the same technique
 // admin-pages.spec.ts uses for states the running stack cannot produce on demand). The page
 // keeps a single code path; only its input changes. Selectors are test ids and stable class
-// hooks, never localized copy (rules/06).
+// hooks, never localized copy (docs/standards/06-ui-ux.md).
 
 const EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';

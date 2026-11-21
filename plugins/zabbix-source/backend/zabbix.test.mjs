@@ -57,7 +57,7 @@ const answerWith = (table) => async ({ method, params }) => {
 const row = (clockSeconds, value) => ({ clock: String(clockSeconds), ns: '0', value });
 
 // ---------------------------------------------------------------------------
-// The cross-language check that matters most (rules/10)
+// The cross-language check that matters most (docs/standards/10-language-agnostic.md)
 // ---------------------------------------------------------------------------
 
 test('the signed payload is byte-identical to the Kernel golden vector', () => {
@@ -489,7 +489,7 @@ test('redact removes secret values and credential-shaped text', () => {
 test('inventory keeps UNKNOWN availability distinct from UNAVAILABLE', async () => {
   // Zabbix's "never checked" (0) and "checked and down" (2) are different
   // operational facts. Folding the first into the second turns a monitoring gap
-  // into a fabricated outage, which rules/05 forbids.
+  // into a fabricated outage, which docs/standards/05-data.md forbids.
   const transport = async () => [
     { hostid: '10084', name: 'web-01', available: '1' },
     { hostid: '10085', name: 'db-01', available: '2' },
@@ -596,7 +596,7 @@ test('listing items without a host is refused rather than silently listing every
 });
 
 // ---------------------------------------------------------------------------
-// Outbound policy (rules/03: bounded outbound targets)
+// Outbound policy (docs/standards/03-security.md: bounded outbound targets)
 // ---------------------------------------------------------------------------
 
 test('the outbound guard refuses loopback, private, metadata and credential URLs', async () => {

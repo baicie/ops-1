@@ -157,7 +157,7 @@ export function canSave(collection: CollectionResult | null): boolean {
 }
 
 
-/** Wire outcomes rendered as catalog copy; never as raw enum text (rules/06). */
+/** Wire outcomes rendered as catalog copy; never as raw enum text (docs/standards/06-ui-ux.md). */
 export type OutcomeKey =
   | 'incidents.collect.outcome.ok'
   | 'incidents.collect.outcome.empty'

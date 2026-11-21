@@ -63,7 +63,7 @@ import { ConnectorConfigForm } from './sources-config';
  *      (403 on grants, for instance) renders UNKNOWN rather than the pessimistic answer.
  *   2. No secret reaches the DOM. The configuration form takes a `secret://` reference or an
  *      environment variable NAME, never a value, and never echoes an existing one back. There
- *      is no code path here that can render credential material (`rules/03-security.md`).
+ *      is no code path here that can render credential material (`docs/standards/03-security.md`).
  *   3. Trust is reported, not inferred. An unsigned bundle, or a verified one whose publisher
  *      lost trust, can never read as SOURCE_ATTESTED.
  *

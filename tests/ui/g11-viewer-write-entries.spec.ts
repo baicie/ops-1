@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url';
  * Nothing here is stubbed: the accounts are created through the admin API, the record too, and
  * every assertion reads a real kernel's answer - from the DOM or from the endpoint itself.
  *
- * Selectors are data attributes only - never localised copy (rules/06) - so the guard keeps
+ * Selectors are data attributes only - never localised copy (docs/standards/06-ui-ux.md) - so the guard keeps
  * working if the sentence is edited, and only fails if its provenance changes.
  */
 
