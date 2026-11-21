@@ -20,6 +20,12 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
+// Server-side bounds applied to every connection this module opens. See the
+// note in `openStorage` for the measurements behind the numbers.
+const LOCK_TIMEOUT_MS = Number(process.env.OPSWEAVE_DB_LOCK_TIMEOUT_MS || 2000);
+const STATEMENT_TIMEOUT_MS = Number(process.env.OPSWEAVE_DB_STATEMENT_TIMEOUT_MS || 30000);
+const IDLE_TX_TIMEOUT_MS = Number(process.env.OPSWEAVE_DB_IDLE_TX_TIMEOUT_MS || 30000);
+
 export const MAX_COLLECTIONS_PER_WORKSPACE = 500;
 export const COLLECTION_TTL_HOURS = 24;
 
@@ -41,6 +47,49 @@ export class SourceConflictError extends Error {
     this.code = 'ZBX_SOURCE_CONFLICT';
     this.retryable = false;
   }
+}
+
+/**
+ * A failure that is transient by construction, classified as such.
+ *
+ * Once the pool carries a `lock_timeout`, a contended source row or migration
+ * lock produces a pg error with code `55P03` and no `status`. Left alone it
+ * reaches the server's handler as a 500 `INTERNAL` with `retryable: false` -
+ * a permanent-looking answer for a condition that is transient by
+ * construction, and the same mistake the data plugins made until #185.
+ *
+ * THE CODE LISTS BELOW ARE SUPERSETS OF WHAT WAS HERE, NOT A TIDY-UP.
+ *
+ * `#query` used to translate four codes inline: ECONNREFUSED, 57P01, 08006,
+ * 08001. The first version of this function kept only ` 08xxx` as a prefix and
+ * ECONNREFUSED - which DROPS 57P01. That one matters: `admin_shutdown` is what
+ * a database sends when it is being restarted, so the regression would have
+ * turned "the database restarted, retry" into a permanent 500 on exactly the
+ * path the old code handled. `57P03` (cannot_connect_now) is the sibling case
+ * - the server is up but not accepting connections yet.
+ *
+ * Everything here answers 503 + retryable, which is what both conditions are.
+ */
+const TRANSIENT_DB_CODES = new Set([
+  // Bounded waits that expired (new with this change).
+  '55P03', // lock_not_available - lock_timeout
+  '57014', // query_canceled - statement_timeout
+  '40001', // serialization_failure
+  // The connection went away mid-statement (was 08006/08001 inline).
+  '08000', '08001', '08003', '08004', '08006', '08007', '08P01',
+  // The server is shutting down or not ready (57P01 was inline and nearly lost).
+  '57P01', // admin_shutdown
+  '57P03', // cannot_connect_now
+  // Rejected before a connection exists.
+  'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'EPIPE',
+]);
+
+export function storageFailure(error) {
+  if (!(error instanceof Error)) return error;
+  if (TRANSIENT_DB_CODES.has(error.code)) {
+    return new StorageUnavailableError('the plugin database could not be reached in time; retry');
+  }
+  return error;
 }
 
 const MIGRATIONS = [
@@ -127,10 +176,10 @@ export class PostgresStore {
     try {
       return await this.pool.query(text, values);
     } catch (error) {
-      if (error && (error.code === 'ECONNREFUSED' || error.code === '57P01' || error.code === '08006' || error.code === '08001')) {
-        throw new StorageUnavailableError();
-      }
-      throw error;
+      // Was an inline list of four connection codes. `storageFailure` covers
+      // those and the bounded-wait codes the pool now produces, and keeps the
+      // translation in one place instead of five catch blocks drifting apart.
+      throw storageFailure(error);
     }
   }
 
@@ -170,8 +219,10 @@ export class PostgresStore {
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
       if (error instanceof StorageUnavailableError) throw error;
-      if (error && error.code === 'ECONNREFUSED') throw new StorageUnavailableError();
-      throw error;
+      // The migration advisory lock is now bounded. When another instance holds
+      // it past `lock_timeout`, that is a transient startup condition, not a
+      // broken plugin - `storageFailure` turns 55P03 into the 503 it is.
+      throw storageFailure(error);
     } finally {
       client.release();
     }
@@ -215,7 +266,7 @@ export class PostgresStore {
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
       if (error && error.code === '23505') throw new SourceConflictError();
-      throw error;
+      throw storageFailure(error);
     } finally {
       client.release();
     }
@@ -260,7 +311,7 @@ export class PostgresStore {
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
       if (error && error.code === '23505') throw new SourceConflictError();
-      throw error;
+      throw storageFailure(error);
     } finally {
       client.release();
     }
@@ -287,7 +338,7 @@ export class PostgresStore {
       return result.rows[0];
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
-      throw error;
+      throw storageFailure(error);
     } finally {
       client.release();
     }
@@ -333,7 +384,7 @@ export class PostgresStore {
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
-      throw error;
+      throw storageFailure(error);
     } finally {
       client.release();
     }
@@ -481,17 +532,54 @@ export class MemoryStore {
  */
 export async function openStorage({ databaseUrl, allowMemory, logger = console }) {
   if (databaseUrl) {
+    // THE ACQUIRE BOUND WAS NOT THE WAIT THAT MATTERED.
+    //
+    // `connectionTimeoutMillis` bounds how long a request waits for a free
+    // POOL SLOT. It says nothing about the waits inside a transaction, and
+    // this plugin has two that were unbounded:
+    //
+    //   - `updateSource` takes `FOR UPDATE` on the source row;
+    //   - `migrate` takes `pg_advisory_xact_lock` on a fixed key.
+    //
+    // Measured 2026-11-21 against PostgreSQL 17.10, holder sleeping 12s:
+    //
+    //   shipped options (acquire bound only), FOR UPDATE  -> STILL WAITING at 5s
+    //   + lock_timeout=1s, same wait                      -> 55P03 at 1476ms
+    //   + lock_timeout=1s, pg_advisory_xact_lock          -> 55P03 at 1527ms
+    //
+    // So the advisory lock is covered by the same setting - worth stating,
+    // because an advisory lock has no row to point at and it is reasonable to
+    // assume it behaves differently. It does not.
+    //
+    // The bounds go in the startup packet (`options`) rather than into each
+    // transaction: `migrate` runs from `openStorage` before any request exists,
+    // and a per-transaction `SET LOCAL` written next to each `BEGIN` is exactly
+    // the shape that let three of six transactions in the sibling plugin drift
+    // unbounded. A connection is bounded before its first statement.
+    //
+    // `idle_in_transaction_session_timeout` is the one that matters when a
+    // client is killed mid-transaction: without it a COMMIT that never arrives
+    // holds the source row until the TCP connection dies, which after a network
+    // partition can be hours.
     const pool = new Pool({
       connectionString: databaseUrl,
       max: 5,
       connectionTimeoutMillis: 5000,
       idleTimeoutMillis: 30_000,
+      options: `-c lock_timeout=${LOCK_TIMEOUT_MS} -c statement_timeout=${STATEMENT_TIMEOUT_MS}`
+        + ` -c idle_in_transaction_session_timeout=${IDLE_TX_TIMEOUT_MS}`,
     });
     const store = new PostgresStore(pool);
     try {
       await store.migrate();
     } catch (error) {
       await pool.end().catch(() => {});
+      // `migrate` translates its own failures - a 55P03 from the advisory lock
+      // is a retryable 503, and the pool failing to connect is a 503 for a
+      // different reason. Re-wrapping every error here erases that difference
+      // and made the advisory-lock test below pass without exercising the
+      // translation at all. Only an untranslated error gets the generic wrap.
+      if (error instanceof StorageUnavailableError) throw error;
       throw new StorageUnavailableError(
         `the plugin database is configured but unusable: ${error instanceof Error ? error.message : String(error)}`,
       );
