@@ -129,6 +129,16 @@ const RULES = [
   // that path, so the suite never ran and the gate had nothing to read. Now the
   // claim is the specific one.
   { glob: 'tests/ci/**', suites: ['spec-coverage', 'data-foundation', 'linux-runtime'] },
+  // `tests/scripts/` holds tests for the scripts in `scripts/`. They run in the
+  // `lint` job, which is unconditional, so no suite needs to be requested.
+  //
+  // Without this entry the directory is an UNMAPPED PATH, fail-closed turns
+  // every suite on, and `plugin-lifecycle` / `runtime-conformance` are demanded
+  // for a change to neither - neither workflow's `paths` filter matches a test
+  // script, so neither runs, and ci-gate reports `delegated-absent`. Measured on
+  // PR #192: moving one test file made the gate demand two workflows that
+  // cannot start.
+  { glob: 'tests/scripts/**', suites: ['spec-coverage'] },
   { glob: 'tests/ci/p001c13_*.sh', suites: ['plugin-lifecycle'] },
   { glob: 'tests/ci/p001c_multilang_lifecycle.sh', suites: ['plugin-lifecycle', 'runtime-conformance'] },
   { glob: 'tests/acceptance/**', suites: ['data-foundation', 'browser-e2e'] },
