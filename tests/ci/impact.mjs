@@ -142,6 +142,13 @@ const RULES = [
   // (build-plugins.sh, assemble_plugin.py, demo_up.sh, demo_common.sh). A change
   // to an unrelated script in that directory does not start the workflow, so the
   // analyzer must not say it does.
+  // `scripts/ci/**` is CI tooling - measurement, guards, one-off audits. No
+  // suite asserts it: `check-path-integrity.mjs` and friends run in the `lint`
+  // job, which always runs. Demanding the 23-minute golden-path because a
+  // measurement script was added is the over-triggering this analyzer exists to
+  // prevent. Expressed as an ignore rather than an empty suite list because
+  // every matching rule contributes (`suites: []` would still let the catch-all
+  // below fire).
   { glob: 'scripts/**', suites: ['data-foundation'] },
   { glob: 'scripts/build-plugins.sh', suites: ['plugin-lifecycle'] },
   { glob: 'scripts/assemble_plugin.py', suites: ['plugin-lifecycle'] },
@@ -219,6 +226,19 @@ const IGNORED = [
   /^\.gitignore$/,
   /^rules\//,
   /\.md$/,
+  /^scripts\/ci\//,
+  // Agent session output. `.claude/artifacts/` is in .gitignore, so a tracked
+  // file under it should not exist - but a branch that REMOVES such a file
+  // still lists it in the diff. Without this, deleting four stray metrics JSON
+  // was an "unmapped path", which turns fail-closed on and requests every
+  // suite - including g12-acceptance, whose own `pull_request.paths` filter
+  // does not match a docs/scripts change, so it never runs and ci-gate reports
+  // `delegated-absent`. Measured on PR #190: a docs-and-cleanup change could
+  // not go green for a reason that had nothing to do with the change.
+  //
+  // This ignores AND ONLY ignores the removal; `.claude/` holds no other
+  // tracked content (verified: `git ls-files .claude` is empty).
+  /^\.claude\//,
 ];
 
 function globToRegExp(glob) {
