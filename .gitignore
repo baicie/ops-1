@@ -26,6 +26,14 @@ data-test/
 
 artifacts/reliability/
 artifacts/staging-preview/
+# Agent session output. `.claude/` holds configuration that IS tracked (skills,
+# settings); only the run output under it is not. Without this, four metrics
+# JSON from a capture run with OBS_OUT pointed here were committed, and
+# docs/design/observability-console-v4/HANDOFF.md records 24 matching PNGs
+# being committed the same way and deleted as duplicate evidence. The tool
+# writes to `artifacts/ui/observability` by default; pointing it at `.claude`
+# was the accident, so the guard goes on the directory, not on the tool.
+.claude/artifacts/
 # P001-C1.3 lifecycle acceptance writes one evidence file per step (command,
 # exit code, stdout, stderr) plus the structured lifecycle.json. They are
 # uploaded as a workflow artifact; committing them would put raw logs and image
