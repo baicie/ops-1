@@ -344,7 +344,7 @@ describe('summarize', () => {
 });
 
 /**
- * rules/03-security.md: a credential travels as a reference. The field must refuse secret
+ * docs/standards/03-security.md: a credential travels as a reference. The field must refuse secret
  * material, and - just as important - must never hand the rejected input back to the caller,
  * which would put it straight into the DOM.
  */

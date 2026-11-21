@@ -6,19 +6,19 @@ info:
     Provider contract for `telemetry.source.v1`, served by the
     `opsweave.zabbix-source` plugin. Zabbix lives entirely in this plugin: the
     Kernel holds no Zabbix knowledge, no Zabbix table and no Zabbix credential
-    (ADR-006, rules/01-architecture.md). A reader that wants metrics calls this
+    (ADR-006, docs/standards/01-architecture.md). A reader that wants metrics calls this
     capability through the Gateway; nothing talks to a Zabbix endpoint directly
     from the browser.
 
     Four rules shape every response here.
 
-    1. Credentials are references, never values (rules/03-security.md). A
+    1. Credentials are references, never values (docs/standards/03-security.md). A
        request carries `secretref:...`; the plugin resolves it at call time under
        a short-lived grant. No endpoint accepts, returns, logs or echoes a token,
        and `endpoint` rejects a URL with a userinfo component so a token cannot
        be smuggled into a string that is later logged.
 
-    2. Absence is typed, never zero (rules/05-data.md). `EMPTY`, `NO_DATA`,
+    2. Absence is typed, never zero (docs/standards/05-data.md). `EMPTY`, `NO_DATA`,
        `PARTIAL`, `UNKNOWN`, `UNAVAILABLE` and `TIMEOUT` are six different
        answers and this contract keeps them apart. A sample with no observed
        number is `value: null` with an `absenceReason`; the schema binds the two
@@ -190,7 +190,7 @@ paths:
         A failed probe is a 200 carrying a failure outcome, not an HTTP error
         (the one exception is a credential-binding policy refusal):
         "the endpoint is unreachable" is a successful observation about Zabbix,
-        and a reader needs it as queryable evidence (rules/05 Gate).
+        and a reader needs it as queryable evidence (docs/standards/05-data.md Gate).
       responses:
         '200':
           description: Probe observation, successful or not
@@ -534,7 +534,7 @@ components:
       description: |
         Authenticated but not permitted. Decided by the Gateway and this plugin
         from the Kernel-issued identity, never from a tenant or subject the
-        request claims for itself (rules/03, rules/10).
+        request claims for itself (docs/standards/03-security.md, docs/standards/10-language-agnostic.md).
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

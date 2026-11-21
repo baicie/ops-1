@@ -4,7 +4,7 @@
 
 ## 必做
 
-1. 读取 `AGENTS.md`、`rules/06-ui-ux.md`、`apps/platform-web/src/{App.tsx,auth.tsx,extensions.tsx,components/Layout.tsx,styles.css,tailwind.config.cjs}`、`package.json`、现有 E2E 和 `contracts/`。
+1. 读取 `AGENTS.md`、`docs/standards/06-ui-ux.md`、`apps/platform-web/src/{App.tsx,auth.tsx,extensions.tsx,components/Layout.tsx,styles.css,tailwind.config.cjs}`、`package.json`、现有 E2E 和 `contracts/`。
 2. 提交一份**真实路由图**：现有路由、实际页面、API、角色、插件贡献、旧 URL/深链、迁移目标、是否已有测试。
 3. 提交“已有与缺失”组件表：shadcn primitives、Tailwind、i18n、Design Tokens、Status、Table、Dialog、Command、Sidebar、Theme、VersionBadge。不要让后续 DSH 重写已完成内容。
 4. 对照最初 0.1.0 Incident 设计辨别平台管理页与业务页；不能将 Pipeline Studio 误认成 AI Investigation UI。

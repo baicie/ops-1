@@ -6,7 +6,7 @@
 
 ## 退役必须原子完成（MUST）
 
-- MUST：退役一个路径（删除 `apps/x`、重命名包、拆分应用）时，同一个变更内更新全部活引用：代码、`package.json` / `pnpm-workspace.yaml`、`.github/workflows/**`、`tests/ci/**`、`tests/runtime/**`、`tests/acceptance/**`、扫描类门禁脚本、以及**描述当前树的文档**（`README.md` 仓库地图、`AGENTS.md`、`rules/**`）。
+- MUST：退役一个路径（删除 `apps/x`、重命名包、拆分应用）时，同一个变更内更新全部活引用：代码、`package.json` / `pnpm-workspace.yaml`、`.github/workflows/**`、`tests/ci/**`、`tests/runtime/**`、`tests/acceptance/**`、扫描类门禁脚本、以及**描述当前树的文档**（`README.md` 仓库地图、`AGENTS.md`、`docs/standards/**`）。
 - MUST：删除而不是保留第三个入口。拆分成两个应用时，旧入口不能作为"兼容别名"留下——一个同时渲染两个 Surface 的入口会还原掉拆分本身要消除的属性（ADR-022 §2.2、G14.2）。
 - MUST：区分**活文档**与**历史记录**。`docs/design/**`、`artifacts/**`、`docs/IMPLEMENTATION_STATUS.md` 中带日期的章节是当时事实的证据，**不得**回写旧路径；它们描述的是"当时如此"，改写等于伪造历史。只有声称"现在是什么"的文本才必须跟代码同步。
 - SHOULD：检索退役标识符时用 `git grep <old-path>`，并把命中分为"活引用（必须改）"与"历史记录（必须不改）"两类再动手。

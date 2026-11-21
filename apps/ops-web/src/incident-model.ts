@@ -255,7 +255,7 @@ export const INCIDENT_EMPTY_COPY: Record<IncidentEmptyKind, { title: MessageKey;
 
 /**
  * Failure copy, by the stable error code the kernel sends. The code decides; the server's
- * English sentence is never rendered as copy (rules/06). A code with no entry is reported with
+ * English sentence is never rendered as copy (docs/standards/06-ui-ux.md). A code with no entry is reported with
  * the code itself in a <code> element and a generic sentence around it.
  */
 const FAILURE_KEYS: Record<string, MessageKey> = {
@@ -1220,7 +1220,7 @@ export function evidenceAssurance(rows: IncidentEvidence[]): EvidenceAssurance {
 export type IncidentListState =
   | 'loading' | 'forbidden' | 'conflict' | 'failed' | 'empty' | 'filtered' | 'stale' | 'ready';
 
-/** The HTTP status decides a refusal; the message never does (rules/06). */
+/** The HTTP status decides a refusal; the message never does (docs/standards/06-ui-ux.md). */
 function statusOf(error: unknown): number | null {
   const status = (error as { status?: unknown } | null)?.status;
   return typeof status === 'number' ? status : null;

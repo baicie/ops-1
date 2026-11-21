@@ -108,7 +108,7 @@ export function useUserDirectory(): { names: Record<string, string> | null; read
  * A failed operation, explained by its stable error code.
  *
  * The code decides the copy; the Kernel's English sentence is never rendered as the message
- * (rules/06). A code this client has no copy for is reported as a code plus a generic sentence,
+ * (docs/standards/06-ui-ux.md). A code this client has no copy for is reported as a code plus a generic sentence,
  * which is at least true, instead of showing a sentence the catalog cannot translate.
  */
 export function IncidentFailureNotice({ error, testId }: { error: unknown; testId?: string }) {

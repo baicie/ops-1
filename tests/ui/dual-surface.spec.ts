@@ -8,7 +8,7 @@ import { expect, test, type Page } from '@playwright/test';
 // is re-fetched for real, so the cookie session and the CSRF token are the live ones and a
 // re-login would show up as an extra `/login` navigation.
 //
-// Selectors are roles, hrefs and data-testids only - never localized copy (rules/06).
+// Selectors are roles, hrefs and data-testids only - never localized copy (docs/standards/06-ui-ux.md).
 const EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
 

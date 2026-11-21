@@ -3517,7 +3517,7 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 
 /* A rejection, and never the rejected input: echoing what was typed would put a
    pasted secret into the DOM, and from there into a screenshot or a log
-   (rules/03-security.md). Colour is not the only carrier - the message is text,
+   (docs/standards/03-security.md). Colour is not the only carrier - the message is text,
    and the field is wired with aria-invalid + aria-describedby. */
 .ow-source-field-error { font-size: var(--ow-type-label); color: var(--ow-danger); }
 
@@ -3541,7 +3541,7 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
    one of the four --ow-type-* steps, and the ratchet in ui-debt.json may only go
    down. The three state renderings (reading / NO_DATA / UNKNOWN) are carried by
    border-style and glyph as well as colour, because colour alone is not a state
-   (rules/06-ui-ux.md MUST).
+   (docs/standards/06-ui-ux.md MUST).
    ───────────────────────────────────────────────────────────────────────────── */
 
 /* The identity cell's second line: os/arch and the generation that produced the

@@ -3,7 +3,7 @@
 - 状态：Accepted（Phase 0 决策；实现按 DS-V1-1..3 分批）
 - 日期：2026-11-04
 - 版本状态：本 ADR **不**改变 `0.0.5_PARTIAL`；不构成发布授权
-- 前置：`AGENTS.md`、`rules/06-ui-ux.md`、`docs/design/ui-visual-v3/spec/{README,page-template,token-table,table-spec,machine-language-rules}.md`、`docs/adr/ADR-016-acceptance-layers-and-code-acceptance-ownership.md`
+- 前置：`AGENTS.md`、`docs/standards/06-ui-ux.md`、`docs/design/ui-visual-v3/spec/{README,page-template,token-table,table-spec,machine-language-rules}.md`、`docs/adr/ADR-016-acceptance-layers-and-code-acceptance-ownership.md`
 - 设计输入：`opsweave-visual-system-v1` 设计包（PROPOSED / NOT IMPLEMENTED；基线 `main@b9a01db`）
 - 复核基线：`origin/main@775a1e2`（2026-11-04）。设计包基线之后只有 PR #32（`auth.tsx` 登录单次往返）与 PR #33（ADR-016 文档）合入；`apps/platform-web` 的视觉层没有其他漂移。
 
@@ -14,7 +14,7 @@ V1 的目标不是换 UI 库，也不是重写界面，而是让仓库已有的 
 权威顺序（冲突时从高到低）：
 
 1. `AGENTS.md`（MUST / MUST NOT）；
-2. `rules/06-ui-ux.md`（UI MUST / Gate）；
+2. `docs/standards/06-ui-ux.md`（UI MUST / Gate）；
 3. `docs/design/ui-visual-v3/spec/*`（当前 normative UI spec）；
 4. 本 ADR（对上述 spec 的显式增补/例外）；
 5. 设计包与历史验收记录（证据与提案，不是规范）。

@@ -126,14 +126,14 @@ PASS
 | 2 | Studio header vs P3 | `page-template.md:155` 要求删除 `.studio-page .page-header` | Pattern D 保留专用 topbar，V1 只 smoke | ADR-017 §D3：Pattern D 声明例外，P3 移出 V1 |
 | 3 | 12px vs 11/13/15/26 | `token-table.md:116-133` 删除 sm；`styles.css:105` 仍 12px；table-spec 用 12×1.4 推导 70.8px | 设计包要求 15/13/11/26 | ADR-017 §D5：值先行，12→13，重算 table-spec §2.5 |
 | 4 | hero "已豁免" vs gate | `token-table.md:128-130` 声称有豁免；`check-ui-tokens.mjs:123-133` 没有 | 设计包依赖 Gate 执行例外 | ADR-017 §D5：实现命名例外表；hero 仅 login/403 |
-| 5 | 设计包十六进制表 vs token-table | `token-table.md:474-483` 明确不做颜色；`rules/06` 禁止第二套 | 设计包给出精确色值，称为"现有 Token" | 保留 token-table 为唯一权威；色值表只作基线证据；对比度 Gate 另立 ADR |
+| 5 | 设计包十六进制表 vs token-table | `token-table.md:474-483` 明确不做颜色；`docs/standards/06-ui-ux.md` 禁止第二套 | 设计包给出精确色值，称为"现有 Token" | 保留 token-table 为唯一权威；色值表只作基线证据；对比度 Gate 另立 ADR |
 | 6 | 内容边距 24 vs 32 | `page-template.md:139-142` ≥1280 = 32 | 设计包"通常 24" | 保留 page-template；修正设计包文字 |
 | 7 | 间距 Gate | `code-rules.md` R7 声称 435→52 / 115→108；`ui-debt.json:8-9` 有键；`check-ui-tokens.mjs` 不读 | 设计包要求无固定尺寸绕过 Token | 未实现 R7；V1 不宣称间距已 gate |
 | 8 | 12 组合证据矩阵 | doc 09/10 与 `AGENTS.md` 要求；实际 `ui-table-audit` 只 1440/390 light、10 路由 | 设计包要求每页 12 组合 | 本轮用新捕获脚本补齐三页 36 张；Gate 迁移另立 |
 | 9 | 截图存储 | doc 09 说 CI artifact；`tracked-png-budget.json` 408/408 | 设计包说精选基线入 Git、全矩阵 artifact | 本轮全矩阵未跟踪；预算不提高 |
-| 10 | Slice 状态词汇 | doc 10.6 没有 NOT_RUN；`rules/07` 要求 NOT_RUN | 设计包要求 PASS/FAIL/NOT_RUN | 检查级用 NOT_RUN；Slice 级映射另记 |
+| 10 | Slice 状态词汇 | doc 10.6 没有 NOT_RUN；`docs/standards/07-testing-release.md` 要求 NOT_RUN | 设计包要求 PASS/FAIL/NOT_RUN | 检查级用 NOT_RUN；Slice 级映射另记 |
 | 11 | 三轴 vs 既有封闭词汇 | `machine-language-rules.md:296` "No new state token"；`status-tone.ts` 闭集；`incidents.ts:30` trust 闭集 | 设计包加 Health/Freshness/Trust | ADR-017 §D4：表现层组合，不新增 wire code，不加 LIVE 行 |
-| 12 | fixture vs 真实数据 | `rules/06:5` 禁止 mock 冒充；设计包允许标注的 fixture | 设计包要求 fixture/live 标注 | 保留；Gate 需机读 fixture/live |
+| 12 | fixture vs 真实数据 | `docs/standards/06-ui-ux.md:5` 禁止 mock 冒充；设计包允许标注的 fixture | 设计包要求 fixture/live 标注 | 保留；Gate 需机读 fixture/live |
 | 13 | `components/domain/` | `code-rules` A1/A7 单一状态/表格权威 | 设计包建议新目录 | ADR-017 §D7：先所有权图，后建目录 |
 | 14 | 文档引用的 gate 运行 | `token-table.md`/`spec/README` 引用旧预算与旧输出 | 设计包要求实际输出 | 本轮以 HEAD 775a1e2 的实测输出为准；旧 transcript 标为历史 |
 

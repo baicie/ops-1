@@ -220,9 +220,9 @@ def main() -> int:
             FAILURES.append("integration accepted a writable preview")
 
     # Zabbix telemetry source: the contract itself must refuse the two shapes
-    # that would let missing data masquerade as a measurement (rules/05), and
+    # that would let missing data masquerade as a measurement (docs/standards/05-data.md), and
     # must refuse a credential pasted in as a literal instead of a reference
-    # (rules/03). These are negative contract tests: they prove the schema
+    # (docs/standards/03-security.md). These are negative contract tests: they prove the schema
     # discriminates, rather than asserting it in prose.
     zabbix_schema = schemas.get("zabbix-source.v1.schema.json")
     if zabbix_schema:

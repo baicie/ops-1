@@ -8,7 +8,7 @@ import { test as base, expect, type Page } from '@playwright/test';
 // login, a revocation that is obeyed, a surface that is refused before it fetches, and the
 // fact (recorded, not blessed) that a refused surface is still a readable API.
 //
-// Selectors are roles and data-testids only - never localized copy (rules/06).
+// Selectors are roles and data-testids only - never localized copy (docs/standards/06-ui-ux.md).
 const BASE = process.env.OPSWEAVE_URL || 'http://127.0.0.1:18181';
 const EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';

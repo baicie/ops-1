@@ -3,7 +3,7 @@
 - 状态：Accepted
 - 日期：2026-11-04
 - 版本状态：本 ADR **不**改变 `0.0.5_PARTIAL`；**不**构成 G13 准入
-- 前置：`AGENTS.md`、`rules/07-testing-release.md`、`rules/09-oci-supply-chain.md`、`docs/adr/ADR-014-staging-preview-deployment.md`、`docs/acceptance/g12-r4-release-readiness.md` §12
+- 前置：`AGENTS.md`、`docs/standards/07-testing-release.md`、`docs/standards/09-oci-supply-chain.md`、`docs/adr/ADR-014-staging-preview-deployment.md`、`docs/acceptance/g12-r4-release-readiness.md` §12
 - 相关实现（后续变更，不在本 ADR 中执行）：`.github/workflows/staging-preview.yml`、`.github/workflows/g12-acceptance.yml`、`tests/ci/g12_acceptance_ci.sh`、`tests/ci/check-spec-coverage.mjs`
 
 ## 1. 目标与背景
@@ -28,7 +28,7 @@ G12 R4 的结论是：远端浏览器层间歇性失败的原因是 runner→hos
 | C6 | 远端 full tier 还覆盖 11 个 surfaces spec、`ui-table-audit` + 几何门禁、`visual.spec.ts`；它们不在 53 之内，且多数只在 staging。 | `.github/workflows/staging-preview.yml:951-962,1062-1090,1681-1686` |
 | C7 | `main` 当前**没有 branch protection**；`g12-acceptance` 是否为 required check 是 GitHub 设置，不能从仓库文件证明。 | `GET /repos/baicie/ops-1/branches/main/protection` → 404（2026-11-04，外部观察） |
 | C8 | staging host 为 4 vCPU / 3.7 GB，与其他租户共享，且无法直连 github.com；compose 已把 4 个服务限额配到 4.0 vCPU / 2 GiB。 | `docs/adr/ADR-014-staging-preview-deployment.md:27-29`；`deployments/staging/compose.yaml:49-53,78-82,125-129,188-192` |
-| C9 | `rules/07` 要求每个检查记录「是否真实运行」，未执行项为 `NOT_RUN`；`AGENTS.md` 禁止把 `UNKNOWN/PARTIAL/NO_DATA` 伪装成健康，禁止用组件存在/页面显示代替真实 E2E。 | `rules/07-testing-release.md:3,8`；`AGENTS.md` 绝对禁止章 |
+| C9 | `docs/standards/07-testing-release.md` 要求每个检查记录「是否真实运行」，未执行项为 `NOT_RUN`；`AGENTS.md` 禁止把 `UNKNOWN/PARTIAL/NO_DATA` 伪装成健康，禁止用组件存在/页面显示代替真实 E2E。 | `docs/standards/07-testing-release.md:3,8`；`AGENTS.md` 绝对禁止章 |
 
 C1 + C5 是最强约束：**远端层今天并不是 PR 门禁，而确定性层又还没跑完整套件**。因此不存在「今天把代码验收交给确定性层就立刻有完整门禁」的选项；只能分两步，且第二步的前置是条件 1。
 
@@ -40,7 +40,7 @@ C1 + C5 是最强约束：**远端层今天并不是 PR 门禁，而确定性层
 
 - **A1 自托管 runner 装在 staging host**：被 C8 / ADR-014 C11 阻断——host 无法直连 `github.com`（实测 000），runner 无法注册或轮询控制面；仓库内没有代理/中继记录。安装 Node/Chromium 只是第二道成本。
 - **A2 附近 VPS 注册为 runner**：新基础设施。无候选主机、无路径实测、无预算/所有者；「附近」是未测量的假设——唯一的好基线（TTFB 33–111 ms）来自 host 本机，不来自任何 VPS；放在能稳定访问 github.com 的位置可能又回到跨境路径。
-- **A3 从现有 workflow 经 SSH 在 host 上跑 Playwright 容器**：唯一复用现有链路的形态（GitHub→host SSH、host→ghcr.io 都可用），但把浏览器搬到 host。需要新的 digest 固定/非 root/签名/SBOM/扫描镜像（`rules/09`）、host 级锁与 cgroup 限额，并让 smoke job 获得今天没有的 sudo 级 SSH 密钥，或改在持有该密钥与 `packages:write` 的 deploy job 里运行第三方测试代码——两种都扩大信任边界。并且该层不再是「公网远端」：真实入口/防火墙回归会失去唯一的外部浏览器覆盖。
+- **A3 从现有 workflow 经 SSH 在 host 上跑 Playwright 容器**：唯一复用现有链路的形态（GitHub→host SSH、host→ghcr.io 都可用），但把浏览器搬到 host。需要新的 digest 固定/非 root/签名/SBOM/扫描镜像（`docs/standards/09-oci-supply-chain.md`）、host 级锁与 cgroup 限额，并让 smoke job 获得今天没有的 sudo 级 SSH 密钥，或改在持有该密钥与 `packages:write` 的 deploy job 里运行第三方测试代码——两种都扩大信任边界。并且该层不再是「公网远端」：真实入口/防火墙回归会失去唯一的外部浏览器覆盖。
 
 即使 proximity 降低了每请求地板，它也**不解释 180 s 卡顿**：C4 的失败运行里 netprobe 正常而 Playwright 仍超时，记录本身说此时应查浏览器/进程侧（`docs/acceptance/g12-staging-runner-measurement.md:318-322`）。A 是缓解，不是已证明的修复；且不是仓库内可完成的变更。
 
@@ -92,7 +92,7 @@ C1 + C5 是最强约束：**远端层今天并不是 PR 门禁，而确定性层
 - 持久数据库上的迁移/升级（harness 每次 DROP/CREATE，`tests/ci/g12_acceptance_ci.sh:55-58`）；
 - node readiness、插件 bridge、真实公网入口/TLS。
 
-这些由 `deployment_environment`（身份/健康）或独立的 release gate（`rules/07`、`rules/09`）负责。任何 `code_acceptance=PASSED` 都不得被读成对上述项的接受。
+这些由 `deployment_environment`（身份/健康）或独立的 release gate（`docs/standards/07-testing-release.md`、`docs/standards/09-oci-supply-chain.md`）负责。任何 `code_acceptance=PASSED` 都不得被读成对上述项的接受。
 
 ## 7. 后果与风险
 

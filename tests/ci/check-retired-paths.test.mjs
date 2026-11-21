@@ -26,7 +26,7 @@ const RETIRED = 'apps/platform-web';
 /** Every live root the scanner insists on, so a fixture is "complete" not "convenient". */
 const LIVE_ROOTS = [
   'apps', 'packages', 'plugins', 'tests', 'scripts', '.github',
-  'deployments', 'contracts', 'crates', 'rules',
+  'deployments', 'contracts', 'crates', 'docs/standards',
 ];
 const LIVE_FILES = [
   'README.md', 'AGENTS.md', 'CONTRIBUTING.md', 'SECURITY.md', 'Makefile',

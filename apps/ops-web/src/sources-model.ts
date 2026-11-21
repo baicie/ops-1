@@ -3,7 +3,7 @@ import type { Capability, Extension, PluginSummary, Publisher } from '@opsweave/
 /**
  * What a "source" is on this platform, derived rather than hard-coded per vendor.
  *
- * A telemetry connector is not a kernel concept: `rules/01-architecture.md` keeps business
+ * A telemetry connector is not a kernel concept: `docs/standards/01-architecture.md` keeps business
  * function in plugins, so the kernel knows only "a plugin PROVIDES capability `x.y.v1` at
  * major N". This module is therefore the one place that answers "which of those plugins is a
  * data source", and it answers it from the capability registry (`GET /api/v1/capabilities`)
@@ -357,7 +357,7 @@ export function summarize(connectors: Connector[]): SourcesSummary {
 /**
  * What a credential field may contain.
  *
- * `rules/03-security.md` is unconditional: plugin secrets travel as references with short-lived
+ * `docs/standards/03-security.md` is unconditional: plugin secrets travel as references with short-lived
  * access grants and must never enter a log, a manifest, a URL or an error response. So the field
  * accepts exactly two shapes and rejects everything else - including anything that merely *looks*
  * like a secret, which is the case worth catching, because a pasted token is the mistake this

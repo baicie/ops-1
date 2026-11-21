@@ -1,6 +1,6 @@
 # 代码质量规则清单 — apps/platform-web/src
 
-范围：`apps/platform-web/src/**`（例外在 §5 单列）。来源四条：`AGENTS.md` 的绝对禁止项、`rules/01-…10-*.md`、
+范围：`apps/platform-web/src/**`（例外在 §5 单列）。来源四条：`AGENTS.md` 的绝对禁止项、`docs/standards/01-architecture.md-…10-*.md`、
 `docs/design/ui-visual-v3/spec/*`（token-table / page-template / table-spec / machine-language-rules / ui-debt.json），
 以及这份代码里已经建立的约定（`status-tone.ts` 唯一状态表、`verify-after-write.ts` 写后回读、`facts-ledger.ts` 去重账本、
 `installation-state.ts` 单一推导、`identity.ts`/`age.ts` 单一格式化、`table-kit.tsx` 表格原语）。

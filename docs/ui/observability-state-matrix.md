@@ -1,7 +1,7 @@
 # `/app/observability` — interaction state matrix
 
 Scope: the two routes added by this change — `/app/observability` (fleet) and
-`/app/observability/nodes/{id}` (one entity). Required by `rules/06-ui-ux.md`
+`/app/observability/nodes/{id}` (one entity). Required by `docs/standards/06-ui-ux.md`
 (「Loading/Empty/Error/Unknown/Partial/Stale/Forbidden/Conflict 语义完整」).
 
 Every row names the file and line that renders it, so a reviewer can check the claim against the

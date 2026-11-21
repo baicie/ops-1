@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://opsweave.invalid/schema/zabbix-source.v1.schema.json",
   "title": "OpsWeave Zabbix Source v1",
-  "description": "Telemetry source contract for the opsweave.zabbix-source plugin. The plugin owns its own schema and storage; the Kernel never gains Zabbix knowledge (ADR-006, rules/01). Credentials appear only as references (rules/03): a secret value never appears in this schema, in a URL, in a log line or in an error body. Every collection result carries an outcome that distinguishes EMPTY, NO_DATA, PARTIAL, UNKNOWN, UNAVAILABLE and TIMEOUT, and a missing sample is null with a reason - never 0 (rules/05).",
+  "description": "Telemetry source contract for the opsweave.zabbix-source plugin. The plugin owns its own schema and storage; the Kernel never gains Zabbix knowledge (ADR-006, docs/standards/01-architecture.md). Credentials appear only as references (docs/standards/03-security.md): a secret value never appears in this schema, in a URL, in a log line or in an error body. Every collection result carries an outcome that distinguishes EMPTY, NO_DATA, PARTIAL, UNKNOWN, UNAVAILABLE and TIMEOUT, and a missing sample is null with a reason - never 0 (docs/standards/05-data.md).",
   "$defs": {
     "CredentialReference": {
       "type": "object",
@@ -96,18 +96,18 @@
         "errorCode": {
           "type": ["string", "null"],
           "maxLength": 80,
-          "description": "Stable code for the UI to localize (rules/06). Never the raw upstream sentence, and never a secret."
+          "description": "Stable code for the UI to localize (docs/standards/06-ui-ux.md). Never the raw upstream sentence, and never a secret."
         }
       }
     },
     "CollectionOutcome": {
       "type": "string",
       "enum": ["OK", "EMPTY", "NO_DATA", "PARTIAL", "UNKNOWN", "UNAVAILABLE", "TIMEOUT"],
-      "description": "Seven distinct facts, which rules/05 forbids collapsing. OK: the window was covered and samples were returned. EMPTY: the server answered authoritatively and the item recorded nothing in the window - the absence is established. NO_DATA: whether anything was recorded cannot be established (item unsupported or disabled, history trimmed by housekeeping below the window, item unknown to this source). PARTIAL: some requested items were answered and others were not, or the window was clamped by the budget. UNKNOWN: the outcome itself is not known (timeout mid-flight, transport failure after the request was sent). UNAVAILABLE: the endpoint was never reached, so nothing was requested. TIMEOUT: the deadline passed before an answer."
+      "description": "Seven distinct facts, which docs/standards/05-data.md forbids collapsing. OK: the window was covered and samples were returned. EMPTY: the server answered authoritatively and the item recorded nothing in the window - the absence is established. NO_DATA: whether anything was recorded cannot be established (item unsupported or disabled, history trimmed by housekeeping below the window, item unknown to this source). PARTIAL: some requested items were answered and others were not, or the window was clamped by the budget. UNKNOWN: the outcome itself is not known (timeout mid-flight, transport failure after the request was sent). UNAVAILABLE: the endpoint was never reached, so nothing was requested. TIMEOUT: the deadline passed before an answer."
     },
     "MetricSample": {
       "type": "object",
-      "description": "One observation. `value` is null whenever there is no observed number, and `absenceReason` says why. A null is never rendered or stored as 0 (rules/05). The two fields are bound by the if/then below, so a schema-valid sample can never be an unexplained null nor a number carrying an absence reason - the 'no data is not zero' rule is enforced by the contract, not only asserted in prose.",
+      "description": "One observation. `value` is null whenever there is no observed number, and `absenceReason` says why. A null is never rendered or stored as 0 (docs/standards/05-data.md). The two fields are bound by the if/then below, so a schema-valid sample can never be an unexplained null nor a number carrying an absence reason - the 'no data is not zero' rule is enforced by the contract, not only asserted in prose.",
       "additionalProperties": false,
       "required": ["occurredAt", "value"],
       "properties": {
@@ -163,7 +163,7 @@
     },
     "CollectionResult": {
       "type": "object",
-      "description": "One collection over one time window. Counts are reported with their unknown denominator (rules/05): requestedItems is what was asked for, answeredItems what came back, and the difference is visible rather than absorbed.",
+      "description": "One collection over one time window. Counts are reported with their unknown denominator (docs/standards/05-data.md): requestedItems is what was asked for, answeredItems what came back, and the difference is visible rather than absorbed.",
       "additionalProperties": false,
       "required": ["collectionId", "sourceId", "outcome", "requestedItems", "answeredItems", "series", "budget", "observedAt", "contentRef"],
       "properties": {

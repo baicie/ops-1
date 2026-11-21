@@ -47,7 +47,7 @@ opsweave/
   contracts/{schema,openapi,examples}/
   deployments/{local,two-node}/
   tests/{contract,integration,system,fault-injection,ui}/
-  docs/ rules/ skills/ plan/ scripts/
+  docs/ (含 standards/) skills/ plan/ scripts/
 ```
 
 ## 内部 Kernel 模块职责

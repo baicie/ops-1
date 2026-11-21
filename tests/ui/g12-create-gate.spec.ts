@@ -16,7 +16,7 @@ import { adminSeed, createAccount, createWorkspace, type SeedAccount } from './s
  * the incident list), because "the memberships did not answer" is a state the server cannot be
  * asked to produce on demand.
  *
- * Selectors are data-testids only - never localized copy (rules/06).
+ * Selectors are data-testids only - never localized copy (docs/standards/06-ui-ux.md).
  */
 
 const ADMIN_EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';

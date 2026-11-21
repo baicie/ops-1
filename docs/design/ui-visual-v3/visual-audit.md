@@ -114,7 +114,7 @@
 | 7 | **表格单元格统一基线**：多行首列顶对齐、单行列垂直居中 → 同行文字不在一条线上 | Plugins, Nodes, Governance, Job Detail | 每张表都歪，用户读横排时眼睛需要上下跳 | §3 页 02/11/13 |
 | 8 | **修 390 横向溢出**：Job Detail `scrollWidth=613` vs 内容宽 375（+238px），元凶是 `<code class="mono small">` 无 `overflow-wrap` | Job Detail | 唯一真正撑破视口的页面；且撑破后整页右侧留白 223px | §2.6 |
 | 9 | **面包屑只截最后一段**：`.breadcrumbs{overflow:hidden}` 让每项 shrink 到 0，zh 4 字标签被压到 25px、`/` 分隔符压到 0–2px | 9 页在 390 下 | 28 个被裁节点，移动端首屏左上角就是残句 | §2.5、§2.6 |
-| 10 | **清掉不该出现在 UI 上的原始字段名与开发者措辞**：`heartbeatIntervalSeconds`/`maintenancePerNode` 直接渲染；`(the domain ADR is still open)` 给终端用户看 | Diagnostics, /app/incidents, /app/home | 违反 rules/06"所有用户可见文案必须走 i18n 目录"，且是唯一一类"用户看不懂但一眼看出未完成"的文案 | §3 页 18、S2、S3 |
+| 10 | **清掉不该出现在 UI 上的原始字段名与开发者措辞**：`heartbeatIntervalSeconds`/`maintenancePerNode` 直接渲染；`(the domain ADR is still open)` 给终端用户看 | Diagnostics, /app/incidents, /app/home | 违反 docs/standards/06-ui-ux.md"所有用户可见文案必须走 i18n 目录"，且是唯一一类"用户看不懂但一眼看出未完成"的文案 | §3 页 18、S2、S3 |
 
 第 11–16 项（未列入前十但同样该改）：Studio 18 个草稿按钮墙；Studio 侧栏塌成 64px 后 brand 溢出；`Activity` 25,158px 高的无分页列表；`/app/*` 侧栏仍展示 Kernel Commit SHA；Governance 表格列宽失衡（Schema 列 300px 只放 `r1`）；Diagnostics 六张指标卡被拆成"2 张卡片 + 1 条分隔条"。
 
@@ -305,7 +305,7 @@ ADR-UI-002 写着"所有令牌必须属于 OpsWeave（禁止并行第二套）"�
 2. **Overview（11 张 / 最大 2 层）**："Availability" 面板内嵌 4 张 `.module-card`；下层 4 张 `.ow-metric`；再下层 2 个 `.panel`。三级容器层层包裹，导致同一屏出现 3 种卡片外观（0 阴影面板 / 带阴影指标卡 / 灰底内嵌卡）。
 3. **/app/incidents（6 张 / 2 层 / 视觉 3 层）**：`.panel` → `.investigation-region`（有头有体）→ 虚线 `.investigation-slot`。DOM 只数到 2 层，视觉上是**三层边界**（实线 + 实线 + 虚线）围住一句"Empty slot – no data source"。
 
-**反例（做得好）**：`/admin/jobs` 与 `/admin/pipelines` 只有 1 张卡（表格面板），信息靠表格本身承载，符合 rules/06 "SHOULD：表格、日志、画布使用专属高密度组件而非 Card 堆砌"。
+**反例（做得好）**：`/admin/jobs` 与 `/admin/pipelines` 只有 1 张卡（表格面板），信息靠表格本身承载，符合 docs/standards/06-ui-ux.md "SHOULD：表格、日志、画布使用专属高密度组件而非 Card 堆砌"。
 
 ### 2.4 Q4 · 状态语义
 
@@ -332,7 +332,7 @@ ADR-UI-002 写着"所有令牌必须属于 OpsWeave（禁止并行第二套）"�
 | `FAILED` | 红色实线药丸 + 警告三角 | **唯一清晰的状态** |
 | `ACCEPTED`（审计事件） | 灰底虚线药丸，Overview/Diagnostics 里 9–20 个连续出现 | "一整屏都不确定" |
 
-这条直接违反 rules/06 "MUST：主要状态不只靠颜色"的**反面更严重版本**：这里连颜色都没给，因为归到了 unknown 的视觉语言。而且它把"成功"和"未知"合并——**正是 AGENTS.md 明令禁止的"把 UNKNOWN 伪装成健康状态"的镜像错误：把健康伪装成 UNKNOWN**。
+这条直接违反 docs/standards/06-ui-ux.md "MUST：主要状态不只靠颜色"的**反面更严重版本**：这里连颜色都没给，因为归到了 unknown 的视觉语言。而且它把"成功"和"未知"合并——**正是 AGENTS.md 明令禁止的"把 UNKNOWN 伪装成健康状态"的镜像错误：把健康伪装成 UNKNOWN**。
 
 #### 2.4.3 状态之间的视觉可分性（`.status-indicator--*`，L1071–1084）
 
@@ -936,7 +936,7 @@ ADR-UI-002 写着"所有令牌必须属于 OpsWeave（禁止并行第二套）"�
 - **中英文排版**：zh 2496 vs en 2542（-1.8%）。**Runtime policies 的字段名不翻译**，所以中英文下这一行完全相同。
 - **移动端**：390 页高 4156；Runtime policies 5 列在 390 下的排布未在截图中验证，但 kv-grid 在 ≤560 变 1 列（L608）。
 
-**本页最严重问题（违反 rules/06）**：Runtime policies 直接把后端字段名当 UI 文案渲染——heartbeatIntervalSeconds / maintenancePerNode / nodeStateSeconds / requestTimeoutSeconds / sessionHours。这些不在 i18n 目录中，也不该出现在面向用户的表格里。
+**本页最严重问题（违反 docs/standards/06-ui-ux.md）**：Runtime policies 直接把后端字段名当 UI 文案渲染——heartbeatIntervalSeconds / maintenancePerNode / nodeStateSeconds / requestTimeoutSeconds / sessionHours。这些不在 i18n 目录中，也不该出现在面向用户的表格里。
 
 | 维度 | 分 | 理由 |
 |---|---|---|
@@ -989,7 +989,7 @@ ADR-UI-002 写着"所有令牌必须属于 OpsWeave（禁止并行第二套）"�
 - **卡片与边框**：login-panel 无卡片，表单直接铺在 --ow-bg 上（**不套卡**），符合"表单不需要卡片"的取向。
 - **栅格与对齐**：grid-template-columns: minmax(0,1.15fr) minmax(380px,.85fr)（L519）→ 左右比例固定；≤1024 变单列并隐藏品牌区（L557–558）。
 - **空间密度**：一屏，留白充足。
-- **交互细节**：单一主 CTA（Sign in）；**E2E 用可见文案定位该按钮**（`visual-layout.spec.ts:11` getByRole('button', { name: 'Sign in' })）——违反 rules/06"E2E 禁止按本地化文案定位"，根因是按钮缺 data-testid。
+- **交互细节**：单一主 CTA（Sign in）；**E2E 用可见文案定位该按钮**（`visual-layout.spec.ts:11` getByRole('button', { name: 'Sign in' })）——违反 docs/standards/06-ui-ux.md"E2E 禁止按本地化文案定位"，根因是按钮缺 data-testid。
 - **深浅色一致性**：login-page 用 --ow-bg，login-brand 用 --ow-surface + border-right；暗色下品牌区与表单区靠 1px 边框分隔（与全站同病）。
 - **中英文排版**：登录页在隔离 context 中只采到一种语言（390）→ 中英文对比**未验证**。
 - **移动端**：≤1024 隐藏品牌区、单列表单 min-height 100vh（L557–559）——**决策正确**：手机上不该先让用户读一段营销文案。
@@ -1214,7 +1214,7 @@ ADR-UI-002 写着"所有令牌必须属于 OpsWeave（禁止并行第二套）"�
 4. `Activity` 25,158px 无分页；`Diagnostics` 审计列表 20 行无分页。
 5. `/app/*` 侧栏复用 Admin 的版本徽标（Environment/Commit/Deployed At）。
 6. `kpi-grid` 等 10 条死规则仍活在 4 个媒体查询里（删规则会连带删查询）。
-7. E2E 依赖可见文案（`visual-layout.spec.ts:11`），违反 rules/06。
+7. E2E 依赖可见文案（`visual-layout.spec.ts:11`），违反 docs/standards/06-ui-ux.md。
 8. `tailwind.config.cjs` 的 `fontSize` 映射只有 5 档，而 `styles.css` 用了 19 个字号值——即使全站改用 Tailwind 类也无法覆盖现有排版。
 
 ### 5.3 我认为**做得好、不应在后续重构中被破坏**的部分

@@ -6,7 +6,7 @@ ARG BUILD_DIGEST
 WORKDIR /app
 COPY package.json package-lock.json ./
 # The plugin's only runtime dependency is `pg`, used to reach the
-# Kernel-provisioned plugin schema. npm ci keeps it locked (rules/09).
+# Kernel-provisioned plugin schema. npm ci keeps it locked (docs/standards/09-oci-supply-chain.md).
 RUN npm ci --omit=dev --no-audit --no-fund
 COPY zabbix.mjs server.mjs storage.mjs identity.mjs credential-binding.mjs ./
 ENV NODE_ENV=production \
@@ -15,7 +15,7 @@ ENV NODE_ENV=production \
     OPSWEAVE_PLUGIN_VERSION=${PLUGIN_VERSION} \
     OPSWEAVE_CAPABILITY_DIGEST=${CAPABILITY_DIGEST} \
     OPSWEAVE_BUILD_DIGEST=${BUILD_DIGEST}
-# Non-root, matching the other reference plugins (rules/09: the runtime must not
+# Non-root, matching the other reference plugins (docs/standards/09-oci-supply-chain.md: the runtime must not
 # need root and the image must not rely on being given it).
 USER 65532:65532
 EXPOSE 8080
