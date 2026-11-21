@@ -37,6 +37,7 @@
  * Exit 0 when every parsed reference resolves, 1 otherwise, 2 on a parse error.
  */
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname, join, normalize, relative, resolve } from 'node:path';
 
 const ROOT = process.cwd();
@@ -64,17 +65,43 @@ function dangling(where, what, target) {
   problems.push({ where, what, target });
 }
 
-/** Does `target` exist relative to `base`? `*` in the last segment is a glob. */
+/**
+ * Paths `.gitignore` covers, so a COPY of one is a BUILD INPUT, not a dangling
+ * reference. Resolved lazily, one `git check-ignore` per unresolved path - the
+ * set of unresolved paths is small, and caching the whole ignore database would
+ * mean reimplementing gitignore semantics in this file.
+ */
+function isBuildOutput(full) {
+  const rel = relative(ROOT, full);
+  try {
+    execFileSync('git', ['check-ignore', '--quiet', rel], {
+      cwd: ROOT, stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    return true; // exit 0 means "ignored"
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Does `target` exist relative to `base`? `*` in the last segment is a glob.
+ *
+ * A path that does not exist but IS GITIGNORED is not a finding: it is a build
+ * input. `plugins/hello-go/Dockerfile` copies `hello-go-linux`, which `.gitignore`
+ * lists at line 18 - the file is produced by the build the Dockerfile is part
+ * of. The first CI run of this checker reported all three of these as dangling,
+ * which is the false-positive failure mode its own header warns about: a checker
+ * that cries wolf on correct files gets ignored.
+ */
 function resolves(base, target) {
   const full = resolve(base, target);
   if (!full.startsWith(ROOT)) return true; // outside the repo: not ours to check
   if (existsSync(full)) return true;
   if (target.includes('*')) {
-    // A glob is satisfied when its literal prefix directory exists.
     const prefix = target.slice(0, target.indexOf('*'));
     return existsSync(resolve(base, prefix));
   }
-  return false;
+  return isBuildOutput(full);
 }
 
 function walk(dir, out = []) {
