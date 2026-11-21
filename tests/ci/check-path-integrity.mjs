@@ -73,14 +73,29 @@ function dangling(where, what, target) {
  */
 function isBuildOutput(full) {
   const rel = relative(ROOT, full);
-  try {
-    execFileSync('git', ['check-ignore', '--quiet', rel], {
-      cwd: ROOT, stdio: ['ignore', 'ignore', 'ignore'],
-    });
-    return true; // exit 0 means "ignored"
-  } catch {
-    return false;
-  }
+  const ignored = (p) => {
+    try {
+      execFileSync('git', ['check-ignore', '--quiet', p], {
+        cwd: ROOT, stdio: ['ignore', 'ignore', 'ignore'],
+      });
+      return true; // exit 0 means "ignored"
+    } catch {
+      return false;
+    }
+  };
+  // THE PATH ITSELF, AND A CHILD OF IT.
+  //
+  // `.gitignore` line 17 is `plugins/hello-java/jre/` - a directory rule with a
+  // trailing slash. `git check-ignore plugins/hello-java/jre` returns NOT
+  // ignored in a fresh clone, because the path does not exist and git cannot
+  // tell it is a directory; `git check-ignore plugins/hello-java/jre/bin`
+  // returns ignored, because the path SHAPE is unambiguous.
+  //
+  // Measured in a clean clone: the Dockerfile was reported as copying a
+  // dangling `jre` while the same repository at HEAD, with the directory
+  // present in the working tree, passed. The check must not depend on whether
+  // a build has run in this checkout.
+  return ignored(rel) || ignored(`${rel}/.probe`);
 }
 
 /**
