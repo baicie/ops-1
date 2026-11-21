@@ -192,10 +192,39 @@ fi
 # Batch mode keeps the output non-interactive and keeps warnings and errors; it
 # gives up only the progress noise. It does not make failures less likely - it
 # makes the next one explain itself.
+#
+# RATE LIMITING IS A DIFFERENT FAILURE FROM THE ONE THE DOC ABOVE RECORDS, AND
+# IT IS THE ONE THAT NOW HAPPENS.
+#
+# docs/ci/plugin-lifecycle-maven-failure.md:48-56 records an attempt at
+# `-Dmaven.wagon.http.retryHandler.count=3` that was reverted because it did not
+# help - correctly, because that incident was a TIMEOUT, and retrying a timeout
+# inside the same budget changes nothing.
+#
+# Measured 2026-11-21, twice on this repository's own CI (runs 44881173622 and
+# 44888419414), with a message the earlier incident never produced:
+#
+#   Could not transfer .../spring-boot-starter-parent-3.3.5.pom ...
+#   status: 429
+#
+# 429 is the registry asking us to come back later. That is exactly the failure
+# a backed-off retry fixes, and exactly what a timeout patch does not. So the
+# two properties that were reverted for the wrong failure are added back for
+# the right one, and nothing else about the invocation changes.
+#
+# `aether.connector.connectTimeout` / `.requestTimeout` are the resolver's own
+# knobs; `retryHandler.count` is what turns a 429 into a later attempt. A
+# retry that is still rate-limited after 4 tries fails as loudly as before -
+# this raises the chance of success, it does not hide the failure.
+MAVEN_RESILIENCE=(
+  -Dmaven.wagon.http.retryHandler.count=4
+  -Daether.connector.connectTimeout=60000
+  -Daether.connector.requestTimeout=180000
+)
 if [ -x /opt/homebrew/opt/openjdk@21/bin/java ]; then
-  JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -B -f plugins/hello-java/pom.xml -DskipTests package
+  JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -B "${MAVEN_RESILIENCE[@]}" -f plugins/hello-java/pom.xml -DskipTests package
 else
-  mvn -B -f plugins/hello-java/pom.xml -DskipTests package
+  mvn -B "${MAVEN_RESILIENCE[@]}" -f plugins/hello-java/pom.xml -DskipTests package
 fi
 JAVA_BUILD="$(sha256_file plugins/hello-java/target/hello-java-0.0.1.jar)"
 docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION=0.0.1 --build-arg CAPABILITY_DIGEST="$JAVA_CAP" --build-arg BUILD_DIGEST="$JAVA_BUILD" -t "$REGISTRY/opsweave/hello-java:0.0.1" plugins/hello-java >/dev/null
