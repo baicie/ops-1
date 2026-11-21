@@ -350,6 +350,12 @@ jobs:
       # Its first run found two real entries: `tests/acceptance/g11_*.sh`,
       # a file `git log --all --diff-filter=A` proves was never added.
       - run: node tests/ci/check-paths-filters.mjs
+      # Root hygiene: the top level stays legible, build output stays out of the
+      # index, and one ecosystem keeps one lockfile. An unapproved directory is
+      # reported WITH how to approve it - a project that cannot add a top-level
+      # directory puts the new thing somewhere worse.
+      - run: node --test tests/ci/check-root-hygiene.test.mjs
+      - run: node tests/ci/check-root-hygiene.mjs
       # The standards moved to docs/standards/. This asserts the three things
       # path integrity cannot see: every rule is indexed, the two entry
       # documents name the new location, and no stale rules/ copy was left
