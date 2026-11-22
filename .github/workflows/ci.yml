@@ -1887,6 +1887,14 @@ jobs:
           # mistake cannot reach a terminal.
           node tests/ci/check-ruleset-payload.mjs --selftest
           node tests/ci/check-ruleset-payload.mjs
+          # The migration's PRECONDITION: can all ten contexts the candidate
+          # ruleset requires actually appear on every pull request? A required
+          # context whose workflow has a path filter, or whose job is conditional,
+          # leaves the PR on "Expected - Waiting for status to be reported" with no
+          # timeout and no override. That is worse than an advisory gate, so it is
+          # checked before the ruleset is written rather than after.
+          node --test tests/ci/check-required-contexts.test.mjs
+          node tests/ci/check-required-contexts.mjs
           # Is the gate actually enforceable? Reads the LIVE ruleset, because a
           # flawless workflow that nothing requires gates nothing. ADVISORY and
           # PARTIAL exit 0 - they are facts for a migration to decide about, not
@@ -1899,6 +1907,12 @@ jobs:
           # offline; the live write/verify path needs a token and belongs to the
           # certification workflow, not here.
           node scripts/release-receipt.mjs --selftest
+          # The receipt's own counterfactuals. `--selftest` above proves the
+          # refusal messages; this file proves the two defects MEASURED against
+          # the previous implementation: a required suite that was red on both
+          # sides came back CERTIFIED, and a sticky-success rule let an old green
+          # mask a newer failing attempt.
+          node --test scripts/release-receipt.test.mjs
           # A new shell script must be linted without anyone remembering to add
           # it, and a new workflow must be seen. Counts the unpinned actions too,
           # without failing on them - 126 exist today and making that fatal would
