@@ -1887,6 +1887,14 @@ jobs:
           # mistake cannot reach a terminal.
           node tests/ci/check-ruleset-payload.mjs --selftest
           node tests/ci/check-ruleset-payload.mjs
+          # The migration's PRECONDITION: can all ten contexts the candidate
+          # ruleset requires actually appear on every pull request? A required
+          # context whose workflow has a path filter, or whose job is conditional,
+          # leaves the PR on "Expected - Waiting for status to be reported" with no
+          # timeout and no override. That is worse than an advisory gate, so it is
+          # checked before the ruleset is written rather than after.
+          node --test tests/ci/check-required-contexts.test.mjs
+          node tests/ci/check-required-contexts.mjs
           # Is the gate actually enforceable? Reads the LIVE ruleset, because a
           # flawless workflow that nothing requires gates nothing. ADVISORY and
           # PARTIAL exit 0 - they are facts for a migration to decide about, not
@@ -1899,6 +1907,23 @@ jobs:
           # offline; the live write/verify path needs a token and belongs to the
           # certification workflow, not here.
           node scripts/release-receipt.mjs --selftest
+          # The receipt's own counterfactuals. `--selftest` above proves the
+          # refusal messages; this file proves the two defects MEASURED against
+          # the previous implementation: a required suite that was red on both
+          # sides came back CERTIFIED, and a sticky-success rule let an old green
+          # mask a newer failing attempt.
+          node --test scripts/release-receipt.test.mjs
+          # The certification ledger. `release-certification.yml` used
+          # `unique_by(.name)` on the check-run list, which keeps the LAST element
+          # in ARRAY ORDER - and GitHub does not promise an order. Measured: an old
+          # success followed by a NEW failure reported `rust=success`.
+          node --test scripts/ci/release-check-ledger.test.mjs
+          # The certification's TARGET decision. It was five shell branches with no
+          # test, because "the workflow exists" was taken as "the chain is
+          # verified". Writing the cases found a real hole: a command substitution
+          # in an assignment does not trip `set -e`, so a refused target left the
+          # step at rc=0 and the next step certified whatever it could find.
+          node --test scripts/ci/resolve-certification-target.test.mjs
           # A new shell script must be linted without anyone remembering to add
           # it, and a new workflow must be seen. Counts the unpinned actions too,
           # without failing on them - 126 exist today and making that fatal would

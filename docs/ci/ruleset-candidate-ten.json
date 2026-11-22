@@ -1,0 +1,80 @@
+{
+  "_comment": "Restores required status checks on main WITHOUT touching the four protections it already has. Generated from the live ruleset (id 26958761, updated_at 2026-11-20T11:03:08.398+08:00) by reading it, not by typing it: the four protective rules and every pull_request parameter are copied verbatim. See docs/ci/ruleset-restore.md.",
+  "_profile": "candidate-ten",
+  "name": "main-protection",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "~DEFAULT_BRANCH"
+      ]
+    }
+  },
+  "bypass_actors": [],
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "required_linear_history"
+    },
+    {
+      "parameters": {
+        "allowed_merge_methods": [
+          "squash"
+        ],
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_extra_approval_for_unattributed_changes": true,
+        "require_last_push_approval": false,
+        "required_approving_review_count": 0,
+        "required_review_thread_resolution": true,
+        "required_reviewers": []
+      },
+      "type": "pull_request"
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          {
+            "context": "contracts"
+          },
+          {
+            "context": "linux-runtime"
+          },
+          {
+            "context": "platform-image-build"
+          },
+          {
+            "context": "platform-only"
+          },
+          {
+            "context": "quality-faults"
+          },
+          {
+            "context": "rust"
+          },
+          {
+            "context": "spec-coverage"
+          },
+          {
+            "context": "web"
+          },
+          {
+            "context": "web-unit"
+          },
+          {
+            "context": "ci-gate"
+          }
+        ]
+      }
+    }
+  ]
+}

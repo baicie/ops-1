@@ -14,6 +14,7 @@ mod logs;
 mod nodes;
 mod packages;
 mod pipeline;
+mod placement_preflight;
 mod plugins;
 mod publishers;
 mod receipts;
