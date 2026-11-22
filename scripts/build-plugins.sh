@@ -246,7 +246,20 @@ fi
 mvn_package() {
   local attempt=1 out
   while :; do
-    if out="$(mvn -B "${MAVEN_RESILIENCE[@]}" -f plugins/hello-java/pom.xml -DskipTests package 2>&1)"; then
+    # `-U` IS WHAT MAKES THE RETRY A RETRY.
+    #
+    # Measured on CI (run 45001045124): attempt 1 failed with a 429, the retry
+    # ran 16 seconds later and failed immediately with
+    #
+    #   was not found in ... during a previous attempt. This failure was cached
+    #   in the local repository and resolution is not reattempted until the
+    #   update interval of central has elapsed or updates are forced
+    #
+    # Maven had cached the failure, so the retry never issued a second request -
+    # it re-read its own record of the first one and exited. A loop that repeats
+    # a command whose result is memoised is not a retry; it is the same failure
+    # with extra wall-clock. `-U` forces the re-resolution the retry depends on.
+    if out="$(mvn -B -U "${MAVEN_RESILIENCE[@]}" -f plugins/hello-java/pom.xml -DskipTests package 2>&1)"; then
       printf '%s\n' "$out"
       return 0
     fi
