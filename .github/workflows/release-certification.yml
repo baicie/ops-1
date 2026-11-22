@@ -72,27 +72,39 @@ jobs:
           INPUT_SHA: ${{ inputs.sha }}
           TAG_REF: ${{ github.ref }}
           EVENT: ${{ github.event_name }}
+        # THE DECISION IS A SCRIPT, NOT A SHELL BLOCK.
+        #
+        # Five branches - tag vs dispatch, 40-hex, a real commit, an ancestor of
+        # main, and the ref the receipt will claim - with no test, because "the
+        # workflow exists" was taken as "the chain is verified". That is the
+        # assumption this repository has already recorded as wrong.
+        #
+        # `scripts/ci/resolve-certification-target.mjs` is the same decision with 11
+        # cases. It also refuses a UPPERCASE sha: git accepts one, and
+        # `release-receipt.mjs` validates `^[0-9a-f]{40}$` - so the old block could
+        # resolve a target whose own receipt would then fail verification.
         run: |
           set -euo pipefail
-          if [ "$EVENT" = "push" ]; then
-            # A tag names a commit; certify what the tag points at, not HEAD.
-            sha="$(git rev-parse "refs/tags/${TAG_REF#refs/tags/}^{commit}")"
-            ref="$TAG_REF"
-          else
-            sha="$INPUT_SHA"
-            ref="refs/heads/main"
+          # NOT `OUT="$(...)"`. A command substitution in an assignment does not
+          # trip `set -e`: measured, the resolver exited 1 on a malformed sha and the
+          # step still finished with rc=0, certifying whatever the next step could
+          # find. Capture to a file and check the code explicitly.
+          if ! node scripts/ci/resolve-certification-target.mjs \
+              --event "$EVENT" --tag-ref "$TAG_REF" --sha "$INPUT_SHA" > /tmp/target.txt; then
+            cat /tmp/target.txt >&2 || true
+            echo "::error::the certification target could not be resolved; see the refusal above"
+            exit 1
           fi
-          case "$sha" in
-            *[!0-9a-f]*|'') echo "::error::sha must be 40 lowercase hex characters, got '$sha'"; exit 1 ;;
-          esac
-          [ "${#sha}" -eq 40 ] || { echo "::error::sha must be 40 characters, got ${#sha}"; exit 1; }
-          git cat-file -e "${sha}^{commit}" 2>/dev/null \
-            || { echo "::error::$sha is not a commit in this repository"; exit 1; }
-          # Certification is about what shipped. A commit that never reached main
-          # is not certifiable, and saying so here is clearer than certifying a
-          # branch tip that will be force-pushed away.
-          git merge-base --is-ancestor "$sha" origin/main \
-            || { echo "::error::$sha is not an ancestor of origin/main"; exit 1; }
+          OUT="$(cat /tmp/target.txt)"
+          printf '%s\n' "$OUT"
+          sha="$(printf '%s\n' "$OUT" | sed -n 's/^sha=//p')"
+          ref="$(printf '%s\n' "$OUT" | sed -n 's/^ref=//p')"
+          # An empty field here is the same class as an unchecked exit code: the
+          # resolver succeeded, but something between it and this line did not carry
+          # the value through. Both outputs are load-bearing - `sha` is what every
+          # later step certifies and `ref` is what the receipt will claim.
+          [ -n "$sha" ] || { echo "::error::the resolver succeeded but produced no sha"; exit 1; }
+          [ -n "$ref" ] || { echo "::error::the resolver succeeded but produced no ref"; exit 1; }
           echo "certifying $sha (ref $ref)"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
