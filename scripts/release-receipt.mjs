@@ -97,6 +97,52 @@ export const CERTIFICATION_STATES = [
  */
 export const STATES_THIS_FILE_PROVES = ['CODE_CERTIFIED'];
 
+/**
+ * Which workflow must have produced each required context.
+ *
+ * WHY THIS BELONGS IN THE RECEIPT AND NOT ONLY IN `ci-gate`
+ *
+ * `checkState` can say `impostor` and `ambiguous`, but only when the caller tells it
+ * which workflow it expects. The merge gate does - `DELEGATED_CHECK_OWNERS` - and
+ * the certification path did not, so it accepted any producer of a name.
+ *
+ * A check name is a string an author chooses. Nothing stops another workflow, or an
+ * app, from reporting `rust`. Without an owner, "the commit has a green check called
+ * `rust`" and "this repository's `rust` job passed" are the same statement, and the
+ * second is the one a certification is worth anything about.
+ *
+ * The nine entries below are DERIVED, not typed: eight from the gate's own tables
+ * and `ci-gate` named directly (it is not in `JOB_TO_SUITE` because it asserts no
+ * suite - it reads the map). `check-release-provenance` below asserts this stays a
+ * complete cover of `REQUIRED_SUITES`, so a suite added without an owner is a test
+ * failure rather than an unowned check.
+ */
+export const REQUIRED_SUITE_PRODUCER = {
+  rust: 'ci.yml',
+  web: 'ci.yml',
+  'web-unit': 'ci.yml',
+  contracts: 'ci.yml',
+  'spec-coverage': 'ci.yml',
+  'platform-only': 'ci.yml',
+  'platform-image-build': 'ci.yml',
+  'quality-faults': 'reliability.yml',
+  'linux-runtime': 'platform-linux-acceptance.yml',
+  // Produced by `ci.yml`'s own `ci-gate` job. Named here rather than looked up in
+  // `JOB_TO_SUITE`, which maps jobs to the impact suites they assert - and the gate
+  // asserts none.
+  'ci-gate': 'ci.yml',
+};
+
+/**
+ * Required suites with no declared producer.
+ *
+ * Exported so a test can assert it is empty rather than a reader noticing by eye.
+ * @returns {string[]}
+ */
+export function suitesWithoutProducer() {
+  return REQUIRED_SUITES.filter((s) => !(s in REQUIRED_SUITE_PRODUCER));
+}
+
 function gh(repo, path) {
   return JSON.parse(execFileSync('gh', ['api', `repos/${repo}/${path}`], { encoding: 'utf8' }));
 }
@@ -302,6 +348,14 @@ export function verifyReceipt(receipt, fetchRun, expected = null) {
       problems.push(`the run has no check named "${name}", which is required`);
       continue;
     }
+    if (actual === 'impostor' || actual === 'ambiguous') {
+      // A green check with the right NAME from the wrong workflow is the failure
+      // mode an owner declaration exists for. `checkState` only produces these two
+      // when it was told who the producer should be, which `fetchRunFacts` now does.
+      problems.push(`the required suite "${name}" cannot be attributed to ${REQUIRED_SUITE_PRODUCER[name]}`
+        + `: ${reasons[name] ?? actual}`);
+      continue;
+    }
     if (!PASSING_STATES.has(actual)) {
       problems.push(`the required suite "${name}" is ${actual} on the run${reasons[name] ? ` (${reasons[name]})` : ''}; only success certifies`);
     }
@@ -368,7 +422,10 @@ export function fetchRunFacts(repo, runId) {
     incomplete.push(`workflow runs: ${wfSeen} of ${wfTotal} read (one page requested)`);
   }
 
-  const attributed = suiteStates(checkRuns.check_runs ?? [], {}, workflowRuns.workflow_runs ?? []);
+  // The declared owners are passed in, so a name produced by the wrong workflow
+  // comes back `impostor` instead of being credited by name alone.
+  const attributed = suiteStates(checkRuns.check_runs ?? [], REQUIRED_SUITE_PRODUCER,
+    workflowRuns.workflow_runs ?? []);
   return {
     headSha: run.head_sha,
     workflow: run.path ? String(run.path).replace(/^\.github\/workflows\//, '') : null,

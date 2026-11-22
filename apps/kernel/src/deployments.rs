@@ -1973,7 +1973,7 @@ impl PlacementRejection {
     /// How far the node got through the gate. Several nodes can be refused in
     /// one decision; reporting the furthest one keeps the message useful
     /// ("the only node ran out of CPU" beats "another node is not READY").
-    fn progress(&self) -> u8 {
+    pub(crate) fn progress(&self) -> u8 {
         match self {
             Self::NodeNotReady { .. } => 0,
             Self::SelectorMismatch { .. } => 1,
@@ -1986,24 +1986,24 @@ impl PlacementRejection {
 }
 
 /// Placement inputs that do not vary between nodes in one slot decision.
-struct PlacementContext<'a> {
-    selector: &'a BTreeMap<String, String>,
-    requested: &'a ResourceRequirements,
-    max_instances_per_deployment: usize,
-    max_instances_per_node: usize,
+pub(crate) struct PlacementContext<'a> {
+    pub(crate) selector: &'a BTreeMap<String, String>,
+    pub(crate) requested: &'a ResourceRequirements,
+    pub(crate) max_instances_per_deployment: usize,
+    pub(crate) max_instances_per_node: usize,
 }
 
 /// What a node already carries before this slot is added.
 #[derive(Debug, Clone, Copy, Default)]
-struct NodeUsage {
-    cpu_millis: i64,
-    memory_mib: i64,
-    deployment_instances: usize,
-    node_instances: usize,
+pub(crate) struct NodeUsage {
+    pub(crate) cpu_millis: i64,
+    pub(crate) memory_mib: i64,
+    pub(crate) deployment_instances: usize,
+    pub(crate) node_instances: usize,
 }
 
 impl NodeUsage {
-    fn of(
+    pub(crate) fn of(
         node: &NodeRow,
         reserved: &HashMap<Uuid, (i64, i64)>,
         used_nodes: &HashMap<Uuid, usize>,
@@ -2021,7 +2021,7 @@ impl NodeUsage {
 
 /// The whole placement gate for one node and one slot, in the order the
 /// scheduler used to evaluate it inline, now answering *why* when it refuses.
-fn evaluate_node(
+pub(crate) fn evaluate_node(
     node: &NodeRow,
     usage: NodeUsage,
     placement: &PlacementContext<'_>,

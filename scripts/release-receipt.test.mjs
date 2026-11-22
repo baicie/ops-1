@@ -25,7 +25,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  SCHEMA, REQUIRED_SUITES, suiteStates, verifyReceipt, PASSING_STATES, CERTIFICATION_STATES,
+  SCHEMA, REQUIRED_SUITES, suiteStates, verifyReceipt, PASSING_STATES, CERTIFICATION_STATES, REQUIRED_SUITE_PRODUCER,
+  suitesWithoutProducer,
 } from './release-receipt.mjs';
 
 const SHA = 'a'.repeat(40);
@@ -245,4 +246,63 @@ test('TASK-07 a receipt with no state field is still checked for its suites', ()
   const bad = receipt({ suites: { ...ALL_OK, rust: 'failure' } });
   delete bad.state;
   assert.ok(verifyReceipt(bad, runFor({ suites: { ...ALL_OK, rust: 'failure' } }), EXPECTED).length > 0);
+});
+
+// --- TASK-05: a check name is not a producer declaration ---------------------
+//
+// `checkState` can report `impostor` and `ambiguous`, but only when the caller says
+// which workflow it expects. The certification path did not, so any workflow - or
+// any app - reporting a check called `rust` was credited as this repository's.
+
+test('TASK-05 every required suite declares a producer', () => {
+  assert.deepEqual(suitesWithoutProducer(), [],
+    'a required suite with no declared producer is an unowned check');
+});
+
+test('TASK-05 every declared producer is a workflow that exists', async () => {
+  const { readdirSync } = await import('node:fs');
+  const files = new Set(readdirSync('.github/workflows').filter((n) => n.endsWith('.yml')));
+  for (const [suite, wf] of Object.entries(REQUIRED_SUITE_PRODUCER)) {
+    assert.ok(files.has(wf), `${suite} names ${wf}, which is not a workflow file`);
+  }
+});
+
+test('TASK-05 a green check of the right NAME from the wrong workflow is not the suite', () => {
+  const runs = [
+    { name: 'rust', conclusion: 'success', status: 'completed', id: 1,
+      started_at: '2026-01-01T00:00:00Z', check_suite: { id: 99 } },
+  ];
+  // Workflow 99 is some other file; ci.yml is workflow 10 and produced nothing.
+  const r = suiteStates(runs, { rust: 'ci.yml' },
+    [{ check_suite_id: 99, path: '.github/workflows/some-other.yml' }]);
+  assert.equal(r.states.rust, 'impostor',
+    `a name alone was credited: ${JSON.stringify(r.states)}`);
+});
+
+test('TASK-05 an impostor green is refused by verifyReceipt, not just reported', () => {
+  const run = runFor();
+  run.suites = { ...ALL_OK, rust: 'impostor' };
+  run.reasons = { rust: 'check named "rust" was produced by some-other.yml, not ci.yml' };
+  const problems = verifyReceipt(receipt(), () => run, EXPECTED);
+  assert.ok(problems.some((p) => /rust/.test(p) && /cannot be attributed/.test(p)),
+    JSON.stringify(problems));
+});
+
+test('TASK-05 an ambiguous producer is refused too', () => {
+  const run = runFor();
+  run.suites = { ...ALL_OK, web: 'ambiguous' };
+  run.reasons = { web: 'check named "web" was produced by 2 workflows' };
+  const problems = verifyReceipt(receipt(), () => run, EXPECTED);
+  assert.ok(problems.some((p) => /web/.test(p) && /cannot be attributed/.test(p)),
+    JSON.stringify(problems));
+});
+
+test('TASK-05 the right producer is still credited', () => {
+  const runs = [
+    { name: 'rust', conclusion: 'success', status: 'completed', id: 1,
+      started_at: '2026-01-01T00:00:00Z', check_suite: { id: 10 } },
+  ];
+  const r = suiteStates(runs, { rust: 'ci.yml' },
+    [{ check_suite_id: 10, path: '.github/workflows/ci.yml' }]);
+  assert.equal(r.states.rust, 'success');
 });
