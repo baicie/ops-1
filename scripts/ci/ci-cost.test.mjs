@@ -127,3 +127,24 @@ test('span is measured from the push, and startSkew is NOT reported as queueing'
   // created_at is before it, so this interval cannot measure the queue.
   assert.ok(!('queueSeconds' in g), 'the group must not claim a queue measurement it cannot make');
 });
+
+// ---- run attempt -----------------------------------------------------------
+
+test('a rerun is counted, because it is a separate execution of the same push', () => {
+  // `gh run list` returns ONE row per run even when it was rerun - `attempt` is
+  // an attribute, not a second row - so a rerun cannot split a group. What it
+  // does do is make the group's duration describe the retry as well, which is
+  // why the count is carried out: a sample full of reruns is a sample of slow
+  // pushes, and a P50 that hides that is a P50 that flatters the pipeline.
+  const { groups } = groupByPush([
+    run({ headSha: 'a'.repeat(40), databaseId: 1, attempt: 1 }),
+    run({ headSha: 'a'.repeat(40), databaseId: 2, attempt: 3 }),
+  ]);
+  assert.equal(groups.length, 1, 'one push is one group');
+  assert.equal(groups[0].retriedWorkflows, 1, 'the retried workflow must be visible in the group');
+});
+
+test('a group with no reruns reports zero, not undefined', () => {
+  const { groups } = groupByPush([run({ headSha: 'b'.repeat(40) })]);
+  assert.equal(groups[0].retriedWorkflows, 0);
+});

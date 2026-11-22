@@ -243,38 +243,62 @@ fi
 # So the retry has to be outside Maven - and it must be narrow enough that it
 # cannot mask a real build failure. It retries ONLY when the output names a
 # resolution failure, and never when the compiler or the tests spoke.
-mvn_package() {
-  local attempt=1 out
+# The retry policy, extracted so it can be tested without Maven.
+#
+# `retry_on_registry_fault <label> <command...>` runs the command, and retries it
+# up to three attempts with a linear backoff ONLY when the output names a
+# registry fault. Everything else is returned on the first failure.
+#
+# The separation is what makes TASK-25 possible: a test can pass it a command
+# that prints a given message and exits non-zero, and assert how many times it
+# ran. Testing this through the real Maven would need a controlled registry and
+# would measure the network as much as the policy.
+#
+# A registry fault is one of:
+#   Could not (find|transfer|resolve) artifact   the resolver gave up
+#   status: 429                                  rate limited
+#   status: 5xx                                  the registry is unwell
+# A compilation error, a test failure, or a missing `pom.xml` matches none of
+# them, which is why the policy cannot mask a real build failure.
+retry_on_registry_fault() {
+  local label="$1"; shift
+  local attempt=1 out rc=0
   while :; do
-    # `-U` IS WHAT MAKES THE RETRY A RETRY.
-    #
-    # Measured on CI (run 45001045124): attempt 1 failed with a 429, the retry
-    # ran 16 seconds later and failed immediately with
-    #
-    #   was not found in ... during a previous attempt. This failure was cached
-    #   in the local repository and resolution is not reattempted until the
-    #   update interval of central has elapsed or updates are forced
-    #
-    # Maven had cached the failure, so the retry never issued a second request -
-    # it re-read its own record of the first one and exited. A loop that repeats
-    # a command whose result is memoised is not a retry; it is the same failure
-    # with extra wall-clock. `-U` forces the re-resolution the retry depends on.
-    if out="$(mvn -B -U "${MAVEN_RESILIENCE[@]}" -f plugins/hello-java/pom.xml -DskipTests package 2>&1)"; then
+    if out="$("$@" 2>&1)"; then
       printf '%s\n' "$out"
       return 0
+    else
+      rc=$?
     fi
-    # The three shapes a transient registry fault takes in this build's history:
-    # 429 from the wagon, "Could not find"/"Could not transfer" from the
-    # resolver. A compile error matches none of them and fails immediately.
     if [ "$attempt" -ge 3 ] || ! printf '%s' "$out" | grep -qE \
         'Could not (find|transfer|resolve) artifact|status: (429|5[0-9][0-9])'; then
       printf '%s\n' "$out" >&2
-      return 1
+      # THE COMMAND'S EXIT CODE, NOT A FLATTENED 1.
+      #
+      # `return 1` reported "the build failed" for every failure, which erases
+      # the one signal a caller uses to tell a build error from a wrapper
+      # problem. Measured by the test: a command exiting 42 was reported as 1.
+      return "$rc"
     fi
-    printf 'mvn: registry fault on attempt %d, retrying in %ds\n' "$attempt" "$((attempt * 15))" >&2
-    sleep "$((attempt * 15))"
+    printf '%s: registry fault on attempt %d, retrying in %ds\n' "$label" "$attempt" "$((attempt * 15))" >&2
+    [ -n "${OPSWEAVE_RETRY_SLEEP:-}" ] && sleep "$((attempt * OPSWEAVE_RETRY_SLEEP))" || sleep "$((attempt * 15))"
     attempt=$((attempt + 1))
   done
+}
+
+mvn_package() {
+  # `-U` IS WHAT MAKES THE RETRY A RETRY, and it belongs on the command the
+  # policy re-runs. Measured on CI (run 45001045124): attempt 1 failed with a
+  # 429, the retry ran 16 seconds later and failed immediately with
+  #
+  #   was not found in ... during a previous attempt. This failure was cached
+  #   in the local repository and resolution is not reattempted until the
+  #   update interval of central has elapsed or updates are forced
+  #
+  # Maven had cached the failure, so the retry never issued a second request.
+  # A loop that repeats a memoised command is not a retry.
+  retry_on_registry_fault mvn \
+    mvn -B -U "${MAVEN_RESILIENCE[@]}" -f plugins/hello-java/pom.xml -DskipTests package
 }
 
 MAVEN_RESILIENCE=(
