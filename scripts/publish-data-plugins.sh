@@ -100,8 +100,40 @@ cleanup() {
   # The staging copies are not secret material (assembled manifests), but a
   # failed run should not leave half-built trees either.
   sudo rm -rf /tmp/opsweave-bundle-* 2>/dev/null || true
+
+  # WHICH PLUGINS WERE NEVER TRIED.
+  #
+  # `set -e` stops the loop at the first failure, which is the right call for a
+  # release - publishing the rest after one plugin failed produces a half-upgraded
+  # platform. What it does NOT do is tell anyone that the later plugins were never
+  # attempted. Measured: with three plugins and a failure on the second, the third
+  # never runs, and the run's output says nothing about it. An operator then reads
+  # "the publish failed" as "this plugin failed" and re-runs everything, rebuilding
+  # what already succeeded.
+  #
+  # Reported on the EXIT path so it covers `die`, a failed command under `set -e`,
+  # and a signal - every way out of the loop.
+  if [ "$rc" -ne 0 ] && [ "${#ATTEMPTED[@]}" -lt "${#PLUGINS[@]}" ]; then
+    local_untried=()
+    for candidate in "${PLUGINS[@]}"; do
+      # shellcheck disable=SC2076  # deliberate literal match, not a regex
+      if [[ ! " ${ATTEMPTED[*]} " =~ " ${candidate} " ]]; then
+        local_untried+=("$candidate")
+      fi
+    done
+    if [ "${#local_untried[@]}" -gt 0 ]; then
+      printf '::error::the run stopped before it reached: %s\n' "${local_untried[*]}" >&2
+      printf '::error::only %s were attempted; re-running will rebuild those too, because the\n' \
+        "${ATTEMPTED[*]:-none}" >&2
+      printf '::error::script is not incremental. See `node scripts/ci/publish-phases.mjs --explain`.\n' >&2
+    fi
+  fi
   return "$rc"
 }
+# Populated as each plugin starts, so the EXIT trap can name the ones it never
+# reached. Declared before the trap is installed, or `set -u` makes the trap itself
+# fail on the first run.
+ATTEMPTED=()
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -258,6 +290,7 @@ else
 fi
 
 for name in "${PLUGINS[@]}"; do
+  ATTEMPTED+=("$name")
   plugin="opsweave.$name"
   installed="$(sudo docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
     "SELECT count(*) FROM kernel.plugin_packages WHERE plugin_id='$plugin' AND version='$version'")"

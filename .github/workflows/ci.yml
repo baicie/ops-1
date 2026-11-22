@@ -1913,6 +1913,10 @@ jobs:
           # not perform.
           node --test scripts/ci/publish-phases.test.mjs
           node scripts/ci/publish-phases.mjs --publish-script-drift
+          # A failed publish must name the plugins it never reached: `set -e` stops
+          # the loop at the first failure and the output otherwise says nothing about
+          # the rest. Measured with three plugins and a failure on the second.
+          bash tests/scripts/publish-untried-report.test.sh
           # Is the gate actually enforceable? Reads the LIVE ruleset, because a
           # flawless workflow that nothing requires gates nothing. ADVISORY and
           # PARTIAL exit 0 - they are facts for a migration to decide about, not
