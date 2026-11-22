@@ -364,6 +364,22 @@ jobs:
       # a file `git log --all --diff-filter=A` proves was never added.
       - run: node --test tests/ci/check-paths-filters.test.mjs
       - run: node tests/ci/check-paths-filters.mjs
+      # `ci-gate`'s tables name jobs and workflows. This checks they still exist.
+      #
+      # The runtime gate reads ONE commit, where a producer whose paths did not
+      # match and a producer that was DELETED look identical - both are simply
+      # absent. `delegatedVerdict` now judges a red alternative before it looks at
+      # the green ones, which closes the case where the job still runs and fails.
+      # It cannot close deletion: that is a property of the tree, so it is checked
+      # against the tree, here.
+      #
+      # It also compares the two hand-maintained "which workflow produces this
+      # suite" tables. They disagreed when this was written - `browser-e2e` had one
+      # producer in `check-impact-consistency.mjs` and two in `ci-gate.mjs`, and
+      # each file was internally consistent. The pair is what decides whether a
+      # filter can start the workflow whose check the gate reads.
+      - run: node --test tests/ci/ci-gate.attribution.test.mjs
+      - run: node tests/ci/check-gate-contract.mjs
       # The CI measurement tool names every performance number this repository
       # publishes. Its first version grouped runs by the MINUTE they were created,
       # which merged two PRs, two pushes of one PR, a workflow_dispatch and a
