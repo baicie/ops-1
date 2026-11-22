@@ -71,7 +71,7 @@ function gh(args) {
   return JSON.parse(execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
 }
 
-const FIELDS = 'databaseId,workflowName,conclusion,status,createdAt,updatedAt,headSha,event,headBranch,url';
+const FIELDS = 'databaseId,workflowName,conclusion,status,createdAt,updatedAt,headSha,event,headBranch,attempt,url';
 
 /** Successful runs of one workflow, newest first, with how many were excluded. */
 export function successfulRuns(workflow, limit) {
@@ -164,9 +164,16 @@ export function groupByPush(runs) {
     const longest = g.runs
       .map((r) => (Date.parse(r.updatedAt) - Date.parse(r.createdAt)) / 1000)
       .filter(Number.isFinite);
+    const attempts = g.runs.map((r) => Number(r.attempt ?? 1));
     return {
       ...g,
       workflows: g.runs.length,
+      // A rerun is a SEPARATE execution of the same push. It does not create a
+      // second row in `run list` - `attempt` is an attribute of one run - so it
+      // cannot split a group. What it does do is make the group's duration
+      // describe the last attempt plus every retry, which is why the count is
+      // carried out: a sample full of reruns is a sample of slow pushes.
+      retriedWorkflows: attempts.filter((a) => a > 1).length,
       // The span of the fanout. NOT the queue, and NOT a per-job measurement.
       spanSeconds: starts.length && ends.length ? (Math.max(...ends) - Math.min(...starts)) / 1000 : null,
       longestWorkflowSeconds: longest.length ? Math.max(...longest) : null,

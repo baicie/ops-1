@@ -332,6 +332,15 @@ jobs:
       # shape `tests/acceptance` and `tests/ci` already use.
       - name: staging deploy gate (no host, no daemon, no root)
         run: bash tests/scripts/deploy-served-sha.test.sh
+      # The Maven retry policy, tested with a stub instead of Maven.
+      #
+      # It shipped untested and had two defects that only CI found: the retry
+      # re-ran a command whose failure Maven had cached (so it never issued a
+      # second request), and a failure exit code was flattened to 1. Both are
+      # counted in one second here; the CI run that found the first took 19
+      # minutes.
+      - name: build retry policy
+        run: bash tests/scripts/build-plugins-retry.test.sh
       # Path integrity: every path a build, script or config names must exist.
       #
       # This is the other half of the retired-path gate. That one catches a live
