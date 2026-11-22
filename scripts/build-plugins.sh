@@ -216,15 +216,63 @@ fi
 # knobs; `retryHandler.count` is what turns a 429 into a later attempt. A
 # retry that is still rate-limited after 4 tries fails as loudly as before -
 # this raises the chance of success, it does not hide the failure.
+#
+# AND A THIRD FAILURE ARRIVED, WHICH MAVEN CANNOT RETRY ITSELF.
+#
+# Measured 2026-11-21 (run 44935699412) with a message that carries no status
+# code at all:
+#
+#   Could not find artifact org.springframework.boot:spring-boot-starter-parent:pom:3.3.5
+#
+# The same URL answered 200 on three consecutive requests a minute later, from
+# the same machine. So the artifact exists and the registry said otherwise.
+#
+# MEASURED WITH A LOCAL SERVER, not assumed:
+#
+#   server 404s the first 3 requests, then serves the POM
+#     retryHandler.count=4            -> 1 request,  BUILD FAILURE
+#     aether...retryHandler.name=standard -> 1 request,  BUILD FAILURE
+#   server 503s the first 3, then serves
+#     (defaults)                      -> 7 requests,  BUILD SUCCESS
+#
+# Maven retries 5xx and NEVER retries 4xx, at either layer, and there is no
+# property that changes that: a 404 is the resolver's answer for "this artifact
+# does not exist", and re-asking is pointless by design. The design is right;
+# what it cannot express is a CDN edge answering 404 for an object it holds.
+#
+# So the retry has to be outside Maven - and it must be narrow enough that it
+# cannot mask a real build failure. It retries ONLY when the output names a
+# resolution failure, and never when the compiler or the tests spoke.
+mvn_package() {
+  local attempt=1 out
+  while :; do
+    if out="$(mvn -B "${MAVEN_RESILIENCE[@]}" -f plugins/hello-java/pom.xml -DskipTests package 2>&1)"; then
+      printf '%s\n' "$out"
+      return 0
+    fi
+    # The three shapes a transient registry fault takes in this build's history:
+    # 429 from the wagon, "Could not find"/"Could not transfer" from the
+    # resolver. A compile error matches none of them and fails immediately.
+    if [ "$attempt" -ge 3 ] || ! printf '%s' "$out" | grep -qE \
+        'Could not (find|transfer|resolve) artifact|status: (429|5[0-9][0-9])'; then
+      printf '%s\n' "$out" >&2
+      return 1
+    fi
+    printf 'mvn: registry fault on attempt %d, retrying in %ds\n' "$attempt" "$((attempt * 15))" >&2
+    sleep "$((attempt * 15))"
+    attempt=$((attempt + 1))
+  done
+}
+
 MAVEN_RESILIENCE=(
   -Dmaven.wagon.http.retryHandler.count=4
   -Daether.connector.connectTimeout=60000
   -Daether.connector.requestTimeout=180000
 )
 if [ -x /opt/homebrew/opt/openjdk@21/bin/java ]; then
-  JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -B "${MAVEN_RESILIENCE[@]}" -f plugins/hello-java/pom.xml -DskipTests package
+  JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn_package
 else
-  mvn -B "${MAVEN_RESILIENCE[@]}" -f plugins/hello-java/pom.xml -DskipTests package
+  mvn_package
 fi
 JAVA_BUILD="$(sha256_file plugins/hello-java/target/hello-java-0.0.1.jar)"
 docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION=0.0.1 --build-arg CAPABILITY_DIGEST="$JAVA_CAP" --build-arg BUILD_DIGEST="$JAVA_BUILD" -t "$REGISTRY/opsweave/hello-java:0.0.1" plugins/hello-java >/dev/null
