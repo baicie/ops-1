@@ -48,6 +48,55 @@ export const REQUIRED_SUITES = [
   'ci-gate',
 ];
 
+/**
+ * The certification states, in the order they can be reached.
+ *
+ * WHY ONE `CERTIFIED` WAS NOT ENOUGH
+ *
+ * The receipt used to carry a single verdict, and `write` hard-coded it to
+ * `CERTIFIED`. That word was read by people as "this release is good", while it
+ * actually meant "a commit's MERGE-GATE checks were green" - and nothing else.
+ *
+ * Measured on commit f06835cb, the ledger of that commit's own checks contains
+ *
+ *     deploy to staging host=failed
+ *
+ * alongside twenty-nine green ones. The receipt would still say CERTIFIED for it,
+ * because staging is not in `REQUIRED_SUITES` - correctly, since a deployment is a
+ * fact about a host and must never block a merge. But a reader who sees CERTIFIED
+ * and then a red staging deploy has been told two things that sound contradictory
+ * and is given nothing to reconcile them.
+ *
+ * So the states are separate and each says exactly what was checked:
+ *
+ *   CODE_CERTIFIED       every merge-gate suite green on the commit (this file)
+ *   ARTIFACT_VERIFIED    the image digest was read back FROM THE REGISTRY and
+ *                        matched (not implemented - see below)
+ *   STAGING_ACCEPTED     the release actually served from the staging host
+ *                        (staging-preview.yml; not this file's evidence)
+ *   PRODUCTION_APPROVED  a human decision, recorded (never automatic)
+ *
+ * NOTHING HERE IMPLIES THE NEXT ONE. `CODE_CERTIFIED` says nothing about whether
+ * the image exists in a registry, and neither says anything about staging. A
+ * receipt carrying `CODE_CERTIFIED` must not be read as a release approval, and
+ * the CLI prints the state rather than the word "CERTIFIED" for that reason.
+ */
+export const CERTIFICATION_STATES = [
+  'CODE_CERTIFIED',
+  'ARTIFACT_VERIFIED',
+  'STAGING_ACCEPTED',
+  'PRODUCTION_APPROVED',
+];
+
+/**
+ * States this file can actually establish.
+ *
+ * `ARTIFACT_VERIFIED` needs a registry read (`scripts/verify-registry-digest.mjs`
+ * exists and is not wired); `STAGING_ACCEPTED` needs the staging run. Listing them
+ * as reachable here would be the same overclaim the single word was.
+ */
+export const STATES_THIS_FILE_PROVES = ['CODE_CERTIFIED'];
+
 function gh(repo, path) {
   return JSON.parse(execFileSync('gh', ['api', `repos/${repo}/${path}`], { encoding: 'utf8' }));
 }
@@ -194,6 +243,25 @@ export function verifyReceipt(receipt, fetchRun, expected = null) {
 
   const states = run.suites ?? {};
   const reasons = run.reasons ?? {};
+
+  // A STATE THAT REQUIRES OTHER EVIDENCE IS NOT THIS FILE'S TO GRANT.
+  //
+  // `STAGING_ACCEPTED` is a statement about a deployment; `ARTIFACT_VERIFIED` is a
+  // statement about a registry. Neither is derived from merge-gate checks, so a
+  // receipt claiming them here would be asserting something no evidence in this
+  // run supports. The check is an ALLOWLIST, so a state nobody has defined yet
+  // also fails.
+  const claimedState = receipt.state;
+  if (claimedState !== undefined) {
+    if (!CERTIFICATION_STATES.includes(claimedState)) {
+      problems.push(`receipt.state is ${JSON.stringify(claimedState)}, which is not one of`
+        + ` ${CERTIFICATION_STATES.join(', ')}`);
+    } else if (!STATES_THIS_FILE_PROVES.includes(claimedState)) {
+      problems.push(`receipt.state is ${claimedState}, which needs evidence this receipt does not`
+        + ' contain. This file can establish only'
+        + ` ${STATES_THIS_FILE_PROVES.join(', ')}`);
+    }
+  }
 
   // A RECEIPT CANNOT CLAIM A SUITE THE RUN DOES NOT HAVE, OR THAT FAILED.
   for (const [name, claimed] of Object.entries(receipt.suites ?? {})) {
@@ -390,7 +458,14 @@ if (RUN_AS_PROGRAM) {
         source: 'build-reported (not registry-verified; see TASK-15)',
       },
       certifiedAt: new Date().toISOString(),
-      verdict: 'CERTIFIED',
+      // THE STATE, NOT THE WORD. `verdict: 'CERTIFIED'` was read as a release
+      // approval; what this file actually establishes is that a commit's
+      // merge-gate checks were green. The other states need evidence this run does
+      // not carry - see CERTIFICATION_STATES.
+      state: 'CODE_CERTIFIED',
+      // Kept alongside so a reader of an older receipt is not silently misled by a
+      // field that changed meaning.
+      verdict: 'CODE_CERTIFIED',
     };
     const problems = verifyReceipt(receipt, () => ({ ...facts, headSha: facts.headSha }));
     if (problems.length) {
@@ -437,7 +512,9 @@ if (RUN_AS_PROGRAM) {
       };
     }, { repository: expectRepo, sha: expectSha, ref: expectRef ?? undefined });
     for (const p of problems) process.stdout.write(`FAIL ${p}\n`);
-    process.stdout.write(problems.length ? 'verdict: NOT_CERTIFIED\n' : 'verdict: CERTIFIED\n');
+    process.stdout.write(problems.length
+      ? 'state: NOT_CERTIFIED\n'
+      : 'state: CODE_CERTIFIED  (merge-gate checks only; staging and registry are separate claims)\n');
     process.exit(problems.length ? 1 : 0);
   } else {
     process.stderr.write('usage: release-receipt.mjs write|verify|--selftest\n');

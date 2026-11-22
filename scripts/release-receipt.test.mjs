@@ -25,7 +25,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  SCHEMA, REQUIRED_SUITES, suiteStates, verifyReceipt, PASSING_STATES,
+  SCHEMA, REQUIRED_SUITES, suiteStates, verifyReceipt, PASSING_STATES, CERTIFICATION_STATES,
 } from './release-receipt.mjs';
 
 const SHA = 'a'.repeat(40);
@@ -200,4 +200,49 @@ test('a genuine refusal is not turned into a pass by an absent expectation', () 
   // run that did not succeed.
   const problems = verifyReceipt(receipt(), runFor({ conclusion: 'failure' }), EXPECTED);
   assert.ok(problems.some((p) => /not success/.test(p)));
+});
+
+// --- TASK-07: the states are separate, and none implies the next --------------
+//
+// The receipt used to carry one `verdict: "CERTIFIED"`, which was read as a release
+// approval while it actually meant "this commit's merge-gate checks were green".
+// Measured on f06835cb: that commit's own ledger contains
+// `deploy to staging host=failed` next to twenty-nine green checks. Both are true,
+// and one word could not say so.
+
+test('TASK-07 CODE_CERTIFIED is accepted: it is what the merge-gate evidence supports', () => {
+  assert.deepEqual(verifyReceipt(receipt({ state: 'CODE_CERTIFIED' }), runFor(), EXPECTED), []);
+});
+
+for (const state of ['ARTIFACT_VERIFIED', 'STAGING_ACCEPTED', 'PRODUCTION_APPROVED']) {
+  test(`TASK-07 ${state} is refused by this file: the evidence is elsewhere`, () => {
+    const problems = verifyReceipt(receipt({ state }), runFor(), EXPECTED);
+    assert.ok(problems.some((p) => /needs evidence this receipt does not contain/.test(p)),
+      `${state} was granted without its evidence: ${JSON.stringify(problems)}`);
+  });
+}
+
+test('TASK-07 an undefined state fails closed', () => {
+  const problems = verifyReceipt(receipt({ state: 'SHIP_IT' }), runFor(), EXPECTED);
+  assert.ok(problems.some((p) => /not one of/.test(p)), JSON.stringify(problems));
+});
+
+test('TASK-07 a green staging deploy does not upgrade a code receipt', () => {
+  // The inverse mistake: staging passing is not a reason to claim more than
+  // CODE_CERTIFIED either. The state is what the EVIDENCE supports, not the best
+  // news available.
+  const problems = verifyReceipt(receipt({ state: 'STAGING_ACCEPTED' }),
+    runFor({ suites: { ...ALL_OK } }), EXPECTED);
+  assert.ok(problems.length > 0);
+});
+
+test('TASK-07 a receipt with no state field is still checked for its suites', () => {
+  // Older receipts carry only `verdict`. They are not rejected for lacking the new
+  // field, but the suite rules still apply to them.
+  const old = receipt();
+  delete old.state;
+  assert.deepEqual(verifyReceipt(old, runFor(), EXPECTED), []);
+  const bad = receipt({ suites: { ...ALL_OK, rust: 'failure' } });
+  delete bad.state;
+  assert.ok(verifyReceipt(bad, runFor({ suites: { ...ALL_OK, rust: 'failure' } }), EXPECTED).length > 0);
 });
