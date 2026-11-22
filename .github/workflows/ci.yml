@@ -381,47 +381,33 @@ jobs:
       # else is printed and the step passes, because a routine timeout change
       # must not need a special commit to get through.
       - name: Workflow surface vs the merge base
-        # THE CHECKOUT IS SHALLOW, SO `origin/main` DOES NOT EXIST IN IT.
+        # THE BASE COMES FROM THE EVENT, NOT FROM A FETCH DEPTH.
         #
-        # Measured on this step's first CI run: `git merge-base HEAD origin/main`
-        # answered `fatal: Not a valid object name origin/main` and the step
-        # exited 128. A shallow clone has the commit it was asked for and
-        # nothing else - no remote refs, no history to find a merge base in.
+        # Two depth bounds were tried and both failed on CI while working
+        # locally: --depth=64 and then --depth=500 came back with no merge base
+        # at all. The reason is that GitHub checks out a pull_request as a
+        # MERGE COMMIT whose ancestry is not the branch's own, so "how far back
+        # is the fork" is not a number this workflow can guess - and a guess
+        # that is too small fails a correct change.
         #
-        # Fetching only the base branch keeps the clone cheap (the alternative,
-        # `fetch-depth: 0` on the job, pulls the whole history for one
-        # comparison) and gives `merge-base` exactly the two commits it needs.
+        # `github.event.pull_request.base.sha` is the commit the comparison is
+        # actually about. Fetching THAT one commit - no depth, no history - is
+        # both exact and cheaper than any depth bound.
         env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           BASE_REF: ${{ github.base_ref || 'main' }}
         run: |
           set -eu
-          # A DEPTH BOUND IS THE WRONG TOOL HERE, AND MEASURED ITSELF WRONG.
-          #
-          # THE DEPTH IS A DISTANCE FROM origin/main's TIP, NOT FROM THE FORK.
-          #
-          # `--depth=64` came back with no merge base on a branch whose fork
-          # point is 2 commits back. The reason is measured: a depth-N fetch
-          # keeps the N most recent commits OF THE FETCHED REF. If this branch
-          # was cut from a commit that is 300 commits behind origin/main, a
-          # depth-64 history of main stops before it reaches the fork.
-          #
-          # Measured on a `--depth 1` clone of this branch:
-          #   --depth=64    no merge base
-          #   --depth=500   merge-base a71f943  (correct)
-          #
-          # 500 is not a guess at correctness; it is a bound with a diagnostic
-          # behind it. When even that is not enough the step says so by name
-          # instead of failing with an empty ref.
-          git fetch --no-tags --depth=500 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          base="$(git merge-base HEAD "origin/${BASE_REF}" || true)"
-          if [ -z "$base" ]; then
-            echo "::error::no merge base with origin/${BASE_REF} within 500 commits"
-            echo "  HEAD=$(git rev-parse HEAD)"
-            echo "  origin/${BASE_REF}=$(git rev-parse "origin/${BASE_REF}" 2>/dev/null || echo missing)"
-            echo "  shallow=$(git rev-parse --is-shallow-repository), depth asked=500"
-            exit 1
+          echo "base sha: ${BASE_SHA} (${BASE_REF})"
+          git fetch --no-tags --depth=1 origin "${BASE_SHA}" 2>/dev/null || true
+          if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            base="${BASE_SHA}"
+          else
+            # No base sha (a push, or a dispatch): there is no merge base to
+            # find, and comparing a commit against itself is the honest answer.
+            base="$(git rev-parse HEAD)"
+            echo "no pull_request base; comparing ${base} against itself"
           fi
-          echo "comparing against merge-base ${base}"
           node tests/ci/workflow-snapshot.mjs compare --base-ref "$base" --advisory > /tmp/surface.txt || true
           cat /tmp/surface.txt
           if grep -qE 'UNPARSED|job REMOVED|permissions changed.*-> .*(write|write-all)' /tmp/surface.txt; then
