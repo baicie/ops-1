@@ -1913,6 +1913,11 @@ jobs:
           # sides came back CERTIFIED, and a sticky-success rule let an old green
           # mask a newer failing attempt.
           node --test scripts/release-receipt.test.mjs
+          # The certification ledger. `release-certification.yml` used
+          # `unique_by(.name)` on the check-run list, which keeps the LAST element
+          # in ARRAY ORDER - and GitHub does not promise an order. Measured: an old
+          # success followed by a NEW failure reported `rust=success`.
+          node --test scripts/ci/release-check-ledger.test.mjs
           # A new shell script must be linted without anyone remembering to add
           # it, and a new workflow must be seen. Counts the unpinned actions too,
           # without failing on them - 126 exist today and making that fatal would

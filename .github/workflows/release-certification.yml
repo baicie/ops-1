@@ -121,28 +121,31 @@ jobs:
           # produce evidence that is about a different process than the one the
           # merge gate used.
           #
-          # Bounded: a suite that has not answered within the budget is UNKNOWN,
-          # which is not a pass.
-          BUDGET="${CERTIFY_WAIT_SECONDS:-2400}"
-          started=$SECONDS
-          while :; do
-            states="$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
-              --jq '[.check_runs[] | {name, s: (.conclusion // .status)}] | unique_by(.name) | .[] | "\(.name)=\(.s)"' 2>/dev/null || echo "")"
-            if [ -z "$states" ]; then
-              echo "::error::the check-run API returned nothing for $SHA; refusing to certify blind"
-              exit 1
-            fi
-            pending="$(printf '%s\n' "$states" | grep -cE '=(queued|in_progress|waiting|requested|pending)$' || true)"
-            if [ "${pending:-0}" -eq 0 ]; then
-              printf '%s\n' "$states" | sort
-              break
-            fi
-            if [ $((SECONDS - started)) -ge "$BUDGET" ]; then
-              echo "::error::$pending check(s) still unfinished after ${BUDGET}s; UNKNOWN is not CERTIFIED"
-              exit 1
-            fi
-            sleep 30
-          done
+          # THE LEDGER COMES FROM A SCRIPT, NOT FROM A `--jq` FILTER.
+          #
+          # The filter this replaced was
+          #
+          #   [... ] | unique_by(.name)
+          #
+          # `unique_by` keeps the LAST occurrence in ARRAY ORDER, and GitHub does
+          # not promise an order. Measured on four inputs:
+          #
+          #   old success, NEW failure      -> rust=success   <- red reported green
+          #   new failure FIRST             -> rust=failure   <- same data, other order
+          #   old success, NEW in_progress  -> rust=success   <- certifying mid-rerun
+          #   old in_progress, NEW success  -> rust=in_progress
+          #
+          # It also dropped `check_suite.id`, the only field that says which
+          # workflow produced a check. `scripts/ci/release-check-ledger.mjs` reads
+          # both endpoints, joins them, and asks the same `checkState` the merge
+          # gate uses - so certification and gating cannot disagree about which
+          # attempt is the answer.
+          #
+          # An unreadable API exits 2 and is NOT "no checks": the old
+          # `2>/dev/null || echo ""` made a transport failure look like a commit
+          # with nothing to certify.
+          node scripts/ci/release-check-ledger.mjs \
+            --repo "$REPO" --sha "$SHA" --budget-seconds "${CERTIFY_WAIT_SECONDS:-2400}"
 
       - name: Write the receipt
         env:
