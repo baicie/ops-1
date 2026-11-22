@@ -41,8 +41,9 @@
  *   node scripts/ci/classify-visual-assets.mjs [--json]
  */
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
 const ROOT = process.cwd();
 
@@ -102,6 +103,17 @@ export function referencesByKind() {
     if (!/\.(md|ts|tsx|mjs|cjs|js|py|json|ya?ml|sh)$/.test(rel)) continue;
     let text;
     try { text = readFileSync(file, 'utf8'); } catch { continue; }
+    // THE CLASSIFIER DOES NOT COUNT ITSELF.
+    //
+    // It walks `tests/` and `scripts/`, and it lives in `scripts/` - so a path
+    // written in THIS FILE becomes a reference to that path. Measured: a comment
+    // in this very function naming a doc copy made that file class A, so the note
+    // explaining a misclassification created the evidence for it. A tool that
+    // appears in its own input cannot be reasoned about.
+    //
+    // Excluded by resolved path, not by name: a copy of this tool elsewhere SHOULD
+    // be scanned, and only the file doing the scanning is the problem.
+    if (resolve(file) === resolve(fileURLToPath(import.meta.url))) continue;
     const isAssertionSource = /(^|\/)(tests|scripts)\//.test(rel) || /\.spec\.ts$/.test(rel)
       || /check-tracked-png-budget/.test(rel);
     const isDoc = rel.endsWith('.md');
@@ -166,10 +178,30 @@ export function classify(pngs, refs) {
     if (assertedBy.length > 0) cls = 'A';
     else if (citedBy.length > 0) cls = 'B';
     else cls = 'C';
-    // A classification resting on a shared basename is not evidence. It is
-    // reported as such rather than silently counted - the deletion question
-    // "is anything using this?" must not be answered by a guess.
+
+    // A CLASSIFICATION RESTING ON A SHARED BASENAME IS NOT EVIDENCE, AND MUST NOT
+    // LAND IN A OR B.
+    //
+    // The first version computed `ambiguous` and then left `class` as A, so the
+    // flag and the verdict disagreed: a row could say `ambiguous: true` while
+    // being counted in the A total - "asserted by a spec, do not delete". The A
+    // total is exactly what a reader consults before deleting, so a guess counted
+    // there is the defect this function exists to prevent.
+    //
+    // Measured: eight rows in this repository classified as A purely because a
+    // DIFFERENT file in another directory shares their basename. A spec writes
+    // `artifacts/ui/studio/<name>.png`; a document lists a same-named file under
+    // `docs/assets/`; the basename match credited the second to the first.
+    //
+    // (This comment deliberately does NOT spell those paths out. The extractor
+    // below scans this file too, so a path written here becomes a reference to
+    // it - which is how the first version of this note made its own subject class
+    // A. Measured, and worth the parenthetical.)
+    //
+    // So ambiguity is a CLASS, not a footnote: UNKNOWN means "this cannot be
+    // answered from the evidence", which is a different answer from "asserted".
     const ambiguous = match === 'basename' && (shared.get(base) ?? 1) > 1;
+    if (ambiguous) cls = 'UNKNOWN';
     return { path, class: cls, citedBy, assertedBy, match, ambiguous };
   });
 }
@@ -189,8 +221,11 @@ if (RUN_AS_PROGRAM) {
   const byDir = new Map();
   for (const row of rows) {
     const dir = row.path.split('/').slice(0, -1).join('/');
-    if (!byDir.has(dir)) byDir.set(dir, { A: 0, B: 0, C: 0, total: 0, bytes: 0 });
+    if (!byDir.has(dir)) byDir.set(dir, { A: 0, B: 0, C: 0, UNKNOWN: 0, total: 0, bytes: 0 });
     const bucket = byDir.get(dir);
+    // A class the bucket does not know would make `undefined += 1` a NaN and
+    // silently drop the row from every column. Fail loudly instead.
+    if (!(row.class in bucket)) throw new Error(`unknown class ${row.class} for ${row.path}`);
     bucket[row.class] += 1;
     bucket.total += 1;
     try { bucket.bytes += statSync(join(ROOT, row.path)).size; } catch { /* index entry without a file */ }
@@ -199,19 +234,28 @@ if (RUN_AS_PROGRAM) {
   if (process.argv.includes('--json')) {
     process.stdout.write(`${JSON.stringify({ rows, byDir: Object.fromEntries(byDir) }, null, 2)}\n`);
   } else {
-    process.stdout.write(`${'directory'.padEnd(42)}${'A'.padStart(5)}${'B'.padStart(5)}${'C'.padStart(5)}${'total'.padStart(7)}${'MB'.padStart(9)}\n`);
+    // UNKNOWN GETS ITS OWN COLUMN. Without one, its rows were counted in `total`
+    // and in no class column, so the table did not add up - and a table that does
+    // not add up is the first thing a reader stops trusting.
+    process.stdout.write(`${'directory'.padEnd(42)}${'A'.padStart(5)}${'B'.padStart(5)}${'C'.padStart(5)}`
+      + `${'?'.padStart(5)}${'total'.padStart(7)}${'MB'.padStart(9)}\n`);
     for (const [dir, b] of [...byDir.entries()].sort((a, b2) => b2[1].bytes - a[1].bytes)) {
       process.stdout.write(`${dir.padEnd(42)}${String(b.A).padStart(5)}${String(b.B).padStart(5)}`
-        + `${String(b.C).padStart(5)}${String(b.total).padStart(7)}${(b.bytes / 1048576).toFixed(2).padStart(9)}\n`);
+        + `${String(b.C).padStart(5)}${String(b.UNKNOWN ?? 0).padStart(5)}`
+        + `${String(b.total).padStart(7)}${(b.bytes / 1048576).toFixed(2).padStart(9)}\n`);
     }
-    const totals = { A: 0, B: 0, C: 0, bytes: 0 };
+    const totals = { A: 0, B: 0, C: 0, UNKNOWN: 0, bytes: 0 };
     for (const b of byDir.values()) {
-      totals.A += b.A; totals.B += b.B; totals.C += b.C; totals.bytes += b.bytes;
+      totals.A += b.A; totals.B += b.B; totals.C += b.C;
+      totals.UNKNOWN += b.UNKNOWN ?? 0; totals.bytes += b.bytes;
     }
     process.stdout.write(`${'TOTAL'.padEnd(42)}${String(totals.A).padStart(5)}${String(totals.B).padStart(5)}`
-      + `${String(totals.C).padStart(5)}${String(totals.A + totals.B + totals.C).padStart(7)}`
+      + `${String(totals.C).padStart(5)}${String(totals.UNKNOWN).padStart(5)}`
+      + `${String(totals.A + totals.B + totals.C + totals.UNKNOWN).padStart(7)}`
       + `${(totals.bytes / 1048576).toFixed(2).padStart(9)}\n`);
     process.stdout.write('\nA = written by a spec/checker, B = cited by a document, C = neither\n');
+    process.stdout.write('? = matched only by a SHARED BASENAME: not evidence either way, and not a\n');
+    process.stdout.write('    deletion candidate. Answered by finding the reference, not by guessing.\n');
     process.stdout.write('(no file here is a pixel baseline: this repository has 0 toHaveScreenshot)\n');
   }
 }
