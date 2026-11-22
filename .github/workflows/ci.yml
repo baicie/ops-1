@@ -1895,6 +1895,12 @@ jobs:
           # checked before the ruleset is written rather than after.
           node --test tests/ci/check-required-contexts.test.mjs
           node tests/ci/check-required-contexts.mjs
+          # The ruleset migration's WRITE VERIFICATION: after a PUT, is the ruleset
+          # exactly what was sent? A 200 is not evidence, and the failure that
+          # matters is losing one of the four protections the migration must not
+          # touch. The rollback payload is asserted here too, so a file that claims
+          # to restore the old state and does not cannot sit in the repository.
+          node --test tests/ci/check-ruleset-payload.test.mjs
           # Is the gate actually enforceable? Reads the LIVE ruleset, because a
           # flawless workflow that nothing requires gates nothing. ADVISORY and
           # PARTIAL exit 0 - they are facts for a migration to decide about, not
