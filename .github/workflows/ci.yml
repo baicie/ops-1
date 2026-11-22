@@ -1901,6 +1901,12 @@ jobs:
           # touch. The rollback payload is asserted here too, so a file that claims
           # to restore the old state and does not cannot sit in the repository.
           node --test tests/ci/check-ruleset-payload.test.mjs
+          # The registry-digest check `publish-data-plugins.sh` now calls. It
+          # existed for weeks with no caller: the publish path embedded the LOCAL
+          # RepoDigest in every bundle, and on staging that digest returned 404 from
+          # the registry. Wired in and tested together, because either alone is a
+          # claim rather than a control.
+          node --test scripts/verify-registry-digest.test.mjs
           # Is the gate actually enforceable? Reads the LIVE ruleset, because a
           # flawless workflow that nothing requires gates nothing. ADVISORY and
           # PARTIAL exit 0 - they are facts for a migration to decide about, not
