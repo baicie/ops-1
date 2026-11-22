@@ -319,9 +319,27 @@ if (RUN_AS_PROGRAM) {
     const baseRef = arg('base-ref');
     const basePath = arg('base');
     let baseSnap;
-    if (baseRef) baseSnap = snapshotAtRef(baseRef);
-    else if (basePath) baseSnap = JSON.parse(readFileSync(basePath, 'utf8'));
-    else {
+    if (baseRef !== null) {
+      // AN EMPTY REF IS NOT A MISSING OPTION, AND MUST NOT READ AS ONE.
+      //
+      // `--base-ref "$base"` with `base` empty (a shallow clone whose history
+      // does not reach the merge base) used to fall through to the usage text
+      // and exit 2 - which says "you called me wrong" when the truth is "this
+      // repository cannot answer". Measured on this step's first CI run.
+      if (baseRef.trim() === '') {
+        process.stderr.write('REFUSED: --base-ref was given an empty value; the merge base could not be'
+          + ' determined. A shallow clone needs `git fetch --depth` of the base branch first.\n');
+        process.exit(3);
+      }
+      try {
+        baseSnap = snapshotAtRef(baseRef);
+      } catch (error) {
+        process.stderr.write(`REFUSED: cannot read workflows at ${baseRef}: ${String(error.message).split('\n')[0]}\n`);
+        process.exit(3);
+      }
+    } else if (basePath) {
+      baseSnap = JSON.parse(readFileSync(basePath, 'utf8'));
+    } else {
       process.stderr.write('usage: workflow-snapshot.mjs compare --base <f> | --base-ref <ref>\n');
       process.exit(2);
     }

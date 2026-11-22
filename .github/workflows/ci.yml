@@ -381,9 +381,31 @@ jobs:
       # else is printed and the step passes, because a routine timeout change
       # must not need a special commit to get through.
       - name: Workflow surface vs the merge base
+        # THE CHECKOUT IS SHALLOW, SO `origin/main` DOES NOT EXIST IN IT.
+        #
+        # Measured on this step's first CI run: `git merge-base HEAD origin/main`
+        # answered `fatal: Not a valid object name origin/main` and the step
+        # exited 128. A shallow clone has the commit it was asked for and
+        # nothing else - no remote refs, no history to find a merge base in.
+        #
+        # Fetching only the base branch keeps the clone cheap (the alternative,
+        # `fetch-depth: 0` on the job, pulls the whole history for one
+        # comparison) and gives `merge-base` exactly the two commits it needs.
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
         run: |
           set -eu
-          base="$(git merge-base HEAD "origin/${GITHUB_BASE_REF:-main}")"
+          git fetch --no-tags --depth=64 origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          base="$(git merge-base HEAD "origin/${BASE_REF}" || true)"
+          if [ -z "$base" ]; then
+            # A depth-64 fetch can still miss the fork point on a long-lived
+            # branch. Say which of the two things went wrong instead of passing
+            # an empty argument down and letting the tool report a usage error.
+            echo "::error::no merge base with origin/${BASE_REF} within 64 commits; the clone is too shallow"
+            echo "  HEAD=$(git rev-parse HEAD)"
+            echo "  origin/${BASE_REF}=$(git rev-parse "origin/${BASE_REF}" 2>/dev/null || echo missing)"
+            exit 1
+          fi
           echo "comparing against merge-base ${base}"
           node tests/ci/workflow-snapshot.mjs compare --base-ref "$base" --advisory > /tmp/surface.txt || true
           cat /tmp/surface.txt
