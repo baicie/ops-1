@@ -82,26 +82,72 @@ export function successfulRuns(workflow, limit) {
 }
 
 /**
- * Completed job durations for one run: `[{name, seconds, queueSeconds}]`.
+ * Jobs of one run: name, duration, queue delay, and OUTCOME.
  *
  * REST, not `gh run view --json jobs`: that command's job objects have no
  * `createdAt`, so a queue measurement built on it silently produced an empty
  * table (measured - the first `queue` run printed a header and no rows).
  * `/actions/runs/{id}/jobs` does carry `created_at`.
+ *
+ * WHY OUTCOME IS RETURNED INSTEAD OF FILTERED HERE
+ *
+ * This used to keep only `conclusion === 'success'`, which is right for "how long
+ * does this job take when it works" and wrong for "how long do jobs wait", and
+ * the two callers need different answers.
+ *
+ * The bias is real and its SIZE DEPENDS ON THE SAMPLE, which is why this comment
+ * states a mechanism and one observed instance rather than a ratio. Measured on
+ * `g13a1-gateway` over 9 completed runs:
+ *
+ *   45020469137  cancelled  queue 419s   <- the longest wait in the set, dropped before
+ *   45021450620  success    queue 410s
+ *   45022144074  success    queue 106s
+ *   ...          success    queue 2-81s
+ *
+ *   successes only  n=8  p90 = 410s
+ *   every outcome   n=9  p90 = 419s
+ *
+ * Nine seconds here, because only one run in nine was cancelled. A busier window
+ * with more cancellations moves it further - the point is not the magnitude, it is
+ * that the drop is systematic and always in one direction: cancelled and failed
+ * jobs are the ones that waited longest, and they are the ones removed.
+ *
+ * A first draft of this comment quoted a 4x difference measured over a DIFFERENT,
+ * 60-run sample and used it to describe this 9-run one. Same defect as the number
+ * it was describing: a figure attached to a sample it was not measured on.
+ *
+ * So the filter moved to the callers: `jobs` keeps success (it measures a healthy
+ * duration), `queue` keeps anything that was ever PICKED UP (it measures a wait,
+ * and a job that failed still waited).
  */
 export function jobDurations(runId) {
   const run = gh(['api', `repos/{owner}/{repo}/actions/runs/${runId}/jobs?per_page=100`]);
-  return (run.jobs ?? [])
-    .filter((j) => j.conclusion === 'success' && j.started_at && j.completed_at)
-    .map((j) => ({
-      name: j.name,
-      seconds: (Date.parse(j.completed_at) - Date.parse(j.started_at)) / 1000,
-      // created_at for a job is when it entered the queue; started_at is when a
-      // runner picked it up. The difference includes any `needs:` wait.
-      queueSeconds: j.created_at
-        ? (Date.parse(j.started_at) - Date.parse(j.created_at)) / 1000
-        : null,
-    }));
+  const jobs = run.jobs ?? [];
+  // A second page that exists and was not read must not be mistaken for a run
+  // with fewer jobs. Under 100 this is free; at 100+ it is the difference between
+  // "measured every job" and "measured the first hundred".
+  const total = Number(run.total_count ?? jobs.length);
+  return {
+    totalCount: total,
+    jobs: jobs
+      // `started_at` is the only field the queue delay needs, and its absence is
+      // not a failure: a job that never got a runner has no delay to measure.
+      .filter((j) => j.started_at)
+      .map((j) => ({
+        name: j.name,
+        conclusion: j.conclusion ?? null,
+        // A job still running has no duration yet; null rather than NaN, so a
+        // caller cannot average it in by accident.
+        seconds: j.completed_at
+          ? (Date.parse(j.completed_at) - Date.parse(j.started_at)) / 1000
+          : null,
+        // created_at for a job is when it entered the queue; started_at is when a
+        // runner picked it up. The difference includes any `needs:` wait.
+        queueSeconds: j.created_at
+          ? (Date.parse(j.started_at) - Date.parse(j.created_at)) / 1000
+          : null,
+      })),
+  };
 }
 
 /**
@@ -220,8 +266,15 @@ if (!RUN_AS_PROGRAM) {
     process.exit(1);
   }
   const byJob = new Map();
+  let shortPages = 0;
   for (const run of runs) {
-    for (const { name, seconds } of jobDurations(run)) {
+    const { jobs, totalCount } = jobDurations(run);
+    if (totalCount > jobs.length) shortPages += 1;
+    for (const { name, seconds, conclusion } of jobs) {
+      // Duration is a statement about a job that FINISHED. A failed job's
+      // duration is how long it took to fail, which belongs in a different
+      // question; `queue` below keeps it, because a wait is a wait.
+      if (conclusion !== 'success' || seconds === null) continue;
       if (!byJob.has(name)) byJob.set(name, []);
       byJob.get(name).push(seconds);
     }
@@ -234,6 +287,10 @@ if (!RUN_AS_PROGRAM) {
   } else {
     process.stdout.write(`${workflow}  ${runs.length} successful runs`
       + ` (examined ${examined}, excluded ${excluded})\n`);
+    if (shortPages > 0) {
+      process.stdout.write(`WARNING: ${shortPages} run(s) reported more jobs than one page returned;`
+        + ' this table is INCOMPLETE\n');
+    }
     process.stdout.write(`${'job'.padEnd(38)}${'n'.padStart(4)}${'min'.padStart(7)}${'p50'.padStart(7)}`
       + `${'p90'.padStart(7)}${'p95'.padStart(7)}${'max'.padStart(7)}\n`);
     for (const r of rows) {
@@ -281,11 +338,21 @@ if (!RUN_AS_PROGRAM) {
     process.exit(1);
   }
   const byJob = new Map();
+  // How many samples each OUTCOME contributed, so a queue number computed from
+  // successes only cannot be read as if it described every job. The old code
+  // dropped failures before the caller saw them.
+  const byOutcome = new Map();
+  let shortPages = 0;
   for (const id of runs) {
-    for (const { name, queueSeconds } of jobDurations(id)) {
+    const { jobs, totalCount } = jobDurations(id);
+    if (totalCount > jobs.length) shortPages += 1;
+    for (const { name, queueSeconds, conclusion } of jobs) {
       if (queueSeconds === null) continue;
       if (!byJob.has(name)) byJob.set(name, []);
       byJob.get(name).push(queueSeconds);
+      const outcome = conclusion ?? 'unfinished';
+      if (!byOutcome.has(outcome)) byOutcome.set(outcome, 0);
+      byOutcome.set(outcome, byOutcome.get(outcome) + 1);
     }
   }
   const rows = [...byJob.entries()]
@@ -296,6 +363,16 @@ if (!RUN_AS_PROGRAM) {
   } else {
     process.stdout.write(`job queue delay (started_at - created_at), ${runs.length} completed runs\n`);
     process.stdout.write('this interval INCLUDES any `needs:` wait; it is not purely runner queueing\n');
+    const outcomes = [...byOutcome.entries()].sort((a, b) => b[1] - a[1])
+      .map(([k, n]) => `${k}=${n}`).join(' ');
+    process.stdout.write(`samples by outcome: ${outcomes || '(none)'}`
+      + '  - failures and cancellations are INCLUDED: a job that was cancelled after waiting'
+      + ' is the sample that says most about the queue\n');
+    if (shortPages > 0) {
+      // Not a warning about this run being slow - a warning about the number.
+      process.stdout.write(`WARNING: ${shortPages} run(s) reported more jobs than one page returned;`
+        + ' this table is INCOMPLETE and its percentiles are lower bounds\n');
+    }
     process.stdout.write(`${'job'.padEnd(38)}${'n'.padStart(4)}${'min'.padStart(7)}${'p50'.padStart(7)}`
       + `${'p90'.padStart(7)}${'max'.padStart(7)}\n`);
     for (const r of rows) {
