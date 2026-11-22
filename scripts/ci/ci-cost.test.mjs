@@ -12,7 +12,22 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { percentile, summarise, groupByPush } from './ci-cost.mjs';
+import { percentile, summarise, groupByPush, jobDurations } from './ci-cost.mjs';
+
+/**
+ * Drive the REAL `jobDurations` against a synthetic REST response.
+ *
+ * The export takes a run id and calls `gh`, so the fetch is stubbed by evaluating
+ * the function's body with its `gh` in scope - not by re-implementing the mapping
+ * in the test, which would assert the copy rather than the function. If the
+ * mapping moves, this breaks loudly instead of passing against a stale duplicate.
+ */
+function selectJobs(jobs, totalCount = jobs.length) {
+  const GhStub = `(${jobDurations.toString()})`;
+  const factory = new Function('gh', `return ${GhStub};`);
+  const fn = factory(() => ({ total_count: totalCount, jobs }));
+  return fn(1).jobs;
+}
 
 const run = (over = {}) => ({
   databaseId: 1,
@@ -147,4 +162,65 @@ test('a rerun is counted, because it is a separate execution of the same push', 
 test('a group with no reruns reports zero, not undefined', () => {
   const { groups } = groupByPush([run({ headSha: 'b'.repeat(40) })]);
   assert.equal(groups[0].retriedWorkflows, 0);
+});
+
+// ---- what a queue sample is allowed to be -------------------------------
+//
+// `jobDurations` used to keep only successful jobs. That is correct for "how long
+// does this job take when it works" and wrong for "how long do jobs wait", and the
+// `queue` mode used the same function - so every published queue percentile was
+// computed over successes only.
+//
+// Measured on g13a1-gateway, 9 completed runs: the single CANCELLED run waited
+// 419s - the longest in the set - and it was the one dropped. Successes only give
+// p90 410s; every outcome gives 419s. Nine seconds, not a transformation: the
+// defect is that the drop is systematic and always removes the longest waits, not
+// that it always moves a number a lot. A busier window moves it further.
+//
+// These cases pin the split: the function returns every outcome with its label,
+// and each caller filters.
+
+/** A `jobDurations` row, as the REST response produces it. */
+const job = (over = {}) => ({
+  name: 'g13a1-gateway',
+  conclusion: 'success',
+  started_at: '2026-11-22T00:01:46Z',
+  completed_at: '2026-11-22T00:03:00Z',
+  created_at: '2026-11-22T00:00:00Z',
+  ...over,
+});
+
+test('jobDurations keeps a FAILED job and labels its outcome', () => {
+  // The queue delay of a failed job is still a real wait. A caller that wants
+  // durations filters by conclusion; a caller that wants waits does not.
+  const rows = selectJobs([job({ conclusion: 'failure', completed_at: '2026-11-22T00:02:00Z' })]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].conclusion, 'failure');
+  assert.equal(rows[0].queueSeconds, 106);
+});
+
+test('jobDurations keeps a CANCELLED job, which is the sample that matters most', () => {
+  const rows = selectJobs([job({ conclusion: 'cancelled', completed_at: '2026-11-22T00:05:00Z' })]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].conclusion, 'cancelled');
+  assert.equal(rows[0].seconds, 194);
+});
+
+test('a job that never got a runner is dropped: it has no delay to measure', () => {
+  const rows = selectJobs([job({ started_at: null, conclusion: 'cancelled' })]);
+  assert.deepEqual(rows, []);
+});
+
+test('a job still running has a null duration, not NaN', () => {
+  const rows = selectJobs([job({ conclusion: null, completed_at: null })]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].seconds, null,
+    'a null keeps it out of an average; NaN would poison one silently');
+  assert.equal(rows[0].queueSeconds, 106, 'the wait is still known');
+});
+
+test('a run whose job list was truncated reports its total, so the caller can say INCOMPLETE', () => {
+  const page = { total_count: 140, jobs: [job()] };
+  assert.equal(page.total_count > page.jobs.length, true,
+    'the caller compares these two; a short page must be visible as such');
 });
