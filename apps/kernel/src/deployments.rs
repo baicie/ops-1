@@ -4,7 +4,7 @@ use crate::error::{AppError, AppResult};
 use crate::nodes::NodeRow;
 use crate::receipts::{self, ReceiptStart};
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use chrono::{DateTime, Utc};
@@ -1325,6 +1325,66 @@ pub fn spawn_reconciler(state: AppState) {
             }
         }
     });
+}
+
+/// READ-ONLY: would a deploy of `replicas` fit right now, and if not, why.
+///
+/// WHY AN ENDPOINT AND NOT A DOCUMENT
+///
+/// Staging fails with `INSTANCE_CAPACITY_EXCEEDED` after a full image build. The
+/// condition is knowable beforehand, and the answer lived in
+/// `docs/ci/staging-capacity-diagnosis.md` - a snapshot of one query on one day.
+/// A document goes stale in exactly the direction that matters here.
+///
+/// This runs the SAME `evaluate_node` the scheduler runs, so it cannot answer FITS
+/// for a deployment the planner then refuses. It writes nothing.
+///
+/// The response carries `caveat` because a preflight is an estimate: another
+/// deployment can place between this call and the real one, and the scheduler
+/// still re-evaluates every slot.
+pub async fn capacity_preflight(
+    State(state): State<crate::state::AppState>,
+    auth: crate::auth::AuthUser,
+    Query(params): Query<CapacityQuery>,
+) -> crate::error::AppResult<Json<crate::placement_preflight::Preflight>> {
+    let _ = auth;
+    let replicas = params.replicas.unwrap_or(1).clamp(1, 20);
+    let selector: std::collections::BTreeMap<String, String> = params
+        .selector
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    let requested = opsweave_contracts::ResourceRequirements {
+        cpu_millis: params.cpu_millis.unwrap_or(500),
+        memory_mib: params.memory_mib.unwrap_or(256),
+    };
+    let report = crate::placement_preflight::gather(
+        &state.db,
+        None,
+        selector,
+        requested,
+        replicas,
+        params
+            .max_instances_per_deployment
+            .unwrap_or(1)
+            .clamp(1, 20),
+        state.config.max_instances_per_node as usize,
+    )
+    .await
+    .map_err(|e| crate::error::AppError::internal(e.to_string()))?;
+    Ok(Json(report))
+}
+
+/// Query for the preflight endpoint. All optional; the defaults describe a single
+/// small replica with no selector, which is the shape a first deploy has.
+#[derive(Debug, serde::Deserialize)]
+pub struct CapacityQuery {
+    pub replicas: Option<i32>,
+    /// JSON object, e.g. `{"pool":"data"}`.
+    pub selector: Option<String>,
+    pub cpu_millis: Option<i64>,
+    pub memory_mib: Option<i64>,
+    pub max_instances_per_deployment: Option<usize>,
 }
 
 pub async fn reconcile_once(state: &AppState) -> anyhow::Result<()> {
@@ -2846,6 +2906,196 @@ mod tests {
     /// These drive `evaluate_node` through `reconcile_deployment`, not the helper
     /// directly, so the ORDER of the checks and the status the deployment ends up
     /// with are both covered.
+    /// TASK-14: the preflight must count what the PLANNER counts.
+    ///
+    /// The preflight exists to answer "would this deploy fit" before a full image
+    /// build. If it counted instances differently from `reconcile_deployment` - a
+    /// different ghost exclusion, a different status filter - it would answer FITS
+    /// for deployments the scheduler then refuses, which is worse than no preflight:
+    /// the operator would have a tool that disagrees with the system it describes.
+    ///
+    /// The SQL in `placement_preflight::gather` is a copy of the planner's three
+    /// aggregates. This test is the cross-check that justifies the copy.
+    mod preflight_matches_planner {
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let pool = PgPool::connect(&url).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrate");
+            Some(pool)
+        }
+
+        /// A node with N instances, one of them a GHOST, and the planner's own
+        /// count for it.
+        #[tokio::test]
+        async fn the_preflight_and_the_planner_agree_on_what_occupies_a_node() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let tag = Uuid::new_v4().simple().to_string();
+            let node = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at,
+                    data_endpoint, resource_snapshot)
+                 VALUES ($1,$2,'x','tok',1,'linux','amd64',$4::jsonb,'[]'::jsonb,
+                         'READY',now(),now(),'http://127.0.0.1:1',$3)",
+            )
+            .bind(node)
+            .bind(format!("pf-node-{tag}"))
+            .bind(serde_json::json!({
+                "cpuCores": 8,
+                "memoryTotalBytes": 8i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0,
+            }))
+            .bind(serde_json::json!({ "test-fixture": tag }))
+            .execute(&pool)
+            .await
+            .expect("node");
+
+            // Two LIVE instances and one GHOST (UNHEALTHY, no container).
+            let publisher = format!("pub-pf-{tag}");
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(&pool)
+            .await
+            .expect("publisher");
+            let mut deployment_ids = Vec::new();
+            for (slot, ghost) in [(0, false), (1, false), (2, true)] {
+                let plugin = format!("test.pf.{tag}.{slot}");
+                let package = Uuid::new_v4();
+                let dep = Uuid::new_v4();
+                deployment_ids.push(dep);
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_packages
+                       (package_id, plugin_id, version, schema_version, publisher, manifest,
+                        artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                     VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+                )
+                .bind(package)
+                .bind(&plugin)
+                .bind(&publisher)
+                .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+                .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+                .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+                .execute(&pool)
+                .await
+                .expect("package");
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_deployments
+                       (id, plugin_id, package_id, version, desired_replicas, generation,
+                        placement, resources, status, created_at, updated_at)
+                     VALUES ($1,$2,$3,'1.0.0',1,1,'{}'::jsonb,
+                             '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'ACTIVE',now(),now())",
+                )
+                .bind(dep)
+                .bind(&plugin)
+                .bind(package)
+                .execute(&pool)
+                .await
+                .expect("deployment");
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_instances
+                       (id, deployment_id, node_id, slot, deployment_generation,
+                        desired_action, state, container_id)
+                     VALUES ($1,$2,$3,0,1,'START',$4,$5)",
+                )
+                .bind(Uuid::new_v4())
+                .bind(dep)
+                .bind(node)
+                .bind(if ghost { "UNHEALTHY" } else { "READY" })
+                .bind(if ghost {
+                    None
+                } else {
+                    Some(format!("c{slot}"))
+                })
+                .execute(&pool)
+                .await
+                .expect("instance");
+            }
+
+            // What the planner's own aggregate says.
+            let planner_count: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances i
+                 JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+                 WHERE i.node_id=$1 AND i.desired_action='START'
+                   AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+                   AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)",
+            )
+            .bind(node)
+            .fetch_one(&pool)
+            .await
+            .expect("planner count");
+
+            let report = crate::placement_preflight::gather(
+                &pool,
+                None,
+                [("test-fixture".to_string(), tag.clone())]
+                    .into_iter()
+                    .collect(),
+                opsweave_contracts::ResourceRequirements {
+                    cpu_millis: 100,
+                    memory_mib: 128,
+                },
+                1,
+                4,
+                4,
+            )
+            .await
+            .expect("preflight");
+
+            let mine = report
+                .nodes
+                .iter()
+                .find(|n| n.node_id == node)
+                .map(|n| n.instances_on_node as i64)
+                .unwrap_or(-1);
+            assert_eq!(
+                mine, planner_count,
+                "the preflight counts {mine} occupied instances but the planner counts \
+                 {planner_count}; a preflight that disagrees with the scheduler answers for \
+                 a system that does not exist"
+            );
+            assert_eq!(
+                planner_count, 2,
+                "two live instances; the ghost must not count"
+            );
+
+            for dep in deployment_ids {
+                sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+                    .bind(dep)
+                    .execute(&pool)
+                    .await
+                    .ok();
+            }
+            sqlx::query("DELETE FROM kernel.nodes WHERE id=$1")
+                .bind(node)
+                .execute(&pool)
+                .await
+                .ok();
+        }
+    }
+
     mod resource_capacity {
         use sqlx::PgPool;
         use uuid::Uuid;
@@ -3001,7 +3251,7 @@ mod tests {
 
         /// CPU BUDGET IS 90% OF CORES x 1000. Two cores -> 1800m.
         #[tokio::test]
-        async fn a_deployment_over_the_cpu_budget_is_refused_and_NAMES_CPU() {
+        async fn a_deployment_over_the_cpu_budget_is_refused_and_names_cpu() {
             let Some(pool) = test_pool().await else {
                 return;
             };
@@ -3022,7 +3272,7 @@ mod tests {
 
         /// MEMORY BUDGET IS 90% OF (total - used). 1 GiB -> 921 MiB.
         #[tokio::test]
-        async fn a_deployment_over_the_memory_budget_is_refused_and_NAMES_MEMORY() {
+        async fn a_deployment_over_the_memory_budget_is_refused_and_names_memory() {
             let Some(pool) = test_pool().await else {
                 return;
             };
@@ -3044,7 +3294,7 @@ mod tests {
         /// BOTH resources sufficient -> placed. The control: without it the two
         /// refusals above could be "everything is refused".
         #[tokio::test]
-        async fn a_deployment_within_BOTH_budgets_is_placed() {
+        async fn a_deployment_within_both_budgets_is_placed() {
             let Some(pool) = test_pool().await else {
                 return;
             };
@@ -3063,7 +3313,7 @@ mod tests {
         /// A snapshot with no cpuCores is REFUSED, not defaulted to zero and
         /// silently treated as "no budget".
         #[tokio::test]
-        async fn a_snapshot_missing_cpuCores_is_refused_by_name() {
+        async fn a_snapshot_missing_cpu_cores_is_refused_by_name() {
             let Some(pool) = test_pool().await else {
                 return;
             };

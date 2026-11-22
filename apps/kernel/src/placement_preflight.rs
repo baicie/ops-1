@@ -198,6 +198,125 @@ fn verdict_kind(rejection: &PlacementRejection) -> &'static str {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Gathering the input, read-only, from the same SQL the planner uses.
+//
+// The three aggregates below are copied from `reconcile_deployment` ON PURPOSE and
+// with a cross-check: if the preflight counted instances differently from the
+// planner, it would answer FITS for deployments the planner then refuses, which is
+// the whole defect class this module exists to avoid. `preflight_counts_match_planner`
+// in the tests asserts the two produce the same numbers for one fixture.
+// ---------------------------------------------------------------------------
+
+/// Everything the preflight needs for one deployment, read without writing.
+///
+/// `deployment_id` is `Some` to ask about an existing deployment, `None` to ask
+/// "would a new deployment of `requested` with these placement rules fit".
+pub async fn gather(
+    db: &sqlx::PgPool,
+    deployment_id: Option<Uuid>,
+    selector: BTreeMap<String, String>,
+    requested: ResourceRequirements,
+    replicas: i32,
+    max_instances_per_deployment: usize,
+    max_instances_per_node: usize,
+) -> anyhow::Result<Preflight> {
+    let nodes = sqlx::query_as::<_, NodeRow>(
+        "SELECT * FROM kernel.nodes WHERE revoked_at IS NULL AND status='READY' \
+         AND last_seen_at > now() - ($1 || ' seconds')::interval ORDER BY name",
+    )
+    .bind(86400_i64)
+    .fetch_all(db)
+    .await?;
+
+    // Reserved CPU/memory per node, excluding ghosts - the same predicate the
+    // planner uses, so the two cannot disagree about what occupies a slot.
+    let alloc_rows = sqlx::query(
+        r#"
+        SELECT i.node_id,
+               COALESCE(SUM((d.resources->>'cpuMillis')::bigint)::bigint, 0) AS cpu,
+               COALESCE(SUM((d.resources->>'memoryMiB')::bigint)::bigint, 0) AS mem
+        FROM kernel.plugin_instances i
+        JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+        WHERE i.desired_action='START'
+          AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+          AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)
+        GROUP BY i.node_id
+        "#,
+    )
+    .fetch_all(db)
+    .await?;
+    use sqlx::Row as _;
+    let reserved: HashMap<Uuid, (i64, i64)> = alloc_rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<Uuid, _>("node_id"),
+                (row.get::<i64, _>("cpu"), row.get::<i64, _>("mem")),
+            )
+        })
+        .collect();
+
+    let global_rows = sqlx::query(
+        r#"
+        SELECT i.node_id, count(*)::bigint AS n
+        FROM kernel.plugin_instances i
+        JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+        WHERE i.desired_action='START'
+          AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+          AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)
+        GROUP BY i.node_id
+        "#,
+    )
+    .fetch_all(db)
+    .await?;
+    let global_counts: HashMap<Uuid, usize> = global_rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<Uuid, _>("node_id"),
+                row.get::<i64, _>("n").max(0) as usize,
+            )
+        })
+        .collect();
+
+    // Per-deployment facts are only asked for when a deployment was named; a
+    // hypothetical deploy has no rows yet.
+    let (used_nodes, deployment_counts) = match deployment_id {
+        Some(id) => {
+            let rows = sqlx::query(
+                "SELECT node_id, count(*)::bigint AS n FROM kernel.plugin_instances \
+                 WHERE deployment_id=$1 AND desired_action='START' GROUP BY node_id",
+            )
+            .bind(id)
+            .fetch_all(db)
+            .await?;
+            let mut map: HashMap<Uuid, usize> = HashMap::new();
+            for row in rows {
+                map.insert(
+                    row.get::<Uuid, _>("node_id"),
+                    row.get::<i64, _>("n").max(0) as usize,
+                );
+            }
+            (map.clone(), map)
+        }
+        None => (HashMap::new(), HashMap::new()),
+    };
+
+    Ok(preflight(&PreflightInput {
+        nodes,
+        selector,
+        requested,
+        replicas,
+        max_instances_per_deployment,
+        max_instances_per_node,
+        reserved,
+        used_nodes,
+        global_counts,
+        deployment_counts,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn a_full_node_is_CAPACITY_BLOCKED_with_the_number() {
+    fn a_full_node_is_capacity_blocked_with_the_number() {
         // The staging case: four instances against a per-node limit of four.
         let n = node("node-a", "READY");
         let mut i = input(vec![n.clone()], 1);
@@ -271,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn a_node_that_is_not_READY_is_not_counted() {
+    fn a_node_that_is_not_ready_is_not_counted() {
         let r = preflight(&input(vec![node("node-a", "UNREACHABLE")], 1));
         assert_eq!(r.verdict, "CAPACITY_BLOCKED");
         assert_eq!(r.reason, Some("NODE_NOT_READY"));

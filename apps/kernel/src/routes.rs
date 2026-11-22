@@ -161,6 +161,13 @@ pub fn build(state: AppState) -> Router {
         // "no access to X" from this instead of guessing from its own role.
         .route("/api/v1/applications", get(applications::list_applications))
         .route("/api/v1/overview", get(plugins::overview))
+        // READ-ONLY capacity preflight. Staging learns it has no slots by timing out
+        // after a full build; this answers the same question beforehand, using the
+        // scheduler's own `evaluate_node`.
+        .route(
+            "/api/v1/capacity/preflight",
+            get(deployments::capacity_preflight),
+        )
         .route("/api/v1/plugins", get(plugins::list_plugins))
         .route(
             "/api/v1/plugins/packages",
