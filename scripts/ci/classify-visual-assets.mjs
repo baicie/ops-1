@@ -65,52 +65,112 @@ function walk(dir, out = []) {
 }
 
 /**
- * Which PNG basenames appear in which kind of file.
+ * Which PNGs each file names, keyed by the PATH SEGMENTS the file wrote.
  *
- * Matching is on the FILE NAME, not the full path, because that is how the
- * documents and specs cite them (`![x](.../r1440-light-en__overview.png)` and
- * `"audit/.../r1440-light-en__overview.png"` both appear).
+ * Matching on the basename alone is wrong, and the tree proves it: eight
+ * tracked files are named `job-detail.png`, and one document cites
+ * `../assets/0.0.4/hardening/job-detail.png`. Keyed by basename, all eight came
+ * back "cited by 004-product-hardening.md" - so `docs/assets/0.0.4/job-detail.png`
+ * and `docs/assets/0.0.4/ui-redesign/job-detail.png` were classified A while
+ * nothing cites them.
+ *
+ * The key is now the longest run of path segments the file actually wrote:
+ * `hardening/job-detail.png` for a relative reference,
+ * `artifacts/ui/studio/job-detail.png` for a full one, and bare
+ * `job-detail.png` only when nothing longer was written. A bare basename is
+ * kept as a SEPARATE, weaker key - it is what a document that names no
+ * directory leaves us with, and it must not be confused with a path match.
+ *
+ * @returns {{evidence: Map<string, string[]>, assertion: Map<string, string[]>,
+ *            bareEvidence: Map<string, string[]>, bareAssertion: Map<string, string[]>}}
  */
 export function referencesByKind() {
-  const evidence = new Map(); // basename -> [doc]
-  const assertion = new Map(); // basename -> [spec/checker]
+  const evidence = new Map();
+  const assertion = new Map();
+  const bareEvidence = new Map();
+  const bareAssertion = new Map();
+  const add = (map, key, rel) => {
+    if (!map.has(key)) map.set(key, []);
+    const list = map.get(key);
+    if (!list.includes(rel)) list.push(rel);
+  };
+
   const all = walk(ROOT);
   for (const file of all) {
-    // `artifacts/` is the subject, not a reference source; script output and
-    // the Playwright failure dumps cite screenshots they just wrote.
     const rel = relative(ROOT, file);
     if (rel.startsWith('artifacts/') || rel.startsWith('test-results/')) continue;
     if (!/\.(md|ts|tsx|mjs|cjs|js|py|json|ya?ml|sh)$/.test(rel)) continue;
     let text;
     try { text = readFileSync(file, 'utf8'); } catch { continue; }
-    // Only files that could plausibly assert against an image.
     const isAssertionSource = /(^|\/)(tests|scripts)\//.test(rel) || /\.spec\.ts$/.test(rel)
       || /check-tracked-png-budget/.test(rel);
     const isDoc = rel.endsWith('.md');
     if (!isAssertionSource && !isDoc) continue;
-    for (const m of text.matchAll(/([A-Za-z0-9_.@-]+\.png)/g)) {
-      const target = isAssertionSource ? assertion : evidence;
-      if (!target.has(m[1])) target.set(m[1], []);
-      const list = target.get(m[1]);
-      if (!list.includes(rel)) list.push(rel);
+
+    // Match a path-like run ending in .png, and take the LONGEST suffix of it
+    // that is a real tracked file's tail. Greedy on segments, so
+    // `../assets/0.0.4/hardening/job-detail.png` keys on
+    // `hardening/job-detail.png` and not on `job-detail.png`.
+    for (const m of text.matchAll(/([A-Za-z0-9_./@-]*?)([A-Za-z0-9_.@-]+\.png)/g)) {
+      const prefix = m[1];
+      const base = m[2];
+      const segments = prefix.split('/').filter((seg) => seg && seg !== '.' && seg !== '..');
+      const key = segments.length ? `${segments.slice(-2).join('/')}/${base}` : base;
+      const strong = isAssertionSource ? assertion : evidence;
+      const weak = isAssertionSource ? bareAssertion : bareEvidence;
+      if (segments.length) add(strong, key, rel);
+      else add(weak, base, rel);
     }
   }
-  return { evidence, assertion };
+  return { evidence, assertion, bareEvidence, bareAssertion };
+}
+
+/** Is `path` named by any key in `map`, keyed on whole trailing segments? */
+function lookups(path, map) {
+  const segments = path.split('/');
+  // Longest suffix first: the most specific match wins.
+  for (let take = segments.length; take >= 2; take -= 1) {
+    const key = segments.slice(-take).join('/');
+    if (map.has(key)) return map.get(key);
+  }
+  return [];
 }
 
 /**
- * @returns {{path: string, class: string, citedBy: string[], assertedBy: string[]}[]}
+ * @returns {{path: string, class: string, citedBy: string[], assertedBy: string[],
+ *            match: string}[]}
  */
 export function classify(pngs, refs) {
+  // How many files in the tree share each basename. A basename-only match is
+  // evidence when it is unique and a GUESS when it is not: `job-history.png`
+  // exists under both `artifacts/ui/studio/` and `docs/assets/0.0.4/`, so "a
+  // spec names job-history.png" does not say which one.
+  const shared = new Map();
+  for (const p of pngs) {
+    const b = p.split('/').pop();
+    shared.set(b, (shared.get(b) ?? 0) + 1);
+  }
   return pngs.map((path) => {
     const base = path.split('/').pop();
-    const citedBy = refs.evidence.get(base) ?? [];
-    const assertedBy = refs.assertion.get(base) ?? [];
+    // A path match beats a bare-name match, always. A bare name is what a
+    // document leaves us with when it writes no directory, and treating it as
+    // equal to a path is the defect this function was rewritten for.
+    let assertedBy = lookups(path, refs.assertion ?? new Map());
+    let citedBy = lookups(path, refs.evidence ?? new Map());
+    let match = assertedBy.length || citedBy.length ? 'path' : 'none';
+    if (assertedBy.length === 0) assertedBy = refs.bareAssertion?.get(base) ?? [];
+    if (citedBy.length === 0) citedBy = refs.bareEvidence?.get(base) ?? [];
+    if (match === 'none' && (assertedBy.length || citedBy.length)) match = 'basename';
+
     let cls;
     if (assertedBy.length > 0) cls = 'A';
     else if (citedBy.length > 0) cls = 'B';
     else cls = 'C';
-    return { path, class: cls, citedBy, assertedBy };
+    // A classification resting on a shared basename is not evidence. It is
+    // reported as such rather than silently counted - the deletion question
+    // "is anything using this?" must not be answered by a guess.
+    const ambiguous = match === 'basename' && (shared.get(base) ?? 1) > 1;
+    return { path, class: cls, citedBy, assertedBy, match, ambiguous };
   });
 }
 
