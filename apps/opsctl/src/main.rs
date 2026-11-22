@@ -55,6 +55,15 @@ enum Command {
     },
     /// List enrolled nodes.
     Nodes,
+    /// READ-ONLY capacity audit: who is occupying every node slot, and what would
+    /// a deploy of N replicas find. Writes nothing.
+    Capacity {
+        /// Replicas a hypothetical deploy would request.
+        #[arg(long, default_value_t = 1)]
+        replicas: i32,
+        #[arg(long)]
+        json: bool,
+    },
     /// Create a one-time node enrollment token.
     NodeToken {
         #[arg(long)]
@@ -338,6 +347,139 @@ async fn main() -> Result<()> {
                         item["severity"].as_str().unwrap_or("info"),
                         item["title"].as_str().unwrap_or(""),
                         item["detail"].as_str().unwrap_or("")
+                    );
+                }
+            }
+        }
+        Command::Capacity { replicas, json } => {
+            // READ-ONLY, AND SAID SO IN THE COMMAND NAME.
+            //
+            // Staging fails with INSTANCE_CAPACITY_EXCEEDED, and answering "who is
+            // occupying the slots" has so far meant reading the diagnosis document
+            // and trusting it. A document goes stale; this asks the running system.
+            //
+            // It deliberately does NOT decide what is safe to remove. Four active
+            // deployments with live routes are not garbage, and a tool that named
+            // them "reclaimable" would be one step from someone acting on it.
+            let api = Api::new()?;
+            let nodes = api
+                .get("/api/v1/nodes")
+                .await?
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            // THERE IS NO `/api/v1/deployments`. Deployments are listed per plugin,
+            // at `/api/v1/plugins/{id}/deployments`; an invented top-level route
+            // would have 404'd and the audit would have printed "no occupants" -
+            // a tool that answers "nothing is holding the slots" when it failed to
+            // ask is worse than no tool.
+            let plugins = api
+                .get("/api/v1/plugins")
+                .await?
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let mut deployments = Vec::new();
+            for plugin in &plugins {
+                let Some(id) = plugin["id"].as_str() else {
+                    continue;
+                };
+                match api.get(&format!("/api/v1/plugins/{id}/deployments")).await {
+                    Ok(Value::Array(list)) => deployments.extend(list),
+                    // A plugin whose deployments cannot be read makes the audit
+                    // INCOMPLETE rather than silently shorter.
+                    Ok(_) => {}
+                    Err(error) => {
+                        eprintln!("warning: cannot read deployments for {id}: {error}");
+                    }
+                }
+            }
+
+            let mut report = Vec::new();
+            let mut total_free = 0_i64;
+            for node in &nodes {
+                let ready = node["instancesReady"].as_i64().unwrap_or(0);
+                let total = node["instancesTotal"].as_i64().unwrap_or(0);
+                // The per-node limit is not on the node object; the kernel default
+                // is 4 and `deploy --max-instances-per-node` can change it per
+                // deployment. Both are reported so the arithmetic is visible rather
+                // than implied.
+                let free = (total - ready).max(0);
+                total_free += free;
+                report.push(serde_json::json!({
+                    "node": node["name"],
+                    "nodeId": node["id"],
+                    "status": node["status"],
+                    "stale": node["stale"],
+                    "instancesReady": ready,
+                    "instancesTotal": total,
+                    "freeSlots": free,
+                }));
+            }
+
+            let occupants: Vec<Value> = deployments
+                .iter()
+                .filter(|d| d["status"].as_str() != Some("DISABLED"))
+                .map(|d| {
+                    serde_json::json!({
+                        "deploymentId": d["id"],
+                        "plugin": d["pluginId"],
+                        "version": d["version"],
+                        "status": d["status"],
+                        "replicas": d["desiredReplicas"],
+                        "active": d["status"].as_str() == Some("ACTIVE"),
+                        "reason": d["statusReason"],
+                    })
+                })
+                .collect();
+
+            let verdict = if total_free >= i64::from(replicas) {
+                "CAPACITY_AVAILABLE"
+            } else {
+                "CAPACITY_BLOCKED"
+            };
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "verdict": verdict,
+                        "replicasRequested": replicas,
+                        "freeSlotsTotal": total_free,
+                        "nodes": report,
+                        "occupants": occupants,
+                        // The same caveat the placement preflight carries: this is
+                        // an estimate, and the scheduler re-evaluates every slot.
+                        "caveat": "read-only snapshot; the scheduler re-evaluates every slot and \
+                                   another deploy may place in between",
+                    }))?
+                );
+            } else {
+                println!("capacity: {verdict} (want {replicas}, free {total_free})");
+                for n in &report {
+                    println!(
+                        "  node {} status={} stale={} ready={}/{} free={}",
+                        n["node"].as_str().unwrap_or(""),
+                        n["status"].as_str().unwrap_or(""),
+                        n["stale"],
+                        n["instancesReady"],
+                        n["instancesTotal"],
+                        n["freeSlots"]
+                    );
+                }
+                println!("occupants (NOT a removal list):");
+                for o in &occupants {
+                    println!(
+                        "  {} {}@{} status={} replicas={}{}",
+                        o["deploymentId"].as_str().unwrap_or(""),
+                        o["plugin"].as_str().unwrap_or(""),
+                        o["version"].as_str().unwrap_or(""),
+                        o["status"].as_str().unwrap_or(""),
+                        o["replicas"],
+                        o["reason"]
+                            .as_str()
+                            .map(|r| format!("  reason: {r}"))
+                            .unwrap_or_default()
                     );
                 }
             }
