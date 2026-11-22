@@ -113,6 +113,21 @@ case "$out" in
   *) bad "success output was swallowed: [$out]" ;;
 esac
 
+# --- streaming output: NOT TESTED HERE, AND WHY ------------------------------
+#
+# The retry streams its command's output through `tee` so a long Maven build is
+# visible while it runs. Whether that actually happens is not something this
+# file can assert: a buffered implementation and a streaming one both produce
+# the same file when the command finishes, and the difference is a latency a
+# shell script cannot observe without racing a clock - a test that did so would
+# be the flaky kind this repository keeps removing.
+#
+# The property was measured by hand instead, and the measurement is in the
+# function's comment: a two-second command's first line appeared at +2s under
+# the old `out="$(cmd)"` capture and at +0s under `tee`. If that regresses, the
+# symptom is an empty CI log during a slow build, which is visible to a reader
+# and not to a test.
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

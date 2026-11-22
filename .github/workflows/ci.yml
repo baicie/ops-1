@@ -341,6 +341,10 @@ jobs:
       # minutes.
       - name: build retry policy
         run: bash tests/scripts/build-plugins-retry.test.sh
+      # The PNG classifier's own rules. It was rewritten because keying every
+      # citation on the basename made one document's reference mark eight files
+      # as cited - eight tracked files are named job-detail.png.
+      - run: node --test scripts/ci/classify-visual-assets.test.mjs
       # Path integrity: every path a build, script or config names must exist.
       #
       # This is the other half of the retired-path gate. That one catches a live

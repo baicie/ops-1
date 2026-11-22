@@ -262,22 +262,32 @@ fi
 # them, which is why the policy cannot mask a real build failure.
 retry_on_registry_fault() {
   local label="$1"; shift
-  local attempt=1 out rc=0
+  local attempt=1 rc=0 log
+  # STREAMED, NOT BUFFERED. Measured: with `out="$(cmd)"` the first line of a
+  # two-second command appeared only when the command exited, and a Maven build
+  # is minutes long. On CI that means the log shows NOTHING while the build is
+  # failing - the reader learns what went wrong only after it has finished, and
+  # a hung build shows an empty step.
+  #
+  # The output still has to be kept, because the retry decision depends on it
+  # (`grep` for the fault shapes) and because the last attempt's full text is
+  # what a reader needs. A temp file does both: `tee` writes it as the command
+  # runs, so it is visible immediately and complete afterwards.
+  log="$(mktemp)"
+  # shellcheck disable=SC2064  # expand $log now, not at trap time
+  trap "rm -f '$log'" RETURN
   while :; do
-    if out="$("$@" 2>&1)"; then
-      printf '%s\n' "$out"
+    : > "$log"
+    if "$@" > >(tee "$log") 2>&1; then
       return 0
     else
       rc=$?
     fi
-    if [ "$attempt" -ge 3 ] || ! printf '%s' "$out" | grep -qE \
-        'Could not (find|transfer|resolve) artifact|status: (429|5[0-9][0-9])'; then
-      printf '%s\n' "$out" >&2
+    # `tee` runs in a process substitution; wait for it to flush before reading.
+    wait $! 2>/dev/null || true
+    if [ "$attempt" -ge 3 ] || ! grep -qE \
+        'Could not (find|transfer|resolve) artifact|status: (429|5[0-9][0-9])' "$log"; then
       # THE COMMAND'S EXIT CODE, NOT A FLATTENED 1.
-      #
-      # `return 1` reported "the build failed" for every failure, which erases
-      # the one signal a caller uses to tell a build error from a wrapper
-      # problem. Measured by the test: a command exiting 42 was reported as 1.
       return "$rc"
     fi
     printf '%s: registry fault on attempt %d, retrying in %ds\n' "$label" "$attempt" "$((attempt * 15))" >&2
