@@ -1907,6 +1907,12 @@ jobs:
           # the registry. Wired in and tested together, because either alone is a
           # claim rather than a control.
           node --test scripts/verify-registry-digest.test.mjs
+          # What a failed publish leaves behind. The script prints `exit 1` and a wall
+          # of text; this answers which phase, what changed, and where a retry starts.
+          # `scriptDrift` is what stops the model describing a release the script does
+          # not perform.
+          node --test scripts/ci/publish-phases.test.mjs
+          node scripts/ci/publish-phases.mjs --publish-script-drift
           # Is the gate actually enforceable? Reads the LIVE ruleset, because a
           # flawless workflow that nothing requires gates nothing. ADVISORY and
           # PARTIAL exit 0 - they are facts for a migration to decide about, not
