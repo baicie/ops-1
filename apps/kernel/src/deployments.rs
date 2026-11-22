@@ -2836,6 +2836,258 @@ mod tests {
     /// planner has to get right is "is there room", so both aggregates are
     /// asserted to land on the same side of that line.
     #[cfg(test)]
+    /// TASK-25: CPU and memory refusals are INDEPENDENT, on the real path.
+    ///
+    /// The findings register has B-3 as NOT_RUN: `node_has_capacity` has two
+    /// branches and only the instance-count limit was ever exercised. A scheduler
+    /// that collapsed them - "the node is full" - would pass every existing test
+    /// while telling an operator nothing about which resource to add.
+    ///
+    /// These drive `evaluate_node` through `reconcile_deployment`, not the helper
+    /// directly, so the ORDER of the checks and the status the deployment ends up
+    /// with are both covered.
+    mod resource_capacity {
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        use crate::config::Config;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let pool = PgPool::connect(&url).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrate");
+            Some(pool)
+        }
+
+        /// One READY node whose CPU and memory budgets can be set independently,
+        /// and one deployment asking for a fixed amount.
+        struct Fix {
+            node: Uuid,
+            deployment: Uuid,
+        }
+
+        async fn fixture(
+            pool: &PgPool,
+            cores: i64,
+            memory_gib: i64,
+            cpu_millis: i64,
+            memory_mib: i64,
+        ) -> Fix {
+            let tag = Uuid::new_v4().simple().to_string();
+            let node = Uuid::new_v4();
+            let deployment = Uuid::new_v4();
+            let package = Uuid::new_v4();
+            let publisher = format!("pub-res-{tag}");
+            let plugin = format!("test.res.{tag}");
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at,
+                    data_endpoint, resource_snapshot)
+                 VALUES ($1,$2,'x','tok',1,'linux','amd64',$4::jsonb,'[]'::jsonb,
+                         'READY',now(),now(),'http://127.0.0.1:1',$3)",
+            )
+            .bind(node)
+            .bind(format!("res-node-{tag}"))
+            .bind(serde_json::json!({
+                "cpuCores": cores,
+                "memoryTotalBytes": memory_gib * 1024 * 1024 * 1024_i64,
+                "memoryUsedBytes": 0,
+            }))
+            .bind(serde_json::json!({ "test-fixture": tag }))
+            .execute(pool)
+            .await
+            .expect("node");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            .bind(package)
+            .bind(&plugin)
+            .bind(&publisher)
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .execute(pool)
+            .await
+            .expect("package");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 VALUES ($1,$2,$3,'1.0.0',1,1,$4,$5,'PENDING',now(),now())",
+            )
+            .bind(deployment)
+            .bind(&plugin)
+            .bind(package)
+            .bind(serde_json::json!({
+                "nodeSelector": { "test-fixture": tag },
+                "maxInstancesPerNode": 4,
+            }))
+            .bind(serde_json::json!({
+                "cpuMillis": cpu_millis,
+                "memoryMiB": memory_mib,
+            }))
+            .execute(pool)
+            .await
+            .expect("deployment");
+            Fix { node, deployment }
+        }
+
+        fn state_for(pool: &PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(Config::from_env()),
+                db: pool.clone(),
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        async fn reason(pool: &PgPool, id: Uuid) -> (String, String, i64) {
+            let (status, r) = sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .expect("status");
+            let n: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances WHERE deployment_id=$1 AND desired_action='START'",
+            )
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .expect("instances");
+            (status, r.unwrap_or_default(), n)
+        }
+
+        async fn cleanup(pool: &PgPool, f: &Fix) {
+            sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+                .bind(f.deployment)
+                .execute(pool)
+                .await
+                .ok();
+            sqlx::query("DELETE FROM kernel.nodes WHERE id=$1")
+                .bind(f.node)
+                .execute(pool)
+                .await
+                .ok();
+        }
+
+        /// CPU BUDGET IS 90% OF CORES x 1000. Two cores -> 1800m.
+        #[tokio::test]
+        async fn a_deployment_over_the_cpu_budget_is_refused_and_NAMES_CPU() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            // 2 cores -> 1800m budget; ask 1900m. Memory is plentiful.
+            let f = fixture(&pool, 2, 16, 1900, 64).await;
+            crate::deployments::reconcile_once_scoped(&state_for(&pool), Some(f.deployment))
+                .await
+                .expect("reconcile");
+            let (status, why, placed) = reason(&pool, f.deployment).await;
+            assert_eq!(placed, 0, "nothing fits, so nothing is placed");
+            assert_ne!(status, "ACTIVE");
+            assert!(
+                why.contains("CPU") || why.to_lowercase().contains("cpu"),
+                "a CPU refusal must name CPU, not a generic full-node message; got {why:?}"
+            );
+            cleanup(&pool, &f).await;
+        }
+
+        /// MEMORY BUDGET IS 90% OF (total - used). 1 GiB -> 921 MiB.
+        #[tokio::test]
+        async fn a_deployment_over_the_memory_budget_is_refused_and_NAMES_MEMORY() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            // 1 GiB -> 921 MiB budget; ask 1000 MiB. CPU is plentiful.
+            let f = fixture(&pool, 8, 1, 100, 1000).await;
+            crate::deployments::reconcile_once_scoped(&state_for(&pool), Some(f.deployment))
+                .await
+                .expect("reconcile");
+            let (status, why, placed) = reason(&pool, f.deployment).await;
+            assert_eq!(placed, 0);
+            assert_ne!(status, "ACTIVE");
+            assert!(
+                why.to_lowercase().contains("memory"),
+                "a memory refusal must name memory; got {why:?}"
+            );
+            cleanup(&pool, &f).await;
+        }
+
+        /// BOTH resources sufficient -> placed. The control: without it the two
+        /// refusals above could be "everything is refused".
+        #[tokio::test]
+        async fn a_deployment_within_BOTH_budgets_is_placed() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let f = fixture(&pool, 4, 8, 500, 256).await;
+            crate::deployments::reconcile_once_scoped(&state_for(&pool), Some(f.deployment))
+                .await
+                .expect("reconcile");
+            let (_, why, placed) = reason(&pool, f.deployment).await;
+            assert_eq!(
+                placed, 1,
+                "a fitting deployment must be placed; reason: {why:?}"
+            );
+            cleanup(&pool, &f).await;
+        }
+
+        /// A snapshot with no cpuCores is REFUSED, not defaulted to zero and
+        /// silently treated as "no budget".
+        #[tokio::test]
+        async fn a_snapshot_missing_cpuCores_is_refused_by_name() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let f = fixture(&pool, 4, 8, 100, 64).await;
+            sqlx::query(
+                "UPDATE kernel.nodes SET resource_snapshot = resource_snapshot - 'cpuCores' WHERE id=$1",
+            )
+            .bind(f.node)
+            .execute(&pool)
+            .await
+            .expect("strip cpuCores");
+            crate::deployments::reconcile_once_scoped(&state_for(&pool), Some(f.deployment))
+                .await
+                .expect("reconcile");
+            let (_, why, placed) = reason(&pool, f.deployment).await;
+            assert_eq!(placed, 0);
+            assert!(
+                why.contains("RESOURCE_SNAPSHOT_MISSING") || why.contains("cpuCores"),
+                "a missing field must be named; got {why:?}"
+            );
+            cleanup(&pool, &f).await;
+        }
+    }
+
     mod capacity_sql {
         use sqlx::postgres::PgConnectOptions;
         use sqlx::PgPool;
