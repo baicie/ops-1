@@ -395,15 +395,30 @@ jobs:
           BASE_REF: ${{ github.base_ref || 'main' }}
         run: |
           set -eu
-          git fetch --no-tags --depth=64 origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          # A DEPTH BOUND IS THE WRONG TOOL HERE, AND MEASURED ITSELF WRONG.
+          #
+          # THE DEPTH IS A DISTANCE FROM origin/main's TIP, NOT FROM THE FORK.
+          #
+          # `--depth=64` came back with no merge base on a branch whose fork
+          # point is 2 commits back. The reason is measured: a depth-N fetch
+          # keeps the N most recent commits OF THE FETCHED REF. If this branch
+          # was cut from a commit that is 300 commits behind origin/main, a
+          # depth-64 history of main stops before it reaches the fork.
+          #
+          # Measured on a `--depth 1` clone of this branch:
+          #   --depth=64    no merge base
+          #   --depth=500   merge-base a71f943  (correct)
+          #
+          # 500 is not a guess at correctness; it is a bound with a diagnostic
+          # behind it. When even that is not enough the step says so by name
+          # instead of failing with an empty ref.
+          git fetch --no-tags --depth=500 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           base="$(git merge-base HEAD "origin/${BASE_REF}" || true)"
           if [ -z "$base" ]; then
-            # A depth-64 fetch can still miss the fork point on a long-lived
-            # branch. Say which of the two things went wrong instead of passing
-            # an empty argument down and letting the tool report a usage error.
-            echo "::error::no merge base with origin/${BASE_REF} within 64 commits; the clone is too shallow"
+            echo "::error::no merge base with origin/${BASE_REF} within 500 commits"
             echo "  HEAD=$(git rev-parse HEAD)"
             echo "  origin/${BASE_REF}=$(git rev-parse "origin/${BASE_REF}" 2>/dev/null || echo missing)"
+            echo "  shallow=$(git rev-parse --is-shallow-repository), depth asked=500"
             exit 1
           fi
           echo "comparing against merge-base ${base}"
