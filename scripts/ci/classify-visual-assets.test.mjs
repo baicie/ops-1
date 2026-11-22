@@ -78,3 +78,75 @@ test('nothing cited is class C', () => {
   assert.equal(rows[0].class, 'C');
   assert.equal(rows[0].match, 'none');
 });
+
+// --- an ambiguous match is a CLASS, not a footnote ---------------------------
+//
+// The first version computed `ambiguous` and left `class` as 'A'. A row could say
+// `ambiguous: true` while being counted in the A total - "asserted by a spec, do
+// not delete" - and the A total is exactly what a reader consults before deleting.
+//
+// Measured: `docs/assets/0.0.4/ui-redesign/mobile-studio.png` was class A on a
+// basename match, while `tests/ui/studio.spec.ts` writes
+// `artifacts/ui/studio/mobile-studio.png` - a different directory. Nothing
+// referenced the doc copy.
+
+test('a basename match shared by two files is UNKNOWN, not A', () => {
+  const pngs = ['artifacts/ui/studio/x.png', 'docs/assets/0.0.4/x.png'];
+  const refs = {
+    assertion: new Map(),
+    evidence: new Map(),
+    bareAssertion: new Map([['x.png', ['tests/ui/studio.spec.ts']]]),
+    bareEvidence: new Map(),
+  };
+  const rows = classify(pngs, refs);
+  for (const r of rows) {
+    assert.equal(r.ambiguous, true, `${r.path} should be flagged`);
+    assert.equal(r.class, 'UNKNOWN',
+      `${r.path} is ambiguous but was counted as ${r.class}; the A total is what a `
+      + 'reader consults before deleting');
+  }
+});
+
+test('a basename match that is UNIQUE is a real match, and may be A', () => {
+  const pngs = ['artifacts/ui/studio/only.png'];
+  const refs = {
+    assertion: new Map(), evidence: new Map(),
+    bareAssertion: new Map([['only.png', ['tests/ui/s.spec.ts']]]),
+    bareEvidence: new Map(),
+  };
+  const [row] = classify(pngs, refs);
+  assert.equal(row.ambiguous, false);
+  assert.equal(row.class, 'A', 'a name only one file has is evidence, not a guess');
+});
+
+test('a PATH match is never ambiguous, even when the basename is shared', () => {
+  // The defect the path rule exists for: a document that writes the directory is
+  // unambiguous about which file it means.
+  const pngs = ['a/x.png', 'b/x.png'];
+  const refs = {
+    assertion: new Map([['a/x.png', ['tests/a.spec.ts']]]),
+    evidence: new Map(),
+    bareAssertion: new Map(), bareEvidence: new Map(),
+  };
+  const rows = classify(pngs, refs);
+  const a = rows.find((r) => r.path === 'a/x.png');
+  assert.equal(a.class, 'A');
+  assert.equal(a.ambiguous, false);
+});
+
+test('UNKNOWN rows are neither A nor B nor C, so the totals must add up', () => {
+  // A class the summary has no column for makes the table stop adding up, which is
+  // the first thing a reader stops trusting.
+  const pngs = ['a/dup.png', 'b/dup.png', 'c/.keep'];
+  const refs = {
+    assertion: new Map(), evidence: new Map(),
+    bareAssertion: new Map([['dup.png', ['tests/s.spec.ts']]]),
+    bareEvidence: new Map(),
+  };
+  const rows = classify(pngs.filter((p) => p.endsWith('.png')), refs);
+  const byClass = {};
+  for (const r of rows) byClass[r.class] = (byClass[r.class] ?? 0) + 1;
+  assert.equal(Object.values(byClass).reduce((a, b) => a + b, 0), rows.length,
+    'every row belongs to exactly one class');
+  assert.ok(!('A' in byClass), `no ambiguous row may be A: ${JSON.stringify(byClass)}`);
+});
