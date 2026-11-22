@@ -363,9 +363,35 @@ jobs:
       # that is not something a diff review reliably catches - a dropped
       # `timeout-minutes` restores the 360-minute default and fails nothing.
       #
-      # This step does NOT run the comparison: it would fail on every legitimate
-      # workflow edit. The comparison is a tool a refactor runs, and the
-      # self-test below is what CI enforces.
+      # THE COMPARISON RUNS, and it is advisory unless the change is dangerous.
+      #
+      # The earlier version did not compare at all, on the reasoning that every
+      # legitimate workflow edit changes the surface. That reasoning is true and
+      # beside the point: the tool's job is not to forbid change, it is to make
+      # sure somebody LOOKS. A report that names every difference, printed on the
+      # PR, does that. A refusal to run does not.
+      #
+      # The base is the MERGE BASE, not a committed baseline file. Two earlier
+      # PRs (#196, #198) existed only to refresh such a file after the change
+      # that invalidated it - a baseline that must be updated by the change it
+      # is meant to audit cannot audit anything.
+      #
+      # Exit is non-zero ONLY for the classes that are never a routine edit:
+      # a refusal to parse, a removed job, or a widened permission. Everything
+      # else is printed and the step passes, because a routine timeout change
+      # must not need a special commit to get through.
+      - name: Workflow surface vs the merge base
+        run: |
+          set -eu
+          base="$(git merge-base HEAD "origin/${GITHUB_BASE_REF:-main}")"
+          echo "comparing against merge-base ${base}"
+          node tests/ci/workflow-snapshot.mjs compare --base-ref "$base" --advisory > /tmp/surface.txt || true
+          cat /tmp/surface.txt
+          if grep -qE 'UNPARSED|job REMOVED|permissions changed.*-> .*(write|write-all)' /tmp/surface.txt; then
+            echo "::error::a workflow change removed a job, widened a permission, or could not be parsed"
+            exit 1
+          fi
+          echo "advisory: $(grep -c '^CHANGED' /tmp/surface.txt || true) difference(s) reported, none blocking"
       - run: node --test tests/ci/workflow-snapshot.test.mjs
       # Root hygiene: the top level stays legible, build output stays out of the
       # index, and one ecosystem keeps one lockfile. An unapproved directory is
