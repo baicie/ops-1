@@ -1064,6 +1064,241 @@ async fn rollback_response(
     Ok(body)
 }
 
+/// The retire decision, separated from the HTTP and auth plumbing.
+///
+/// WHY A PURE FUNCTION. `retire_deployment` is an axum handler: it needs an
+/// `AuthUser`, a `State` and a `Path`, none of which a unit test should have to
+/// construct. The rules - which generations are refused, which statuses are
+/// already-done, whether the active revision may be retired - are the part worth
+/// testing, and they depend on five values, not on a request.
+///
+/// What stays in the handler: authentication, the transaction, the audit row.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RetireDecision {
+    /// Go ahead; this many instances would be stopped.
+    Proceed,
+    /// Already retired at the requested generation. Idempotent success.
+    AlreadyRetired,
+    /// The caller's generation is stale.
+    GenerationConflict,
+    /// This deployment IS the plugin's active revision.
+    IsActiveRevision,
+}
+
+/// @param current_generation the row's generation
+/// @param current_status     the row's status
+/// @param expected_generation what the caller believes
+/// @param active_deployment  the plugin's ACTIVE revision, if any
+/// @param this_deployment    the id being retired
+pub fn retire_decision(
+    current_generation: i64,
+    current_status: &str,
+    expected_generation: i64,
+    active_deployment: Option<&str>,
+    this_deployment: &str,
+) -> RetireDecision {
+    // GENERATION FIRST. A stale caller must not reach the idempotent branch: it
+    // would answer "nothing to do" and confirm a belief about a generation that is
+    // no longer current. `rollback` had exactly this defect and its comment records
+    // the measurement.
+    if current_generation != expected_generation {
+        return RetireDecision::GenerationConflict;
+    }
+    if current_status == "DISABLED" {
+        return RetireDecision::AlreadyRetired;
+    }
+    if active_deployment == Some(this_deployment) {
+        return RetireDecision::IsActiveRevision;
+    }
+    RetireDecision::Proceed
+}
+
+/// Request body for retiring ONE deployment.
+#[derive(Debug, Deserialize)]
+pub struct RetireRequest {
+    /// The generation the caller believes is current. A mismatch is a 409, not a
+    /// best-effort retire: retiring a deployment someone else has since changed is
+    /// how a live version is stopped by a request about a different one.
+    pub expected_generation: i64,
+    /// Report what WOULD happen and change nothing.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Retire ONE deployment, keeping the plugin package and all business data.
+///
+/// WHY THIS IS NOT `uninstall`
+///
+/// `uninstall` takes a PLUGIN id and disables EVERY deployment of it:
+///
+///     UPDATE ... SET status='DISABLED' WHERE plugin_id=$1
+///
+/// That is the right operation for "this plugin is going away". It is the wrong
+/// operation for "free the slots held by ONE old version" - which is the staging
+/// situation: four deployments, at most two of which are the version anyone wants,
+/// and the rest are ACTIVE revisions of the same plugin. Retiring one of them
+/// through `uninstall` would stop the version that is serving.
+///
+/// WHAT IT GUARANTEES
+///
+///   - the ACTIVE revision of the plugin is REFUSED. Retiring what is serving is a
+///     rollback or a disable, both of which have their own paths and their own
+///     checks; doing it here would be a third, quieter way to stop production.
+///   - `expected_generation` is a compare-and-set. A stale caller gets 409.
+///   - the plugin PACKAGE is untouched: nothing here deletes from
+///     `plugin_packages` or `plugin_installations`.
+///   - business DATA is untouched. The kernel does not own plugin storage and this
+///     function does not reach it.
+///   - instances are stopped, not deleted. The row is the record of what ran.
+///   - the reason is written, so the next reader knows why the deployment is
+///     DISABLED rather than finding a status with no context.
+///   - idempotent: retiring an already-DISABLED deployment at the same generation is
+///     a 200 with `idempotent: true`, so a retried request does not fail.
+pub async fn retire_deployment(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(deployment_id): Path<Uuid>,
+    Json(payload): Json<RetireRequest>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    auth.require_operator()?;
+
+    let row = sqlx::query_as::<_, (String, i64, String, Option<String>)>(
+        "SELECT plugin_id, generation, status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
+    )
+    .bind(deployment_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::not_found("no such deployment"))?;
+    let (plugin_id, generation, status, reason) = row;
+
+    // THE ACTIVE REVISION IS NOT RETIRED HERE.
+    let active: Option<String> = sqlx::query_scalar(
+        "SELECT deployment_id::text FROM kernel.activation_revisions \
+         WHERE plugin_id=$1 AND status='ACTIVE' LIMIT 1",
+    )
+    .bind(&plugin_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    match retire_decision(
+        generation,
+        &status,
+        payload.expected_generation,
+        active.as_deref(),
+        &deployment_id.to_string(),
+    ) {
+        RetireDecision::GenerationConflict => {
+            return Err(AppError::conflict(
+                "GENERATION_CONFLICT",
+                format!(
+                    "deployment is at generation {generation}, the request expected {}. \
+                     Re-read it and retry; retiring a deployment someone else has changed \
+                     is how a live version gets stopped by a request about a different one",
+                    payload.expected_generation
+                ),
+            ));
+        }
+        // IDEMPOTENT: already retired at this generation is the answer asked for.
+        RetireDecision::AlreadyRetired => {
+            return Ok((
+                StatusCode::OK,
+                Json(json!({
+                    "deploymentId": deployment_id,
+                    "idempotent": true,
+                    "status": status,
+                    "reason": reason,
+                })),
+            ));
+        }
+        RetireDecision::IsActiveRevision => {
+            return Err(AppError::conflict(
+                "DEPLOYMENT_IS_ACTIVE",
+                "this deployment is the plugin's ACTIVE revision. Use rollback to move the \
+                 active revision to another version, or disable the plugin - retiring the \
+                 serving version would stop it with none of their checks",
+            ));
+        }
+        RetireDecision::Proceed => {}
+    }
+
+    // What WOULD change, computed before anything is written so `dry_run` reports
+    // the same facts the real call acts on.
+    let instances: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM kernel.plugin_instances WHERE deployment_id=$1 AND desired_action='START'",
+    )
+    .bind(deployment_id)
+    .fetch_one(&state.db)
+    .await?;
+    let containers: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM kernel.plugin_instances WHERE deployment_id=$1 \
+         AND desired_action='START' AND container_id IS NOT NULL",
+    )
+    .bind(deployment_id)
+    .fetch_one(&state.db)
+    .await?;
+
+    if payload.dry_run {
+        return Ok((
+            StatusCode::OK,
+            Json(json!({
+                "deploymentId": deployment_id,
+                "dryRun": true,
+                "wouldStop": { "instances": instances, "containers": containers },
+                "wouldKeep": {
+                    "pluginPackage": true,
+                    "businessData": true,
+                    "instanceRows": true,
+                },
+            })),
+        ));
+    }
+
+    let mut tx = state.db.begin().await?;
+    sqlx::query(
+        "UPDATE kernel.plugin_instances SET desired_action='STOP', updated_at=now() \
+         WHERE deployment_id=$1 AND desired_action='START'",
+    )
+    .bind(deployment_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE kernel.plugin_deployments SET status='DISABLED', \
+         status_reason='Retired by operator; plugin package and data retained', \
+         updated_at=now() WHERE id=$1 AND generation=$2",
+    )
+    .bind(deployment_id)
+    .bind(payload.expected_generation)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    audit::record(
+        &state.db,
+        "deployment.retired",
+        "USER",
+        &auth.user_id.to_string(),
+        "deployment",
+        &deployment_id.to_string(),
+        "deployment.retire",
+        "CONFIRMED",
+        json!({ "expectedGeneration": payload.expected_generation, "stoppedInstances": instances }),
+        None,
+    )
+    .await
+    .ok();
+
+    Ok((
+        StatusCode::OK,
+        Json(json!({
+            "deploymentId": deployment_id,
+            "idempotent": false,
+            "status": "DISABLED",
+            "stopped": { "instances": instances, "containers": containers },
+            "kept": { "pluginPackage": true, "businessData": true },
+        })),
+    ))
+}
+
 pub async fn rollback(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -2916,6 +3151,77 @@ mod tests {
     ///
     /// The SQL in `placement_preflight::gather` is a copy of the planner's three
     /// aggregates. This test is the cross-check that justifies the copy.
+    /// TASK-16: the retire rules, as a pure function.
+    ///
+    /// `uninstall` is plugin-level and disables EVERY deployment of the plugin. On
+    /// staging that would stop the version that is serving, because the four
+    /// occupants include active revisions of the same plugin. These cases pin the
+    /// decisions that make a per-deployment retire safe to offer.
+    mod retire_rules {
+        use super::super::{retire_decision, RetireDecision};
+
+        const ME: &str = "11111111-1111-1111-1111-111111111111";
+        const OTHER: &str = "22222222-2222-2222-2222-222222222222";
+
+        #[test]
+        fn a_stale_generation_is_refused_before_the_idempotent_branch() {
+            // The defect `rollback` recorded: a caller already at the target state
+            // but holding an OUTDATED generation used to get "nothing to do", which
+            // confirmed a belief that was false.
+            assert_eq!(
+                retire_decision(5, "DISABLED", 4, None, ME),
+                RetireDecision::GenerationConflict,
+                "an already-disabled row at a stale generation must not answer idempotent"
+            );
+        }
+
+        #[test]
+        fn an_already_retired_deployment_at_the_same_generation_is_idempotent() {
+            assert_eq!(
+                retire_decision(3, "DISABLED", 3, None, ME),
+                RetireDecision::AlreadyRetired
+            );
+        }
+
+        #[test]
+        fn the_active_revision_is_never_retired_here() {
+            assert_eq!(
+                retire_decision(1, "ACTIVE", 1, Some(ME), ME),
+                RetireDecision::IsActiveRevision,
+                "retiring the serving version is rollback's or disable's job, with their checks"
+            );
+        }
+
+        #[test]
+        fn a_non_active_deployment_is_retirable_even_when_another_is_active() {
+            // The staging shape: this deployment is an old version of a plugin whose
+            // current version is ACTIVE somewhere else.
+            assert_eq!(
+                retire_decision(1, "READY", 1, Some(OTHER), ME),
+                RetireDecision::Proceed
+            );
+        }
+
+        #[test]
+        fn no_active_revision_at_all_still_allows_retiring() {
+            assert_eq!(
+                retire_decision(1, "PENDING", 1, None, ME),
+                RetireDecision::Proceed
+            );
+        }
+
+        #[test]
+        fn the_generation_check_wins_over_the_active_check() {
+            // Order matters for WHICH refusal an operator sees: a stale caller
+            // asking about the active deployment has two problems, and being told
+            // about the generation is the actionable one.
+            assert_eq!(
+                retire_decision(9, "ACTIVE", 1, Some(ME), ME),
+                RetireDecision::GenerationConflict
+            );
+        }
+    }
+
     mod preflight_matches_planner {
         use sqlx::PgPool;
         use uuid::Uuid;

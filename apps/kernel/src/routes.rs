@@ -168,6 +168,12 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/capacity/preflight",
             get(deployments::capacity_preflight),
         )
+        // Retire ONE deployment. Not `uninstall`, which disables every deployment
+        // of the plugin - the operation that would stop the version that is serving.
+        .route(
+            "/api/v1/deployments/{deployment_id}/retire",
+            post(deployments::retire_deployment),
+        )
         .route("/api/v1/plugins", get(plugins::list_plugins))
         .route(
             "/api/v1/plugins/packages",
