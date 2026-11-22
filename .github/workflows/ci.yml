@@ -1945,3 +1945,18 @@ jobs:
           # The analyzer's output is what the gate judges, so its own tests run
           # here too - including the cases that pin the analyzer to the suites a
           # workflow can actually start.
+
+      # `--live` also asks GitHub whether the producing workflows are ENABLED.
+      # Everything the static check above reads is a property of the file, and all of
+      # it can be true while the workflow is disabled - in which case the required
+      # context never appears and every PR waits on it for ever.
+      #
+      # ADVISORY, AND WHY THAT IS ACCEPTABLE: the fatal check is the step above, on
+      # the same tree. This step only adds a fact a file cannot carry, and a
+      # repository that disables a workflow on purpose must not fail every PR. The
+      # operator running `--live` before writing the ruleset is where it is fatal -
+      # and the finding is printed either way.
+      - name: The required contexts' producers are enabled
+        run: node tests/ci/check-required-contexts.mjs --live || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

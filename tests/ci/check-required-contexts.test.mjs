@@ -17,7 +17,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inspectRequiredContexts, producerWorkflowOf } from './check-required-contexts.mjs';
+import { inspectRequiredContexts, producerWorkflowOf, inspectProducerHealth }
+  from './check-required-contexts.mjs';
 import { parse } from './lib/workflow-yaml.mjs';
 
 const WF = (text) => parse(text).value;
@@ -205,4 +206,70 @@ jobs:
 `));
   assert.deepEqual(inspectRequiredContexts({ workflows: wf }), [],
     'a job id of "gate" with name: ci-gate reports the required context');
+});
+
+// --- producer health: the half a static read cannot see ----------------------
+//
+// Every property `inspectRequiredContexts` checks is a property of the FILE. All of
+// them can hold while the workflow is DISABLED in repository settings, and a
+// disabled workflow produces no check runs - so a required context never appears
+// and every pull request waits on it for ever.
+
+test('a DISABLED producer is reported, naming the context it costs', () => {
+  const problems = inspectProducerHealth({
+    contexts: ['rust', 'linux-runtime'],
+    producerOf: (c) => (c === 'rust' ? 'ci.yml' : 'platform-linux-acceptance.yml'),
+    workflows: [
+      { path: '.github/workflows/ci.yml', state: 'active' },
+      { path: '.github/workflows/platform-linux-acceptance.yml', state: 'disabled_manually' },
+    ],
+  });
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /platform-linux-acceptance\.yml is disabled_manually/);
+  assert.match(problems[0], /waits on it for ever/);
+});
+
+test('disabled_inactivity is reported too: the reason does not change the effect', () => {
+  const problems = inspectProducerHealth({
+    contexts: ['quality-faults'],
+    producerOf: () => 'reliability.yml',
+    workflows: [{ path: '.github/workflows/reliability.yml', state: 'disabled_inactivity' }],
+  });
+  assert.ok(problems.some((p) => /disabled_inactivity/.test(p)), JSON.stringify(problems));
+});
+
+test('a producer the API does not list at all is reported', () => {
+  // A workflow file that exists in the tree but not in the API is a file GitHub
+  // has not registered - so it cannot run.
+  const problems = inspectProducerHealth({
+    contexts: ['rust'],
+    producerOf: () => 'ci.yml',
+    workflows: [],
+  });
+  assert.ok(problems.some((p) => /does not list it as a workflow at all/.test(p)), JSON.stringify(problems));
+});
+
+test('every producer active is clean', () => {
+  assert.deepEqual(inspectProducerHealth({
+    contexts: ['rust', 'quality-faults'],
+    producerOf: (c) => (c === 'rust' ? 'ci.yml' : 'reliability.yml'),
+    workflows: [
+      { path: '.github/workflows/ci.yml', state: 'active' },
+      { path: '.github/workflows/reliability.yml', state: 'active' },
+    ],
+  }), []);
+});
+
+test('a context with no producer is reported rather than skipped', () => {
+  const problems = inspectProducerHealth({ contexts: ['ghost'], producerOf: () => null, workflows: [] });
+  assert.ok(problems.some((p) => /no known producer/.test(p)));
+});
+
+test('a producer shared by two contexts is reported once, not twice', () => {
+  const problems = inspectProducerHealth({
+    contexts: ['rust', 'web'],
+    producerOf: () => 'ci.yml',
+    workflows: [{ path: '.github/workflows/ci.yml', state: 'disabled_manually' }],
+  });
+  assert.equal(problems.length, 1, 'one disabled workflow is one problem');
 });
