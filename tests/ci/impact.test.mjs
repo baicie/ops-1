@@ -244,18 +244,24 @@ test('Q the filter parser agrees with PyYAML where PyYAML exists', async () => {
     return;
   }
   const { execFileSync } = await import('node:child_process');
-  const { pathsFor, SUITE_WORKFLOW_MAP } = await import('./check-impact-consistency.mjs');
-  for (const workflow of Object.values(SUITE_WORKFLOW_MAP)) {
-    const js = pathsFor(workflow).map((x) => x.glob);
-    const py = JSON.parse(execFileSync(python, [
-      '-c',
-      'import yaml, json, sys\n'
-      + 'd = yaml.safe_load(open(sys.argv[1]))\n'
-      + 'on = d.get(True) or d.get("on")\n'
-      + 'print(json.dumps(((on or {}).get("pull_request") or {}).get("paths") or []))\n',
-      `.github/workflows/${workflow}`,
-    ], { encoding: 'utf8' }));
-    assert.deepEqual(js, py, `${workflow}: hand-written parser disagrees with PyYAML`);
+  const { pathsFor, SUITE_WORKFLOW, producersOf } = await import('./check-impact-consistency.mjs');
+  // A suite may have SEVERAL producers (`browser-e2e` has two, for disjoint
+  // inputs), so the table's values are unioned rather than read as one filename -
+  // `Object.values` on the raw table produced the path
+  // `.github/workflows/g12-acceptance.yml,data-foundation.yml` and an ENOENT.
+  for (const suite of Object.keys(SUITE_WORKFLOW)) {
+    for (const workflow of producersOf(suite)) {
+      const js = pathsFor(workflow).map((x) => x.glob);
+      const py = JSON.parse(execFileSync(python, [
+        '-c',
+        'import yaml, json, sys\n'
+        + 'd = yaml.safe_load(open(sys.argv[1]))\n'
+        + 'on = d.get(True) or d.get("on")\n'
+        + 'print(json.dumps(((on or {}).get("pull_request") or {}).get("paths") or []))\n',
+        `.github/workflows/${workflow}`,
+      ], { encoding: 'utf8' }));
+      assert.deepEqual(js, py, `${workflow}: hand-written parser disagrees with PyYAML`);
+    }
   }
 
   // The five real workflows happen to be written in a shape the parser handles

@@ -47,11 +47,23 @@ import { analyse, SUITES } from './impact.mjs';
 /**
  * Suite -> the workflow whose `pull_request.paths` decides whether it runs.
  *
- * A suite with no entry is produced by `ci.yml`, which has no path filter and
- * therefore always runs. Those are not checked here: there is no filter to
- * disagree with.
+ * A VANILLA ARRAY on the value means "any one of these producers starting is
+ * enough", which is the same statement as `REQUIRE_ANY_CHECK` in `ci-gate.mjs`.
+ * A plain string means the single producer.
+ *
+ * WHY THE ARRAY FORM REPLACED A SEPARATE `ANY_OF_WORKFLOWS` TABLE
+ *
+ * `browser-e2e` was listed here as ONE workflow (`g12-acceptance.yml`) while a
+ * second table, `ANY_OF_WORKFLOWS`, added the real second producer
+ * (`data-foundation.yml`). Two corrections of one fact, so the table a reader
+ * consults is not the table the script obeys. `ci-gate` carries the same fact a
+ * third time in `DELEGATED`, and it listed BOTH - which is how
+ * `check-gate-contract.mjs` caught it: the two files disagreed, each was
+ * internally consistent, and the script that validates a change against a
+ * workflow's paths was validating a different workflow from the one whose check
+ * the gate reads.
  */
-const SUITE_WORKFLOW = {
+export const SUITE_WORKFLOW = {
   'data-foundation': 'data-foundation.yml',
   'g12-acceptance': 'g12-acceptance.yml',
   'plugin-lifecycle': 'plugin-lifecycle.yml',
@@ -60,8 +72,9 @@ const SUITE_WORKFLOW = {
   // `browser-e2e` came to be mapped to data-foundation's `golden-path` check
   // while every path that requires it (packages/**, the two web apps) does not
   // start data-foundation at all. PR #127 failed on it.
-  // `browser-e2e` has TWO producers for disjoint inputs; see ANY_OF_WORKFLOWS.
-  'browser-e2e': 'g12-acceptance.yml',
+  // `browser-e2e` has TWO producers for disjoint inputs, and this is the one
+  // place that is written down.
+  'browser-e2e': ['g12-acceptance.yml', 'data-foundation.yml'],
   'linux-runtime': 'platform-linux-acceptance.yml',
   'quality-faults': 'reliability.yml',
   // NOT `contracts`. That suite is produced by `ci.yml`'s `contracts` job, which
@@ -71,6 +84,18 @@ const SUITE_WORKFLOW = {
   // producer of this suite. Attributing it here made this script demand that
   // `crates/bundle` changes start a workflow that never claimed to cover them.
 };
+
+/**
+ * The producers of a suite, as a list.
+ *
+ * A string value and an array value are the same question with a different answer
+ * count, so everything downstream reads this and never indexes the table directly.
+ */
+export function producersOf(suite) {
+  const v = SUITE_WORKFLOW[suite];
+  if (v === undefined) return [];
+  return Array.isArray(v) ? [...v] : [v];
+}
 
 /**
  * Probe paths: at least one per rule in impact.mjs, plus paths that exist only
@@ -113,19 +138,6 @@ const PROBES = [
   ['.github/workflows/reliability.yml', 'a workflow with no path filter'],
   ['.github/workflows/g12-acceptance.yml', 'a workflow editing itself'],
 ];
-
-/**
- * Suites that more than one workflow can produce, as alternatives.
- *
- * The single-producer loop below asserts "the workflow that produces this suite
- * must start for the paths that require it". That is false for `browser-e2e`:
- * `packages/**` starts g12-acceptance and never data-foundation, and `tests/ui/**`
- * does the reverse. For those, the rule is "at least ONE of its producers starts",
- * which is the static twin of `REQUIRE_ANY_CHECK` in ci-gate.mjs.
- */
-const ANY_OF_WORKFLOWS = {
-  'browser-e2e': ['g12-acceptance.yml', 'data-foundation.yml'],
-};
 
 function globToRegExp(glob) {
   const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&');
@@ -232,10 +244,10 @@ if (process.argv[1] && !process.argv[1].endsWith('check-impact-consistency.mjs')
 let errors = 0;
 let warnings = 0;
 
-for (const [suite, workflow] of Object.entries(SUITE_WORKFLOW)) {
+for (const [suite] of Object.entries(SUITE_WORKFLOW)) {
   // An any-of suite is satisfied when ANY of its producers starts, so its
   // filters are the union of theirs.
-  const producers = ANY_OF_WORKFLOWS[suite] ?? [workflow];
+  const producers = producersOf(suite);
   const filters = [];
   let unfilteredProducer = null;
   let readFailure = null;
@@ -304,18 +316,25 @@ for (const suite of uncovered) {
 // filtered on the pull-request side only, so the post-merge run is unconditional.
 // ---------------------------------------------------------------------------
 for (const [suite, workflow] of Object.entries(SUITE_WORKFLOW)) {
-  let triggers;
-  try {
-    triggers = triggersFor(workflow);
-  } catch (err) {
-    errors += 1;
-    process.stdout.write(`ERROR ${workflow}: could not read its triggers: ${err.message}\n`);
-    continue;
-  }
-  if (!triggers.includes('push')) {
-    errors += 1;
-    process.stdout.write(`ERROR ${workflow}: produces suite ${suite} but has no push trigger, so main is unverified for it\n`);
-    process.stdout.write(`        ci-gate runs on push and will demand ${suite} with no check to find\n`);
+  // A multi-producer suite needs EVERY producer to run on push, not just one.
+  // The pull-request rule is "any of them matching is enough" because the inputs
+  // are disjoint; on push there are no path filters, so both start, and a
+  // producer missing its `push:` trigger leaves main unverified for its half of
+  // the suite. Reading only `producersOf(suite)[0]` here checked half of it.
+  for (const producer of producersOf(suite)) {
+    let triggers;
+    try {
+      triggers = triggersFor(producer);
+    } catch (err) {
+      if (producer === workflow) errors += 1;
+      process.stdout.write(`ERROR ${producer}: could not read its triggers: ${err.message}\n`);
+      continue;
+    }
+    if (!triggers.includes('push')) {
+      errors += 1;
+      process.stdout.write(`ERROR ${producer}: produces suite ${suite} but has no push trigger, so main is unverified for it\n`);
+      process.stdout.write(`        ci-gate runs on push and will demand ${suite} with no check to find\n`);
+    }
   }
 }
 
@@ -333,10 +352,10 @@ for (const [suite, workflow] of Object.entries(SUITE_WORKFLOW)) {
 const UNFILTERED_ON_PUSH = new Set(['ci.yml']);
 
 for (const [suite, workflow] of Object.entries(SUITE_WORKFLOW)) {
-  if (UNFILTERED_ON_PUSH.has(workflow)) continue;
+  if (producersOf(suite).every((p) => UNFILTERED_ON_PUSH.has(p))) continue;
   // Same any-of rule as the pull-request side: a suite with alternative
   // producers is satisfied when any one of them starts.
-  const producers = ANY_OF_WORKFLOWS[suite] ?? [workflow];
+  const producers = producersOf(suite);
   let filters = [];
   let unfiltered = false;
   let readError = null;

@@ -247,6 +247,35 @@ export const DELEGATED_CHECKS_FROM_OWNERS = Object.fromEntries(
  *
  * So the default is ALL (a facet is the more common shape and the stricter one),
  * and a suite named here is satisfied by any one green check.
+ *
+ * WHAT "ANY" MUST NOT MEAN, AND DID
+ *
+ * The first implementation tested `green.length` FIRST and continued on a hit, so
+ * a red alternative was never looked at. Measured through `gate()` itself:
+ *
+ *   packages/** change, `acceptance` = failure, `golden-path` = success  -> PASS
+ *   packages/** change, `acceptance` never ran,      `golden-path` = success -> PASS
+ *
+ * The first is a red required check reported green. The second is worse: DELETING
+ * the `acceptance` job left the suite passing, because the missing check it was
+ * meant to demand was excused by the one check that did run. `PART 3` cannot catch
+ * either - it opens by skipping every name in `DELEGATED_CHECK_OWNERS`, so
+ * `acceptance` is invisible there too.
+ *
+ * The tolerance the disjoint inputs actually require is "a producer whose paths do
+ * not match this change does not start, and that is not a failure". It is NOT
+ * "a producer that DID start and went red is ignored because a different producer
+ * was green". So the alternatives are read as:
+ *
+ *   any red          -> FAIL   (a check that ran and failed is never excused)
+ *   any green        -> PASS   (the changing-path producer ran and passed)
+ *   none ran at all  -> PASS   (neither producer's paths matched this change)
+ *
+ * An absent alternative no longer distinguishes "its paths did not match" from
+ * "the job was deleted", which is why the static check
+ * `tests/ci/check-gate-contract.mjs` asserts that every name these tables key on
+ * still exists as a job in the workflow that owns it. That is the right place for
+ * it: absence is a property of the TREE, and the runtime gate only sees a commit.
  */
 export const REQUIRE_ANY_CHECK = new Set(['browser-e2e']);
 
@@ -326,6 +355,22 @@ export const NON_GATE_WORKFLOWS = {
   // merge - a commit that fails certification can still be merged (ADR-029).
   'release-certification.yml': 'certification only; never a merge criterion',
 };
+
+/**
+ * Workflows with NO `pull_request.paths` filter, so they start for every PR.
+ *
+ * Derived from the files rather than trusted, by `check-gate-contract.mjs`: an
+ * entry here that HAS grown a path filter would silently exempt its checks from
+ * PART 3's attribution, and a file that lost its filter without being added here
+ * would make that check a merge criterion for documentation edits.
+ *
+ * `ci.yml` is not in this set - it has no filter either, but its jobs are decided
+ * by `JOB_TO_SUITE` in parts 1 and 2, and PART 3 must never re-attribute them.
+ */
+export const UNFILTERED_ON_PR = [
+  'platform-linux-acceptance.yml',
+  'reliability.yml',
+];
 
 /**
  * Decide what to do about the suites produced by other workflows, given the
@@ -471,15 +516,21 @@ export function delegatedVerdict(checks, suites) {
     const impostors = byState('impostor');
     const ambiguousNow = byState('ambiguous');
 
-    // Alternatives: one green check is the whole answer, and only a failure when
-    // EVERY alternative ran and none of them passed.
+    // Alternatives: see `REQUIRE_ANY_CHECK`. ONE green is enough BECAUSE the two
+    // producers cover disjoint inputs, but a red check is decided before the green
+    // ones are looked at - excusing a failure because another producer passed is
+    // how a deleted or broken job reads as green.
     if (REQUIRE_ANY_CHECK.has(suite)) {
-      if (green.length) { verified.push(`${suite} (${green.join(', ')})`); continue; }
       if (red.length) { failed.push(`${suite} (${red.join('; ')})`); continue; }
       if (impostors.length) { impostor.push(`${suite} (${impostors.join('; ')})`); continue; }
       if (ambiguousNow.length) { ambiguous.push(`${suite} (${ambiguousNow.join('; ')})`); continue; }
       if (skippedNow.length) { skipped.push(`${suite} (${skippedNow.join(', ')} was skipped)`); continue; }
+      if (green.length) { verified.push(`${suite} (${green.join(', ')})`); continue; }
       if (unfinished.length) { pending.push(`${suite} (${unfinished.join('; ')}); no alternative had finished when this gate gave up`); continue; }
+      // Neither producer ran. That is the shape a change with no browser-bearing
+      // paths takes, and it is not a failure - but it is also indistinguishable
+      // from a deleted job at run time, so `check-gate-contract.mjs` asserts each
+      // name still exists in its workflow.
       absent.push(`${suite} (none of ${names.join(', ')} exists on this commit from the workflow that owns it)`);
       continue;
     }
@@ -725,11 +776,42 @@ export function gate(rawNeeds, impact, ledgerForGate = null) {
   // ---------------------------------------------------------------------------
   const deploymentFailures = [];
   const unattributedWorkflows = new Set();
+
+  // Which check names this gate must NOT re-attribute here.
+  //
+  // Two kinds, and the difference between them is the whole risk boundary:
+  //
+  //   1. Names `delegatedVerdict` was actually handed for this change. It has
+  //      judged them; re-reporting would give one red check two reasons.
+  //
+  //   2. Names whose workflow runs on EVERY pull request - `ci.yml` always, and
+  //      the delegated workflows with no `pull_request.paths` at all
+  //      (`platform-linux-acceptance.yml`, `reliability.yml`). Their checks are
+  //      reported for every change, so "this red should block" would make one of
+  //      them a merge criterion for documentation edits - the exact failure the
+  //      DEPLOYMENT-gate distinction above exists to prevent. Whether those
+  //      suites are required is the impact analyzer's decision, and it has made
+  //      it by the time this loop runs.
+  //
+  // A workflow WITH a `pull_request.paths` filter is the dangerous case, and it is
+  // not skipped: it ran because the filters said this change is its business, so a
+  // red check from it is a fact about this patch. Before this, EVERY name in
+  // `DELEGATED_CHECK_OWNERS` was skipped unconditionally, so a red `acceptance` or
+  // `golden-path` on a change the analyzer did not require was attributed nowhere -
+  // PART 3's own rule ("a red check from a merge-gate owner blocks") did not apply
+  // to the nine names PART 3 exists to attribute.
+  const judgedDelegatedNames = new Set();
+  for (const suite of required) {
+    if (!DELEGATED[suite]) continue;
+    for (const name of Object.keys(DELEGATED_CHECK_OWNERS[suite] ?? {})) judgedDelegatedNames.add(name);
+  }
+  const alwaysRunsOnPullRequest = new Set(['ci.yml', ...UNFILTERED_ON_PR]);
+
   for (const [name, runs] of Object.entries(ledgerForGate?.byName ?? {})) {
     if (runs.length === 0) continue;
-    // Skip the checks this gate already decided in parts 1 and 2 - by name, so a
-    // ci.yml job and a foreign check with the same name cannot double-report.
-    if (Object.values(DELEGATED_CHECK_OWNERS).some((o) => name in o)) continue;
+    // Skip only what `delegatedVerdict` decided, and what runs on every PR.
+    if (judgedDelegatedNames.has(name)) continue;
+    if (runs.every((r) => r.workflow != null && alwaysRunsOnPullRequest.has(r.workflow))) continue;
 
     const st = checkState(ledgerForGate.byName, name, {});
     if (st.state !== 'failed') continue;
