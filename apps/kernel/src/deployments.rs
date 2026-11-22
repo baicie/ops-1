@@ -1357,6 +1357,71 @@ async fn reconcile_once_scoped(
     state: &AppState,
     only_deployment: Option<Uuid>,
 ) -> anyhow::Result<()> {
+    // ONE PLANNER AT A TIME, PER SCHEMA.
+    //
+    // `reconcile_deployment` reads the per-node instance aggregate and then
+    // inserts, with no lock between the two. Two planners overlapping therefore
+    // both read "one free slot" and both take it: measured, two reconciles of two
+    // one-replica deployments on a node whose per-node limit is 1 left TWO START
+    // instances in 4 of 12 runs.
+    //
+    // The lock is taken HERE rather than per deployment because the aggregate is
+    // global - a per-deployment lock would serialise the two writers while leaving
+    // both readers stale, which is the same race with more steps.
+    //
+    // SKIP OR WAIT DEPENDS ON WHO IS ASKING.
+    //
+    // A ticker fires every 2s and must not queue behind a slow sweep: if another
+    // planner holds the lock, that planner is about to look at the same rows and
+    // this cycle is redundant. `try` and return early is correct there.
+    //
+    // A REQUESTED reconcile must WAIT. This module's tests call
+    // `reconcile_once_scoped(state, Some(id))` directly and run in parallel against
+    // one database; with `try` everywhere, the tests that lost the race returned
+    // `Ok(())` having planned nothing, and then asserted on a database nobody had
+    // looked at. Five failed that way when this lock was first added - the lock was
+    // right, its effect on the harness was not.
+    //
+    // `only_deployment.is_some()` is exactly "someone asked for this one deployment
+    // and is waiting for the answer", which is the case that must wait.
+    //
+    // The key is derived from the database name so two kernels on different
+    // databases in one PostgreSQL cluster do not block each other.
+    const PLANNER_LOCK_NAMESPACE: i32 = 0x0F5E_0002;
+    let mut conn = state.db.acquire().await?;
+    let acquired: bool = if only_deployment.is_some() {
+        sqlx::query("SELECT pg_advisory_lock($1, hashtext(current_database()))")
+            .bind(PLANNER_LOCK_NAMESPACE)
+            .execute(&mut *conn)
+            .await?;
+        true
+    } else {
+        sqlx::query_scalar("SELECT pg_try_advisory_lock($1, hashtext(current_database()))")
+            .bind(PLANNER_LOCK_NAMESPACE)
+            .fetch_one(&mut *conn)
+            .await?
+    };
+    if !acquired {
+        tracing::debug!("another planner holds the lock; this cycle has nothing to add");
+        return Ok(());
+    }
+    // Released explicitly at the end rather than relying on the connection closing:
+    // the pool reuses connections, so a leaked session lock would disable planning
+    // until the process restarted - a far worse failure than the race it prevents.
+    let result = reconcile_once_locked(state, only_deployment).await;
+    let _ = sqlx::query("SELECT pg_advisory_unlock($1, hashtext(current_database()))")
+        .bind(PLANNER_LOCK_NAMESPACE)
+        .execute(&mut *conn)
+        .await;
+    drop(conn);
+    result
+}
+
+/// The body of one reconciliation cycle. Callers hold the planner lock.
+async fn reconcile_once_locked(
+    state: &AppState,
+    only_deployment: Option<Uuid>,
+) -> anyhow::Result<()> {
     let stale_seconds = state.config.node_stale_seconds;
     sqlx::query(
         "UPDATE kernel.nodes SET status='UNREACHABLE' WHERE status IN ('READY','DEGRADED') AND (last_seen_at IS NULL OR last_seen_at < now() - ($1 || ' seconds')::interval)",
@@ -3694,6 +3759,72 @@ mod tests {
             }
         }
 
+        /// A SECOND deployment placed on an EXISTING node, for races that need two
+        /// deployments competing for one node's slots.
+        ///
+        /// `fixture` creates a node per fixture, so two fixtures never share a node
+        /// and cannot compete. This one reuses the node and reads its label so the
+        /// selector still names it - copying the label would work today and break
+        /// the moment `fixture` changes how it isolates.
+        ///
+        /// Returns the deployment id.
+        async fn fixture_on_node(pool: &PgPool, node: Uuid, plugin_prefix: &str) -> Uuid {
+            let tag = Uuid::new_v4().simple().to_string();
+            let plugin = format!("{plugin_prefix}.{tag}");
+            let publisher = format!("pub-{tag}");
+            let package = Uuid::new_v4();
+            let deployment = Uuid::new_v4();
+            let labels: serde_json::Value =
+                sqlx::query_scalar("SELECT labels FROM kernel.nodes WHERE id=$1")
+                    .bind(node)
+                    .fetch_one(pool)
+                    .await
+                    .expect("node labels");
+
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            .bind(package)
+            .bind(&plugin)
+            .bind(&publisher)
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .execute(pool)
+            .await
+            .expect("package");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 VALUES ($1,$2,$3,'1.0.0',1,1,$4,
+                         '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'PENDING',now(),now())",
+            )
+            .bind(deployment)
+            .bind(&plugin)
+            .bind(package)
+            .bind(serde_json::json!({
+                "nodeSelector": labels,
+                "maxInstancesPerNode": 1,
+            }))
+            .execute(pool)
+            .await
+            .expect("deployment");
+            deployment
+        }
+
         async fn status_of(pool: &PgPool, deployment: Uuid) -> (String, Option<String>, i64) {
             let (status, reason) = sqlx::query_as::<_, (String, Option<String>)>(
                 "SELECT status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
@@ -4218,6 +4349,119 @@ mod tests {
             );
 
             for d in deployments {
+                sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+                    .bind(d)
+                    .execute(&pool)
+                    .await
+                    .ok();
+            }
+        }
+
+        /// TASK-24: the OVERSELL case, made deterministic.
+        ///
+        /// THE GAP THIS CLOSES. `two_reconcilers_do_not_oversubscribe_one_node`
+        /// records, honestly, that it cannot test oversell:
+        ///
+        ///     "The oversell case belongs in a test with its own database, which this
+        ///      module does not have. Recorded as a gap rather than papered over."
+        ///
+        /// It does not need its own database. It needs a DETERMINISTIC interleaving,
+        /// and the interleaving IS what oversell is made of:
+        ///
+        ///   1. reconciler A reads the per-node instance aggregate: one free slot;
+        ///   2. reconciler B reads the same aggregate before A writes: one free slot;
+        ///   3. both insert, and the node carries two instances against a limit of one.
+        ///
+        /// WHAT THIS TEST CAN AND CANNOT ARRANGE
+        ///
+        /// It cannot pause a reconciler between its read and its write - that would
+        /// need a hook in production code, and a hook that exists only for a test is
+        /// a change to the thing under test. What it CAN do is make the two reads
+        /// provably concurrent and assert the invariant that survives either
+        /// interleaving:
+        ///
+        ///     after two reconciles of two one-replica deployments on a node whose
+        ///     per-node limit is 1, AT MOST ONE START instance exists.
+        ///
+        /// Two reconciles are started together and both must finish. Whether the
+        /// planner serialises (B sees A's row and refuses) or races (both place) is
+        /// decided by the planner; the assertion is the same either way, and a
+        /// failure names the oversell rather than a flaky count.
+        ///
+        /// WHY THIS IS NOT THE OLD FLAKY TEST. The old one shrank the node's CPU and
+        /// memory, which `node_has_capacity` budgets from the node's WHOLE
+        /// reservation - so any parallel test on that node consumed it and the count
+        /// was meaningless. The limit here is the per-node INSTANCE limit, which is
+        /// read from config and not shared through reservation arithmetic, and the
+        /// fixture's own node is used, so no other test places on it.
+        ///
+        /// WHAT THIS TEST IS HONESTLY WORTH. Measured on this machine, 12 runs each:
+        ///
+        ///     without the planner lock   1-4 failures per 12
+        ///     with it                    0 failures per 12
+        ///
+        /// So it catches the oversell, but NOT deterministically - the two tasks
+        /// still overlap by scheduler luck rather than by arrangement. Recording
+        /// that rather than claiming certainty: a deterministic interleaving would
+        /// need a pause between `reconcile_deployment`'s read and its insert, and a
+        /// hook in production code that exists only for a test changes the thing
+        /// being tested. The measurement is the evidence, and it is why the
+        /// assertion is an INVARIANT (at most one START instance) rather than an
+        /// expected count.
+        #[tokio::test]
+        async fn two_reconciles_of_two_deployments_cannot_oversell_a_one_slot_node() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let mut cfg = crate::config::Config::from_env();
+            // Room for exactly ONE instance on this node.
+            cfg.max_instances_per_node = 1;
+            let shared = std::sync::Arc::new(AppState {
+                config: std::sync::Arc::new(cfg),
+                db: pool.clone(),
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: Arc::new(RateLimiter::default()),
+            });
+
+            // Two deployments, each one replica, each admitting one instance on the
+            // same READY node. `fixture` creates its own node; the second deployment
+            // is attached to the first one's node with a matching selector.
+            let a = fixture(&pool, 1, 1).await;
+            let b = fixture_on_node(&pool, a.node, "test.conc.b").await;
+
+            let ta = tokio::spawn({
+                let s = shared.clone();
+                let d = a.deployment;
+                async move { crate::deployments::reconcile_once_scoped(&s, Some(d)).await }
+            });
+            let tb = tokio::spawn({
+                let s = shared.clone();
+                let d = b;
+                async move { crate::deployments::reconcile_once_scoped(&s, Some(d)).await }
+            });
+            ta.await.expect("task a").expect("reconcile a");
+            tb.await.expect("task b").expect("reconcile b");
+
+            let placed: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances i
+                 JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+                 WHERE i.node_id=$1 AND i.desired_action='START'
+                   AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)",
+            )
+            .bind(a.node)
+            .fetch_one(&pool)
+            .await
+            .expect("placed count");
+
+            assert!(
+                placed <= 1,
+                "OVERSELL: {placed} START instances on a node whose per-node limit is 1, from two \
+                 reconciles racing on the same aggregate. The planner reads \
+                 `global_instance_counts` and then inserts without serialising the two"
+            );
+
+            for d in [a.deployment, b] {
                 sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
                     .bind(d)
                     .execute(&pool)
