@@ -35,6 +35,7 @@
  * Usage: node tests/ci/check-required-contexts.mjs [--json]
  */
 import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parse } from './lib/workflow-yaml.mjs';
 import { CANDIDATE_TEN_CONTEXTS } from './check-ruleset-payload.mjs';
@@ -125,6 +126,53 @@ export function inspectRequiredContexts({ workflows }) {
   return problems;
 }
 
+/**
+ * Are the workflows that produce the required contexts actually ENABLED?
+ *
+ * WHY THIS IS THE ONE THING THE STATIC CHECK CANNOT SEE
+ *
+ * Everything else about a required context is a property of the FILE: it has a
+ * `pull_request` trigger, no path filter, a job with no conditional `if:`. All of
+ * that can be true while the workflow is DISABLED in the repository settings - and
+ * a disabled workflow produces no check runs, so the required context never
+ * appears and every pull request waits on it for ever.
+ *
+ * `check-required-contexts.mjs` reads the tree. This reads the API. They answer
+ * different halves of "will this context appear", and the migration precondition
+ * needs both.
+ *
+ * WHAT IT IS NOT FOR. It does not fail on anything but `active`/`disabled_*`, and
+ * it does not try to repair. A disabled workflow is a deliberate act by someone
+ * with repository admin; the correct output is the name and the state, so the
+ * person who disabled it can see what it costs.
+ *
+ * @param {{contexts: string[], producerOf: Function, workflows: {path: string, state: string}[]}} input
+ * @returns {string[]} problems; empty means every producer is enabled
+ */
+export function inspectProducerHealth({ contexts, producerOf, workflows }) {
+  const problems = [];
+  const byPath = new Map(workflows.map((w) => [`${w.path}`, String(w.state ?? 'unknown')]));
+  const seen = new Set();
+  for (const context of contexts) {
+    const producer = producerOf(context);
+    if (producer === null) {
+      problems.push(`"${context}" has no known producer, so its workflow cannot be checked for being enabled`);
+      continue;
+    }
+    const path = `.github/workflows/${producer}`;
+    if (seen.has(path)) continue;
+    seen.add(path);
+    const state = byPath.get(path);
+    if (state === undefined) {
+      problems.push(`${path} produces a required context but the API does not list it as a workflow at all`);
+    } else if (state !== 'active') {
+      problems.push(`${path} is ${state}, and it produces a required context. A disabled workflow produces no`
+        + ' check runs, so the context never appears and every pull request waits on it for ever');
+    }
+  }
+  return problems;
+}
+
 // ---------------------------------------------------------------------------
 
 const RUN_AS_PROGRAM = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
@@ -134,7 +182,27 @@ if (RUN_AS_PROGRAM) {
     const parsed = parse(readFileSync(WF_DIR + name, 'utf8'));
     workflows.set(name, parsed.ok ? parsed.value : { unparsed: parsed.error });
   }
-  const problems = inspectRequiredContexts({ workflows });
+  let problems = inspectRequiredContexts({ workflows });
+
+  // `--live` also asks GitHub whether the producing workflows are enabled. It needs
+  // `gh` and read access, so it is not part of the default run: a CI checkout has a
+  // token, but a developer running this offline does not, and a missing credential
+  // must not look like a clean bill of health.
+  if (process.argv.includes('--live')) {
+    let listed;
+    try {
+      listed = JSON.parse(execFileSync('gh',
+        ['api', 'repos/baicie/ops-1/actions/workflows'], { encoding: 'utf8' })).workflows ?? [];
+    } catch (error) {
+      process.stderr.write(`cannot read workflow states: ${String(error.message).split('\n')[0]}\n`);
+      process.exit(2);
+    }
+    problems = problems.concat(inspectProducerHealth({
+      contexts: CANDIDATE_TEN_CONTEXTS,
+      producerOf: producerWorkflowOf,
+      workflows: listed,
+    }));
+  }
   if (process.argv.includes('--json')) {
     process.stdout.write(`${JSON.stringify({ problems, contexts: CANDIDATE_TEN_CONTEXTS }, null, 2)}\n`);
   } else {

@@ -289,7 +289,41 @@ for name in "${PLUGINS[@]}"; do
       deploy "$plugin" "$version" --replicas "$REPLICAS" --wait --activate 2>&1 | tail -3
     continue
   fi
-  img="$REGISTRY/opsweave/$name@$(sudo docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/$name:$version" | cut -d@ -f2)"
+  local_img="$REGISTRY/opsweave/$name:$version"
+  local_digest="$(sudo docker inspect --format '{{index .RepoDigests 0}}' "$local_img" 2>/dev/null | cut -d@ -f2)"
+
+  # THE LOCAL DIGEST IS A CLAIM, NOT A FACT. ASK THE REGISTRY.
+  #
+  # `RepoDigests` is what the DAEMON recorded when it pushed. It says nothing about
+  # what a puller will receive: a partial push, a tag moved since, or a registry
+  # that resolved the manifest differently all leave this value looking
+  # authoritative while the bundle embeds a digest that fetches something else - or
+  # nothing. The failure then appears later, as a Node that cannot pull.
+  #
+  # Measured on staging: local `sha256:d9e853e8...`, registry
+  # `Docker-Content-Digest` `sha256:45e09956...`, and
+  # `GET /v2/.../manifests/sha256:d9e853e8...` returned 404. The digest this host
+  # recorded did not exist in the registry.
+  #
+  # Fail closed: an unanswerable registry question is not a pass, because the
+  # alternative is publishing a bundle nobody has verified.
+  # An empty local digest means the daemon has no record of the push at all - that
+  # is already a refusal, and passing "" to --expect would make the tool report
+  # "no expected digest" rather than the real problem.
+  if [ -z "$local_digest" ]; then
+    say "$plugin@$version: this daemon has no RepoDigest for $local_img; the push did not record one"
+    exit 1
+  fi
+  say "$plugin@$version: verifying $local_digest against the registry"
+  if ! node "$SRC/scripts/verify-registry-digest.mjs" \
+      --registry "$REGISTRY" \
+      --repository "opsweave/$name" \
+      --tag "$version" \
+      --expect "$local_digest"; then
+    say "$plugin@$version: the registry does not confirm $local_digest; refusing to bundle"
+    exit 1
+  fi
+  img="$REGISTRY/opsweave/$name@$local_digest"
   say "$plugin@$version: assembling a bundle against $img"
 
   sudo rm -rf "/tmp/opsweave-bundle-$name"

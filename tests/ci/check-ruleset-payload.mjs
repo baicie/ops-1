@@ -265,9 +265,72 @@ function selftest() {
 // from this file; without the guard that import ran the whole checker and printed
 // its results in the importer's output. Every other tool in this directory has
 // the same guard for the same reason.
+/**
+ * Did the write produce EXACTLY the payload?
+ *
+ * A 200 is not evidence: GitHub normalises fields, can drop a rule it does not
+ * accept, and an accepted PUT can still differ from what was sent. The comparison
+ * is field-by-field in BOTH directions, because "the checks are right" is not the
+ * question - "nothing else changed" is.
+ *
+ * @param {object} payload  what was sent
+ * @param {object} after    what the API returned, or a read-back snapshot
+ * @returns {string[]} problems; empty means the ruleset is what the payload said
+ */
+export function inspectReadback(payload, after) {
+  const problems = [];
+  for (const field of ['name', 'target', 'enforcement']) {
+    if (after[field] !== payload[field]) {
+      problems.push(`${field}: payload said ${JSON.stringify(payload[field])}, GitHub returned ${JSON.stringify(after[field])}`);
+    }
+  }
+  for (const field of ['conditions', 'bypass_actors']) {
+    if (JSON.stringify(after[field]) !== JSON.stringify(payload[field])) {
+      problems.push(`${field}: payload and read-back differ`);
+    }
+  }
+  const byType = (p) => Object.fromEntries((p.rules ?? []).map((r) => [r.type, r]));
+  const want = byType(payload);
+  const got = byType(after);
+  for (const type of Object.keys(want)) {
+    if (!got[type]) { problems.push(`rule "${type}" is in the payload but NOT in the read-back`); continue; }
+    if (JSON.stringify(want[type]) !== JSON.stringify(got[type])) {
+      problems.push(`rule "${type}" came back different`);
+    }
+  }
+  for (const type of Object.keys(got)) {
+    if (!want[type]) {
+      problems.push(`rule "${type}" is in the read-back but NOT in the payload - the write ADDED something`);
+    }
+  }
+  for (const type of PROTECTIVE_RULES) {
+    if (!got[type]) problems.push(`PROTECTION LOST: "${type}" is not on the ruleset after the write`);
+  }
+  return problems;
+}
+
+
 const RUN_AS_PROGRAM = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 
 if (RUN_AS_PROGRAM && process.argv[2] === '--selftest') process.exit(selftest() ? 0 : 1);
+
+if (RUN_AS_PROGRAM && process.argv[2] === '--verify-readback') {
+  const [payloadFile, afterFile] = process.argv.slice(3);
+  if (!payloadFile || !afterFile) {
+    process.stderr.write('usage: check-ruleset-payload.mjs --verify-readback <payload.json> <after.json>\n');
+    process.exit(2);
+  }
+  const problems = inspectReadback(
+    JSON.parse(readFileSync(payloadFile, 'utf8')),
+    JSON.parse(readFileSync(afterFile, 'utf8')),
+  );
+  for (const p of problems) process.stdout.write(`FAIL ${p}\n`);
+  process.stdout.write(problems.length
+    ? `readback: ${problems.length} problem(s)\n`
+    : 'readback: the ruleset is exactly what the payload described\n');
+  process.exit(problems.length === 0 ? 0 : 1);
+}
+
 
 // `--against-live <snapshot.json>` compares a payload to what GitHub actually
 // returned. The offline check proves a payload is internally sound; this proves it

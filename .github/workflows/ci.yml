@@ -1895,6 +1895,24 @@ jobs:
           # checked before the ruleset is written rather than after.
           node --test tests/ci/check-required-contexts.test.mjs
           node tests/ci/check-required-contexts.mjs
+          # The ruleset migration's WRITE VERIFICATION: after a PUT, is the ruleset
+          # exactly what was sent? A 200 is not evidence, and the failure that
+          # matters is losing one of the four protections the migration must not
+          # touch. The rollback payload is asserted here too, so a file that claims
+          # to restore the old state and does not cannot sit in the repository.
+          node --test tests/ci/check-ruleset-payload.test.mjs
+          # The registry-digest check `publish-data-plugins.sh` now calls. It
+          # existed for weeks with no caller: the publish path embedded the LOCAL
+          # RepoDigest in every bundle, and on staging that digest returned 404 from
+          # the registry. Wired in and tested together, because either alone is a
+          # claim rather than a control.
+          node --test scripts/verify-registry-digest.test.mjs
+          # What a failed publish leaves behind. The script prints `exit 1` and a wall
+          # of text; this answers which phase, what changed, and where a retry starts.
+          # `scriptDrift` is what stops the model describing a release the script does
+          # not perform.
+          node --test scripts/ci/publish-phases.test.mjs
+          node scripts/ci/publish-phases.mjs --publish-script-drift
           # Is the gate actually enforceable? Reads the LIVE ruleset, because a
           # flawless workflow that nothing requires gates nothing. ADVISORY and
           # PARTIAL exit 0 - they are facts for a migration to decide about, not
@@ -1933,3 +1951,18 @@ jobs:
           # The analyzer's output is what the gate judges, so its own tests run
           # here too - including the cases that pin the analyzer to the suites a
           # workflow can actually start.
+
+      # `--live` also asks GitHub whether the producing workflows are ENABLED.
+      # Everything the static check above reads is a property of the file, and all of
+      # it can be true while the workflow is disabled - in which case the required
+      # context never appears and every PR waits on it for ever.
+      #
+      # ADVISORY, AND WHY THAT IS ACCEPTABLE: the fatal check is the step above, on
+      # the same tree. This step only adds a fact a file cannot carry, and a
+      # repository that disables a workflow on purpose must not fail every PR. The
+      # operator running `--live` before writing the ruleset is where it is fatal -
+      # and the finding is printed either way.
+      - name: The required contexts' producers are enabled
+        run: node tests/ci/check-required-contexts.mjs --live || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
