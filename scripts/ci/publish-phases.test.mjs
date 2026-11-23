@@ -101,3 +101,72 @@ test('scriptDrift notices a stage the script no longer has', () => {
   assert.ok(scriptDrift(without).some((p) => /BUNDLED/.test(p)),
     'removing the bundling stage must be reported');
 });
+
+// --- the journal: evidence, not the model ------------------------------------
+//
+// `explain(phase)` is a statement about the MODEL and says nothing about any
+// particular run. Reading it as "this is what my publish did" is the substitution
+// this repository keeps removing. The journal records what the run actually
+// entered and left.
+
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { journalAppend, journalRead } from './publish-phases.mjs';
+
+const withJournal = (fn) => {
+  const dir = mkdtempSync(join(tmpdir(), 'p7-journal-'));
+  try { return fn(join(dir, 'j.jsonl')); } finally { rmSync(dir, { recursive: true, force: true }); }
+};
+
+test('a journal records what the run entered and completed', () => withJournal((f) => {
+  journalAppend(f, { event: 'begin', phase: 'PREFLIGHT', at: 'T1' });
+  journalAppend(f, { event: 'end', phase: 'PREFLIGHT', at: 'T2', status: 'ok' });
+  journalAppend(f, { event: 'begin', phase: 'BUILT', at: 'T3' });
+  const j = journalRead(f);
+  assert.deepEqual(j.completed, ['PREFLIGHT']);
+  assert.equal(j.inFlight, 'BUILT', 'the last begin with no end is where it stopped');
+  assert.equal(j.failedAt, null);
+}));
+
+test('an explicit failure is reported as the failure, not as in-flight', () => withJournal((f) => {
+  journalAppend(f, { event: 'begin', phase: 'PUSHED', at: 'T1' });
+  journalAppend(f, { event: 'end', phase: 'PUSHED', at: 'T2', status: 'fail' });
+  journalAppend(f, { event: 'begin', phase: 'BUNDLED', at: 'T3' });
+  const j = journalRead(f);
+  assert.equal(j.failedAt, 'PUSHED');
+  assert.equal(j.inFlight, 'BUNDLED');
+}));
+
+test('a HALF-WRITTEN last line does not invalidate the lines before it', () => withJournal((f) => {
+  // A crash during a write leaves exactly this. Discarding the whole journal
+  // because of it would throw away the only record of how far the run got.
+  journalAppend(f, { event: 'begin', phase: 'PREFLIGHT', at: 'T1' });
+  journalAppend(f, { event: 'end', phase: 'PREFLIGHT', at: 'T2', status: 'ok' });
+  // APPEND the truncated fragment, do not rewrite the file with its own content:
+  // the first version did that and produced two complete PREFLIGHT cycles, so the
+  // assertion failed for a reason that had nothing to do with truncation.
+  writeFileSync(f, '{"event":"begin","pha', { flag: 'a' });
+  const j = journalRead(f);
+  assert.deepEqual(j.completed, ['PREFLIGHT']);
+  assert.equal(j.malformed, 1, 'the truncated line is counted, not silently dropped');
+}));
+
+test('a journal that was never written reads as empty, not as an error', () => withJournal((f) => {
+  const j = journalRead(f);
+  assert.deepEqual(j.entries, []);
+  assert.equal(j.inFlight, null);
+  assert.equal(j.failedAt, null);
+}));
+
+test('an entry without a phase is malformed rather than treated as a phase', () => withJournal((f) => {
+  writeFileSync(f, `${JSON.stringify({ event: 'begin' })}\n`);
+  const j = journalRead(f);
+  assert.deepEqual(j.entries, []);
+  assert.equal(j.malformed, 1);
+}));
+
+/** Re-read what is there so the truncation case appends to real content. */
+function readFileSyncForTest(f) {
+  return readFileSync(f, 'utf8');
+}

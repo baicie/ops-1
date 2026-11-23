@@ -44,6 +44,26 @@ PYVERIFY
 TS_BUILD_1="$(sha256_file plugins/hello-ops/backend-ts/server.mjs)"
 TS_BUILD_2="$TS_BUILD_1"
 cargo build -q -p opsweave-opsctl
+
+# CLEAR THE OUTPUT DIRECTORY BEFORE ANY WORK, NOT BEFORE SIGNING.
+#
+# `rm -rf dist/plugins` used to run at the `== signed bundles` stage, after the web
+# builds, six OCI images and the jlink JRE. A failure anywhere before that point -
+# a missing `node_modules`, a registry refusing a push, an image that will not
+# build - left the PREVIOUS run's signed zips sitting in `dist/plugins`.
+#
+# Nothing marks them as stale. `tests/contract/validate_contracts.py` and
+# `tests/contract/test_bundle_validation.py` read `dist/plugins/*.plugin.zip` and
+# have no way to tell this run's output from last week's, so a failed build would
+# present an older bundle as the artifact under test - and `p001c13_negatives.sh`
+# tampers with one of them, so the stale bytes would be what gets tampered with.
+#
+# Clearing here means a build that fails leaves NO bundles, which those consumers
+# already treat as "no bundle was examined" rather than as a pass.
+echo "== clearing any previous bundles"
+rm -rf dist/plugins
+mkdir -p dist/plugins
+
 echo "== web assets"
 PLUGIN_VERSION="$TS_VERSION" pnpm --fail-if-no-match --filter @opsweave/hello-web build >/dev/null
 rm -rf /tmp/hello-web-v1 && cp -R plugins/hello-ops/web/dist /tmp/hello-web-v1
@@ -371,7 +391,9 @@ JAVA_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/ops
 JAVA2_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-java:0.0.2")"
 
 echo "== signed bundles"
-rm -rf /tmp/opsweave-bundles dist/plugins
+# `dist/plugins` was already cleared at the top of this script - see the comment
+# there. Only the temporary staging tree is reset here.
+rm -rf /tmp/opsweave-bundles
 mkdir -p /tmp/opsweave-bundles dist/plugins
 python3 scripts/assemble_plugin.py --template plugins/hello-ops/manifest.template.json --out /tmp/opsweave-bundles/hello-ops-0.0.1 --version "$TS_VERSION" --image-ref "$TS_DIGEST" --frontend-dist /tmp/hello-web-v1 >/dev/null
 python3 scripts/assemble_plugin.py --template plugins/hello-ops/manifest.template.json --out /tmp/opsweave-bundles/hello-ops-0.0.2 --version "$TS_V2_VERSION" --image-ref "$TS2_DIGEST" --frontend-dist /tmp/hello-web-v2 >/dev/null

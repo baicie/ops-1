@@ -225,6 +225,81 @@ export function scriptDrift(scriptText) {
 }
 
 // ---------------------------------------------------------------------------
+// The journal: what a run actually did, as opposed to what the model says.
+//
+// WHY THIS IS THE POINT OF TASK-09
+//
+// `explain(phase)` is a statement about the MODEL. It is correct about the model
+// and says nothing about any particular run. Reading it as a report of what
+// happened is exactly the substitution this repository keeps removing: a static
+// description standing in for evidence.
+//
+// The journal is the evidence. `--begin <PHASE>` appends a line before the shell
+// starts that phase; `--end <PHASE> --status ok|fail` appends the outcome. The
+// file is JSON Lines so a crash between two calls leaves the earlier lines intact
+// - a partial journal that says exactly how far it got is more useful than a
+// document that is either absent or complete.
+//
+// `--explain --journal <file>` then answers from the RECORD rather than from the
+// phase name, and says so.
+// ---------------------------------------------------------------------------
+
+import { appendFileSync, readFileSync as readJournal, existsSync } from 'node:fs';
+
+/**
+ * Append one journal line.
+ *
+ * @param {string} file
+ * @param {{event: 'begin'|'end', phase: string, at: string, status?: string, note?: string}} entry
+ */
+export function journalAppend(file, entry) {
+  appendFileSync(file, `${JSON.stringify(entry)}\n`);
+}
+
+/**
+ * Read a journal and say what it establishes.
+ *
+ * The LAST begin without a matching end is the phase that was in flight when the
+ * process stopped - that is the answer to "where did it die", and it is a fact
+ * about the run rather than about the model.
+ *
+ * @param {string} file
+ * @returns {{entries: object[], inFlight: string|null, failedAt: string|null,
+ *            completed: string[], malformed: number}}
+ */
+export function journalRead(file) {
+  const text = existsSync(file) ? readJournal(file, 'utf8') : '';
+  const entries = [];
+  let malformed = 0;
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (!parsed || typeof parsed.phase !== 'string') { malformed += 1; continue; }
+      entries.push(parsed);
+    } catch {
+      // A half-written last line is expected after a crash; it is counted, not
+      // silently dropped, and it does NOT invalidate the lines before it.
+      malformed += 1;
+    }
+  }
+
+  const completed = [];
+  let inFlight = null;
+  let failedAt = null;
+  for (const e of entries) {
+    if (e.event === 'begin') {
+      inFlight = e.phase;
+    } else if (e.event === 'end') {
+      if (e.status === 'ok') completed.push(e.phase);
+      else if (e.status === 'fail') failedAt = e.phase;
+      inFlight = null;
+    }
+  }
+  return { entries, inFlight, failedAt, completed, malformed };
+}
+
+// ---------------------------------------------------------------------------
 
 const RUN_AS_PROGRAM = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 if (RUN_AS_PROGRAM) {
@@ -235,8 +310,49 @@ if (RUN_AS_PROGRAM) {
     }
     process.exit(0);
   }
+  const b = argv.indexOf('--begin');
+  if (b !== -1) {
+    const file = argv[argv.indexOf('--journal') + 1];
+    if (!file) { process.stderr.write('--begin needs --journal <file>\n'); process.exit(2); }
+    journalAppend(file, { event: 'begin', phase: argv[b + 1], at: new Date().toISOString() });
+    process.exit(0);
+  }
+  const e = argv.indexOf('--end');
+  if (e !== -1) {
+    const file = argv[argv.indexOf('--journal') + 1];
+    const status = argv[argv.indexOf('--status') + 1];
+    if (!file || !['ok', 'fail'].includes(status)) {
+      process.stderr.write('--end needs --journal <file> --status ok|fail\n');
+      process.exit(2);
+    }
+    journalAppend(file, {
+      event: 'end', phase: argv[e + 1], at: new Date().toISOString(), status,
+    });
+    process.exit(0);
+  }
+
   const i = argv.indexOf('--explain');
   if (i !== -1) {
+    // FROM THE RECORD WHEN THERE IS ONE. A journal answers "where did THIS run
+    // die"; the phase name answers "what would happen if it died here". They are
+    // different questions and the output says which was answered.
+    const jf = argv.indexOf('--journal') !== -1 ? argv[argv.indexOf('--journal') + 1] : null;
+    if (jf) {
+      const j = journalRead(jf);
+      const died = j.failedAt ?? j.inFlight;
+      if (!died) {
+        process.stdout.write(`the journal records no failure; completed: ${j.completed.join(' -> ') || '(none)'}\n`);
+        if (j.malformed > 0) process.stdout.write(`  (${j.malformed} unreadable line(s) - a partial write is expected after a crash)\n`);
+        process.exit(0);
+      }
+      const why = j.failedAt ? 'the journal records it as failed' : 'no end entry: the process stopped during it';
+      const result = explain(died);
+      process.stdout.write(`FROM THE JOURNAL (${jf}):\n`);
+      process.stdout.write(`  ${died}: ${why}\n`);
+      process.stdout.write(`${result.explanation}\n`);
+      if (j.malformed > 0) process.stdout.write(`  (${j.malformed} unreadable line(s))\n`);
+      process.exit(result.known ? 0 : 2);
+    }
     const result = explain(argv[i + 1]);
     if (argv.includes('--json')) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     else process.stdout.write(`${result.explanation}\n`);
