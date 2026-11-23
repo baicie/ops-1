@@ -355,6 +355,17 @@ jobs:
         # including that a WRONG ACTIVE version is never RELEASED.
         run: bash tests/ci/phase7_release_stages.test.sh
 
+      - name: A real Maven 429, and who recovers it
+        # NO PUBLIC NETWORK. A local server answers 429; the project's pom.xml names
+        # a parent POM served there, so Maven's own resolver - wagon, checksums,
+        # negative cache - runs exactly as against Central.
+        #
+        # It answers a question a stub cannot: does the OUTER retry fire on a genuine
+        # resolution failure, and when a single 429 clears, is it Maven or the outer
+        # policy that recovers? The answer decides whether a green legacy-regression
+        # may be called 429 recovery at all.
+        run: bash tests/scripts/maven-429-recovery.test.sh
+
       - name: A failed build leaves no stale bundles
         # `dist/plugins` is read by the contract validators and by the negative
         # suite. A failure before the signing stage used to leave the PREVIOUS
