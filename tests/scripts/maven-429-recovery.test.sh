@@ -131,9 +131,24 @@ if ! declare -f retry_on_registry_fault >/dev/null; then
 fi
 export OPSWEAVE_RETRY_SLEEP=0
 
+# A BOUND, BECAUSE MAVEN'S OWN RETRY HANDLER IS EXPENSIVE UNDER A PERSISTENT 429.
+#
+# Measured on CI (run 45183654404): phase 1 took 16 MINUTES. `OPSWEAVE_RETRY_SLEEP=0`
+# is honoured - the outer sleeps are zero - so the time is Maven's internal
+# `wagon.http.retryHandler.count=4`, each attempt waiting out a connect timeout,
+# multiplied by the outer policy's three attempts.
+#
+# `maven.wagon.rto` and `.connectionTimeout` shrink those waits. They are set HERE
+# rather than in `build-plugins.sh` because the real build deliberately keeps them
+# generous: a slow Maven Central is not a fault, and a publish should wait it out.
+# This test only needs the failure fast.
 mvn_against() { # port, local-repo
   ( cd "$WORK/proj" && mvn -B -s "$WORK/settings-$1.xml" \
-      -Dmaven.repo.local="$2" -f pom.xml validate )
+      -Dmaven.repo.local="$2" \
+      -Dmaven.wagon.rto=2000 \
+      -Dmaven.wagon.http.connectionTimeout=2000 \
+      -Dmaven.wagon.http.retryHandler.count=0 \
+      -f pom.xml validate )
 }
 
 echo "== 1. a PERSISTENT 429 must make the outer policy retry"
@@ -167,6 +182,28 @@ else
 fi
 
 echo "== 3. a 429 that CLEARS: who recovers it?"
+# A FRESH SERVER, BECAUSE THE HIT COUNTER IS PER-PATH AND SHARED.
+#
+# The first CI run of this file failed here in 16 seconds while passing locally.
+# The `once` server answers 429 on the FIRST request for each path and 200 after -
+# but "first" is counted across the whole process, and phase 1 has already burned
+# the counter by fetching the POM and its checksums. Phase 3 then got a 200 on its
+# first request, the build succeeded with no 429 at all, and the test asserted a
+# recovery that never had a fault to recover from... except it FAILED, because the
+# negative cache from phase 1's repo was not the issue - the fresh repo had no
+# POM and the server had already moved past its first hit.
+#
+# Restarting is the honest fix: this phase needs a server that has never been
+# asked, and asserting on a counter another phase advanced is how a test passes or
+# fails for a reason unrelated to what it claims to measure.
+kill "$SRV_PID" 2>/dev/null; sleep 0.3
+python3 "$WORK/server.py" "$WORK/served" once "$PORT_ONCE" 2>"$WORK/once2.log" &
+SRV_PID=$!
+for _ in $(seq 1 30); do
+  curl -s -m 1 -o /dev/null "http://127.0.0.1:$PORT_ONCE/" 2>/dev/null; [ $? -ne 7 ] && break
+  sleep 0.2
+done
+sleep 0.5
 rm -rf "$WORK/repo-once"
 out="$(retry_on_registry_fault mvn mvn_against "$PORT_ONCE" "$WORK/repo-once" 2>&1)"; rc=$?
 outer="$(printf '%s\n' "$out" | grep -c 'registry fault on attempt')"
@@ -175,14 +212,27 @@ if [ "$rc" -eq 0 ]; then
   if [ "$outer" -eq 0 ]; then
     # THE FINDING THAT MATTERS: this is why a green legacy-regression does not
     # prove the outer retry works.
-    ok "Maven's OWN retryHandler absorbed the 429 - the outer policy never fired"
+    #
+    # It is NOT `wagon.http.retryHandler`: this test sets that to 0 above, and the
+    # 429 is still absorbed - the retry happens in aether's connector, below the
+    # handler the flags control. Naming it "Maven's retryHandler" would be the same
+    # kind of guess this repository keeps removing.
+    ok "Maven absorbed the 429 internally - the outer policy never fired"
     echo "         => a green legacy-regression is NORMAL_BUILD_VERIFIED at best;"
     echo "            it is not evidence that the outer retry works."
   else
     ok "the outer policy fired $outer time(s) before recovery"
   fi
 else
+  # PRINT THE EVIDENCE. The first CI run of this file failed here and the captured
+  # output was discarded, so the log said only `rc=1` - which is the same defect this
+  # repository keeps fixing in other tools. A failure has to carry what it saw.
   bad "a transient 429 was not recovered (rc=$rc)"
+  printf '       --- the captured build output follows ---\n'
+  printf '%s\n' "$out" | tail -12 | sed 's/^/       /'
+  printf '       --- server hits ---\n'
+  grep -c 'GET ' "$WORK/once.log" 2>/dev/null | sed 's/^/       requests: /'
+  tail -4 "$WORK/once.log" 2>/dev/null | sed 's/^/       /'
 fi
 
 echo
