@@ -128,6 +128,34 @@ esac
 # symptom is an empty CI log during a slow build, which is visible to a reader
 # and not to a test.
 
+# --- when the LOG cannot be written, the classification must not lie ----------
+#
+# The retry decision greps the captured output. If `tee` cannot write it, `grep`
+# reads nothing and concludes "not a registry fault" - so a 429 is returned as a
+# permanent build error for a reason that has nothing to do with the fault.
+#
+# Measured with an unwritable log (`/dev/full`): rc=1, grep matched nothing, ZERO
+# retries, while the command's own output said `status: 429`.
+#
+# These cases drive the REAL function with a log directory that cannot be used.
+
+echo
+echo "unwritable log"
+
+# A mktemp that always fails, so the first guard is exercised.
+mktemp() { return 1; }
+export -f mktemp 2>/dev/null || true
+stub_reset; STUB_FAILS=99 STUB_MESSAGE='[ERROR] transfer failed, status: 429'
+out="$(retry_on_registry_fault t stub 2>&1 || true)"
+case "$out" in
+  *'NO retry classification'*) ok 'an uncreatable log is REPORTED, not silently unretried' ;;
+  *) bad "no report about the unusable log: [$out]" ;;
+esac
+calls="$(wc -l < "$STUB_LOG" | tr -d ' ')"
+[ "$calls" = "1" ] && ok 'the command still ran exactly once (a build must not be refused over a temp file)' \
+  || bad "ran $calls time(s), expected 1"
+unset -f mktemp
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

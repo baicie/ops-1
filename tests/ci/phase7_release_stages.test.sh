@@ -77,6 +77,14 @@ expect 'the earliest failing stage wins' \
 # is what happens rather than assuming it.
 expect 'an empty summary blocks at HOST_UP' '' BLOCKED_AT_HOST_UP
 
+# A CONTAINER ID IS NOT A SERVING INSTANCE. The first version counted any row with
+# a container id, which is true of a container that exists and whose state is still
+# STARTING or UNHEALTHY. The stage now reports NOT_READY for that, and it must block.
+expect 'a container that is not READY blocks at PLUGIN_RUNNING' \
+  "${ALL_GOOD/PLUGIN_RUNNING RUNNING/PLUGIN_RUNNING NOT_READY}" BLOCKED_AT_PLUGIN_RUNNING
+
+expect 'RUNNING (the only value that passes) is accepted' "$ALL_GOOD" RELEASED
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

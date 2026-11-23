@@ -108,11 +108,28 @@ else
 fi
 
 # --- 5. a real container is running ----------------------------------------
+# A CONTAINER ID IS NOT A RUNNING INSTANCE.
+#
+# The first version counted rows with `container_id IS NOT NULL`, which is true of a
+# container that exists and whose `state` is still STARTING, or UNHEALTHY, or
+# STOPPING. A deployment is not running because a container was created for it.
+#
+# Two facts are asked separately and both must hold:
+#   the row has a container          (the node created something)
+#   the row's state is READY         (the plugin said it is ready)
+#
+# Measured on a real kernel after a failed placement: the instance row had a
+# container id while the deployment was DEGRADED, which the old query would have
+# called RUNNING.
 CONTAINERS="$(q "SELECT count(*) FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='$PLUGIN' AND i.desired_action='START' AND i.container_id IS NOT NULL" || echo "")"
-if [ "${CONTAINERS:-0}" -ge 1 ]; then
-  stage PLUGIN_RUNNING RUNNING "${CONTAINERS} instance(s) with a container id"
-else
+READY_INSTANCES="$(q "SELECT count(*) FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='$PLUGIN' AND i.desired_action='START' AND i.container_id IS NOT NULL AND i.state='READY'" || echo "")"
+if [ "${CONTAINERS:-0}" -eq 0 ]; then
   stage PLUGIN_RUNNING NOT_RUNNING "no instance of $PLUGIN holds a container"
+elif [ "${READY_INSTANCES:-0}" -eq 0 ]; then
+  # THE DISTINCTION THE TASK ASKED FOR: a container exists and is not ready.
+  stage PLUGIN_RUNNING NOT_READY "${CONTAINERS} container(s), none READY yet - the instance exists but is not serving"
+else
+  stage PLUGIN_RUNNING RUNNING "${READY_INSTANCES} of ${CONTAINERS} instance(s) READY with a container"
 fi
 
 # --- 6. the active revision is the version asked for -----------------------
