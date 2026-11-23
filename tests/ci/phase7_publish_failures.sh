@@ -440,6 +440,59 @@ fi
 
 # ===========================================================================
 echo
+echo "== TASK-08  one plugin succeeds, the NEXT one fails"
+# ===========================================================================
+# The publish script loops plugins under `set -e`, so a failure stops the run. Two
+# claims are worth checking and only one of them has ever been:
+#   1. the plugin that succeeded is UNAFFECTED
+#   2. the run says which plugin it never reached
+#
+# (2) is unit-tested in `publish-untried-report.test.sh`. (1) is not tested
+# anywhere, and it is the one that matters: a half-upgraded platform where the new
+# failure also broke what was working is a different incident from one where it
+# did not.
+CAT="$(active_version)"
+CAT_CONTAINERS_BEFORE="$(psql_run "SELECT count(*) FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog' AND i.desired_action='START' AND i.container_id IS NOT NULL")"
+
+# The second plugin: install it, then fail its deploy the same way TASK-02 does.
+INTEG_BUNDLE=dist/plugins/data-integration-0.0.3.plugin.zip
+if [ -f "$INTEG_BUNDLE" ]; then
+  ops install "$INTEG_BUNDLE" > "$EVIDENCE/08-install-integration.log" 2>&1 || true
+  INTEG_RC=0
+  ops deploy opsweave.data-integration 0.0.3 --replicas 1 \
+    --selector "no-such-label=no-such-value" --wait \
+    > "$EVIDENCE/08-integration-fail.log" 2>&1 || INTEG_RC=$?
+  [ "$INTEG_RC" -ne 0 ] && ok "the second plugin's deploy failed (rc=$INTEG_RC)" \
+    || bad "the second plugin's deploy reported success; see 08-integration-fail.log"
+
+  # THE CLAIM THAT MATTERS: the first plugin is untouched.
+  CAT_AFTER="$(active_version)"
+  [ "$CAT_AFTER" = "$CAT" ] && ok "the FIRST plugin is still active at $CAT after the second one failed" \
+    || bad "a failure in data-integration moved data-catalog: $CAT -> ${CAT_AFTER:-<none>}"
+
+  CAT_CONTAINERS_AFTER="$(psql_run "SELECT count(*) FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog' AND i.desired_action='START' AND i.container_id IS NOT NULL")"
+  [ "$CAT_CONTAINERS_AFTER" = "$CAT_CONTAINERS_BEFORE" ] \
+    && ok "its container count is unchanged ($CAT_CONTAINERS_AFTER)" \
+    || bad "containers went from $CAT_CONTAINERS_BEFORE to $CAT_CONTAINERS_AFTER"
+
+  # The failing plugin DID get its package installed - install and deploy are
+  # separate steps with separate failure modes, which is what the publish script's
+  # own comment says. A failed deploy must not roll the package back.
+  INTEG_PKG="$(psql_run "SELECT count(*) FROM kernel.plugin_packages WHERE plugin_id='opsweave.data-integration' AND version='0.0.3'")"
+  [ "${INTEG_PKG:-0}" -ge 1 ] && ok "the failing plugin's package is still registered (install and deploy are separate)" \
+    || bad "the failed deploy also removed the package row"
+
+  # And it is NOT active: a package that exists is not a version that serves.
+  INTEG_ACTIVE="$(HOME="$STATE/home" ./target/debug/opsctl --url "$KERNEL_URL" plugins 2>/dev/null \
+    | awk '$1 == "opsweave.data-integration" { sub(/^active=/, "", $3); print $3 }')"
+  [ "$INTEG_ACTIVE" != "0.0.3" ] && ok "the failing plugin is not active (active=${INTEG_ACTIVE:-<none>})" \
+    || bad "a plugin whose deploy failed reports 0.0.3 active"
+else
+  skip "no data-integration bundle in dist/plugins; the mixed-outcome case needs two plugins"
+fi
+
+# ===========================================================================
+echo
 echo "== what this run did NOT prove"
 echo "   - not staging: one host, two node PROCESSES, not two machines"
 echo "   - not a real publish: no image was built in this run; the registry holds"

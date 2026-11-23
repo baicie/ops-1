@@ -90,6 +90,34 @@ export function profileOf(payload) {
   return 'historical-nine';
 }
 
+/**
+ * JSON equality that does not depend on KEY ORDER.
+ *
+ * `JSON.stringify(a) === JSON.stringify(b)` is the obvious comparison and it is
+ * wrong for anything that crossed a system boundary: this check reported
+ *
+ *   "pull_request" differs between live and payload; a restore would change it
+ *
+ * for two rules whose parameters were IDENTICAL - `{type, parameters}` from the API
+ * and `{parameters, type}` from the payload file. A false "a restore would change
+ * it" is the worst kind of failure here: it trains an operator to ignore the one
+ * warning that matters.
+ *
+ * Sorting keys recursively makes the comparison about content. Array order IS
+ * significant and is preserved - `allowed_merge_methods: ["squash","merge"]` must
+ * not equal `["merge","squash"]`... except that it must, because it is a set of
+ * permitted methods. Sets are sorted by the caller where they are sets; this
+ * helper only fixes object key order.
+ */
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableJson(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 /** @returns {string[]} problems; empty means the payload is safe to PUT. */
 export function inspectPayload(name, payload) {
   const problems = [];
@@ -285,7 +313,7 @@ export function inspectReadback(payload, after) {
     }
   }
   for (const field of ['conditions', 'bypass_actors']) {
-    if (JSON.stringify(after[field]) !== JSON.stringify(payload[field])) {
+    if (stableJson(after[field]) !== stableJson(payload[field])) {
       problems.push(`${field}: payload and read-back differ`);
     }
   }
@@ -294,7 +322,7 @@ export function inspectReadback(payload, after) {
   const got = byType(after);
   for (const type of Object.keys(want)) {
     if (!got[type]) { problems.push(`rule "${type}" is in the payload but NOT in the read-back`); continue; }
-    if (JSON.stringify(want[type]) !== JSON.stringify(got[type])) {
+    if (stableJson(want[type]) !== stableJson(got[type])) {
       problems.push(`rule "${type}" came back different`);
     }
   }
@@ -356,7 +384,7 @@ if (RUN_AS_PROGRAM && process.argv[2] === '--against-live') {
     }
   }
   for (const field of ['conditions', 'bypass_actors']) {
-    if (JSON.stringify(live[field]) !== JSON.stringify(target.payload[field])) {
+    if (stableJson(live[field]) !== stableJson(target.payload[field])) {
       problems.push(`${field}: live and payload differ`);
     }
   }
@@ -368,14 +396,14 @@ if (RUN_AS_PROGRAM && process.argv[2] === '--against-live') {
   for (const type of PROTECTIVE_RULES) {
     if (!liveRules[type]) problems.push(`live ruleset has NO "${type}" rule - read the snapshot again`);
     else if (!payloadRules[type]) problems.push(`payload is missing "${type}", which live has`);
-    else if (JSON.stringify(liveRules[type]) !== JSON.stringify(payloadRules[type])) {
+    else if (stableJson(liveRules[type]) !== stableJson(payloadRules[type])) {
       problems.push(`"${type}" differs between live and payload; a restore would change it`);
     }
   }
   // The ONE intended difference.
   const liveChecks = liveRules.required_status_checks;
   const payloadChecks = payloadRules.required_status_checks;
-  if (liveChecks && JSON.stringify(liveChecks) !== JSON.stringify(payloadChecks)) {
+  if (liveChecks && stableJson(liveChecks) !== stableJson(payloadChecks)) {
     problems.push('live already has a required_status_checks rule and it differs from the payload');
   }
   if (!payloadChecks) problems.push('payload has no required_status_checks rule; it is not the migration');

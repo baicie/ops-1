@@ -173,7 +173,25 @@ src_hash="$(
   } | sha256sum | cut -c1-12
 )"
 version="0.0.$(( 0x$src_hash % 100000 ))"
+# THE PHASES THIS RUN ACTUALLY ENTERS.
+#
+# `scripts/ci/publish-phases.mjs --explain <PHASE>` describes what a failure at a
+# phase leaves behind, from a MODEL. That model says nothing about any particular
+# run. The journal is the evidence: a line before each phase starts, a line when it
+# ends. `--explain --journal <file>` then answers "where did THIS run die" from the
+# record instead of from the name.
+#
+# Off unless asked for, because a publish path that starts writing files nobody
+# requested is a new failure mode. `OPSWEAVE_PUBLISH_JOURNAL` turns it on and names
+# the file; every call is `|| true` so a journal that cannot be written never fails
+# a release - the journal observes the publish, it is not part of it.
+journal() {
+  [ -n "${OPSWEAVE_PUBLISH_JOURNAL:-}" ] || return 0
+  node "$SRC/scripts/ci/publish-phases.mjs" "$@" --journal "$OPSWEAVE_PUBLISH_JOURNAL" 2>/dev/null || true
+}
+
 say "plugin source digest: $version (from $src_hash)"
+journal --begin PREFLIGHT
 
 # --- 2. images --------------------------------------------------------------
 for name in "${PLUGINS[@]}"; do
@@ -347,6 +365,8 @@ for name in "${PLUGINS[@]}"; do
     say "$plugin@$version: this daemon has no RepoDigest for $local_img; the push did not record one"
     exit 1
   fi
+  journal --end PUSHED --status ok
+  journal --begin VERIFIED
   say "$plugin@$version: verifying $local_digest against the registry"
   if ! node "$SRC/scripts/verify-registry-digest.mjs" \
       --registry "$REGISTRY" \
@@ -356,7 +376,9 @@ for name in "${PLUGINS[@]}"; do
     say "$plugin@$version: the registry does not confirm $local_digest; refusing to bundle"
     exit 1
   fi
+  journal --end VERIFIED --status ok
   img="$REGISTRY/opsweave/$name@$local_digest"
+  journal --begin BUNDLED
   say "$plugin@$version: assembling a bundle against $img"
 
   sudo rm -rf "/tmp/opsweave-bundle-$name"
@@ -376,12 +398,20 @@ for name in "${PLUGINS[@]}"; do
   sudo docker exec -u 0 "$KERNEL_CONTAINER" chown opsweave:opsweave /tmp/publisher.key
   sudo docker exec -u 0 "$KERNEL_CONTAINER" chmod 0400 /tmp/publisher.key
 
+  journal --end BUNDLED --status ok
+  journal --begin SIGNED
   sudo docker exec "$KERNEL_CONTAINER" /usr/local/bin/opsctl --url "$KERNEL_URL" \
     bundle --dir "/tmp/bundle-$name" --out "/tmp/$name.plugin.zip" --key /tmp/publisher.key >/dev/null
+  journal --end SIGNED --status ok
+  journal --begin INSTALLED
   sudo docker exec "$KERNEL_CONTAINER" /usr/local/bin/opsctl --url "$KERNEL_URL" \
     install "/tmp/$name.plugin.zip" 2>&1 | tail -1
+  journal --end INSTALLED --status ok
+  journal --begin DEPLOYING
   sudo docker exec "$KERNEL_CONTAINER" /usr/local/bin/opsctl --url "$KERNEL_URL" \
     deploy "$plugin" "$version" --replicas "$REPLICAS" --wait --activate 2>&1 | tail -3
+  journal --end DEPLOYING --status ok
+  journal --end ACTIVE --status ok
 
   # The fast path; the EXIT trap covers every other way out of this loop.
   if sudo docker exec "$KERNEL_CONTAINER" rm -f /tmp/publisher.key; then

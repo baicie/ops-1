@@ -332,6 +332,29 @@ jobs:
           set -o pipefail
           tests/ci/phase7_publish_failures.sh 2>&1 | tee phase7-publish-failures.log
 
+      - name: Two nodes, and what a node failure does (Phase 7 TASK-12)
+        # Runs AFTER the publish-failure suite, serially: both start a platform and a
+        # registry, and both clean up their own. What this adds is the two-node half -
+        # a 2-replica deploy using BOTH nodes, and a node PROCESS stopping while its
+        # containers stay up, which is the case a single-node harness cannot show.
+        #
+        # NOT two machines: both nodes are processes on this runner. The script says
+        # so in its own output.
+        if: success()
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          set -o pipefail
+          tests/ci/phase7_two_node_failure.sh 2>&1 | tee phase7-two-node.log
+
+      - name: A failed build leaves no stale bundles
+        # `dist/plugins` is read by the contract validators and by the negative
+        # suite. A failure before the signing stage used to leave the PREVIOUS
+        # run's zips there, and nothing marks them stale.
+        run: bash tests/scripts/build-plugins-stale-output.test.sh
+
       - name: Upload the acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -347,6 +370,7 @@ jobs:
             lifecycle-negatives.log
             lifecycle-multilang.log
             phase7-publish-failures.log
+            phase7-two-node.log
             artifacts/p001c-multilang-lifecycle/
           if-no-files-found: warn
           retention-days: 14
