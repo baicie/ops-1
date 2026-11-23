@@ -108,3 +108,64 @@ test('the ROLLBACK payload is what the pre-migration state looked like', async (
     assert.ok(rollback[field], `rollback payload has no ${field}; PUT requires it`);
   }
 });
+
+// --- key order is not content ------------------------------------------------
+//
+// `--against-live` reported a difference for two rules whose parameters were
+// IDENTICAL, because the API returns `{type, parameters}` and the payload file
+// writes `{parameters, type}`. `JSON.stringify` is order-sensitive.
+//
+// A false "a restore would change it" is the worst failure mode here: it teaches an
+// operator to ignore the one warning that matters.
+
+test('the same rule in a different KEY ORDER is not a difference', () => {
+  const live = {
+    name: 'p', target: 'branch', enforcement: 'active',
+    conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },
+    bypass_actors: [],
+    rules: [
+      { type: 'deletion' }, { type: 'non_fast_forward' }, { type: 'required_linear_history' },
+      { type: 'pull_request', parameters: { allowed_merge_methods: ['squash'], required_approving_review_count: 0 } },
+      { type: 'required_status_checks', parameters: { required_status_checks: CANDIDATE_TEN_CONTEXTS.map((c) => ({ context: c })), strict_required_status_checks_policy: true } },
+    ],
+  };
+  // Same content, keys written the other way round - which is what the API does.
+  const payload = {
+    enforcement: 'active', target: 'branch', name: 'p', bypass_actors: [],
+    conditions: { ref_name: { exclude: [], include: ['~DEFAULT_BRANCH'] } },
+    rules: [
+      { type: 'deletion' }, { type: 'non_fast_forward' }, { type: 'required_linear_history' },
+      { parameters: { required_approving_review_count: 0, allowed_merge_methods: ['squash'] }, type: 'pull_request' },
+      { parameters: { strict_required_status_checks_policy: true, required_status_checks: CANDIDATE_TEN_CONTEXTS.map((c) => ({ context: c })) }, type: 'required_status_checks' },
+    ],
+  };
+  assert.deepEqual(inspectReadback(payload, live), [],
+    'key order alone was reported as a difference');
+});
+
+test('a REAL parameter change is still caught after that fix', () => {
+  const payload = payload_();
+  const after = payload_();
+  after.rules.find((r) => r.type === 'pull_request').parameters.allowed_merge_methods = ['merge'];
+  assert.ok(inspectReadback(payload, after).some((p) => /pull_request/.test(p)),
+    'the fix must not have made the comparison blind');
+});
+
+/** The same fixture used above, factored so the counterfactual can mutate it. */
+function payload_() {
+  return {
+    name: 'main-protection', target: 'branch', enforcement: 'active',
+    conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },
+    bypass_actors: [],
+    rules: [
+      { type: 'deletion' },
+      { type: 'non_fast_forward' },
+      { type: 'required_linear_history' },
+      { type: 'pull_request', parameters: { allowed_merge_methods: ['squash'] } },
+      { type: 'required_status_checks', parameters: {
+        strict_required_status_checks_policy: true,
+        required_status_checks: CANDIDATE_TEN_CONTEXTS.map((context) => ({ context })),
+      } },
+    ],
+  };
+}
