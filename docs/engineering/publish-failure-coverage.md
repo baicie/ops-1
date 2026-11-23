@@ -17,7 +17,7 @@ it, or that nothing does. Nothing here was inferred from "the code looks right".
 | 6 | Install succeeds, deploy fails | **INTEGRATION_VERIFIED** | `tests/ci/phase7_publish_failures.sh` TASK-02: an unsatisfiable `--selector` on an undeployed version is refused, the refusal NAMES the placement reason, and the ACTIVE version does not move |
 | 7 | READY but activate fails | **INTEGRATION_VERIFIED** | same script, TASK-03: a stale `--expected-revision` is refused (rc=1), the previous version keeps serving, and the serving container is still running afterwards |
 | 8 | Activate succeeds but the read-back differs | **INTEGRATION_VERIFIED** | same script, TASK-04: deploying a version the kernel does not have is refused (rc=1), and the active version does not move. **Partial**: the mismatch is 'version absent', not 'kernel read back a different version than asked' — that second shape has no injection yet |
-| 9 | One plugin succeeds, another fails | **PARTIALLY_COVERED** | `tests/scripts/publish-untried-report.test.sh` proves the EXIT trap NAMES the plugins it never reached. Still not an end-to-end run: no test publishes two plugins where one fails |
+| 9 | One plugin succeeds, another fails | **INTEGRATION_VERIFIED** | `tests/ci/phase7_publish_failures.sh` TASK-08: with data-catalog active, data-integration's deploy is made to fail. The FIRST plugin stays active at 0.0.3, its container count is unchanged, the failing plugin's package is still registered (install and deploy are separate), and it does NOT report active. `publish-untried-report.test.sh` still covers the EXIT trap's report |
 | 10 | Re-run after a failure | **INTEGRATION_VERIFIED** | same script, TASK-05: after the injected failures a re-run succeeds (rc=0), registers no extra package, and converges to the same active version |
 | 11 | Cancelled during rollback | **INTEGRATION_VERIFIED (narrow)** | same script, TASK-06: SIGTERM reaches the rollback (rc=143), the kernel still lists its plugins, a later deploy converges, and the final active version is the expected one. **Narrow**: on that run the rollback was a no-op, so the platform recovered from a signal during an operation that had little to interrupt |
 
@@ -44,8 +44,10 @@ production.
   active), so the signal arrived at a process with little to interrupt. The
   recovery assertions hold; the cancellation assertions did not get a real
   transition to cancel.
-- **Row 9** did not move. The report exists; a two-plugin publish with one failure
-  still does not.
+- **Row 9** moved to INTEGRATION_VERIFIED, but through the SAME kernel rather than
+  through `publish-data-plugins.sh`. What is proven is that one plugin's failed
+  deploy leaves the other serving; what is not is a real two-plugin run of the
+  publish shell script itself, which needs two images built and pushed.
 
 ### And the environment is one host
 

@@ -332,6 +332,12 @@ jobs:
           set -o pipefail
           tests/ci/phase7_publish_failures.sh 2>&1 | tee phase7-publish-failures.log
 
+      - name: A failed build leaves no stale bundles
+        # `dist/plugins` is read by the contract validators and by the negative
+        # suite. A failure before the signing stage used to leave the PREVIOUS
+        # run's zips there, and nothing marks them stale.
+        run: bash tests/scripts/build-plugins-stale-output.test.sh
+
       - name: Upload the acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
