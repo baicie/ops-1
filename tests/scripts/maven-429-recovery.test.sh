@@ -101,8 +101,21 @@ class H(http.server.BaseHTTPRequestHandler):
         HITS[path] = n
         sys.stderr.write(f"GET {path} hit={n}\n"); sys.stderr.flush()
         if MODE == 'always' or n == 1:
-            self.send_response(429); self.send_header('Retry-After', '0'); self.end_headers()
-            self.wfile.write(b'rate limited'); return
+            # A 429 WITH A BODY AND A LENGTH.
+            #
+            # CI run 45190236157 failed with
+            #   Non-readable POM ...: input contained no data
+            # because a 429 whose body was empty left a ZERO-BYTE pom in the local
+            # repository, and Maven then refused to read its own cache. The body is
+            # not what makes Maven retry - the status code is - but an empty one is
+            # something the resolver can write down and later refuse.
+            body = b'{"error":"rate limited"}'
+            self.send_response(429)
+            self.send_header('Retry-After', '0')
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body); return
         fp = os.path.join(ROOT, path.lstrip('/'))
         if not os.path.isfile(fp):
             self.send_response(404); self.end_headers(); return
@@ -199,11 +212,12 @@ echo "== 3. a 429 that CLEARS: who recovers it?"
 kill "$SRV_PID" 2>/dev/null; sleep 0.3
 python3 "$WORK/server.py" "$WORK/served" once "$PORT_ONCE" 2>"$WORK/once2.log" &
 SRV_PID=$!
-for _ in $(seq 1 30); do
-  curl -s -m 1 -o /dev/null "http://127.0.0.1:$PORT_ONCE/" 2>/dev/null; [ $? -ne 7 ] && break
-  sleep 0.2
-done
-sleep 0.5
+# THE PROBE MUST NOT CONSUME A `once` HIT. It asks for `/`, which the server
+# counts - and the first CI run showed `GET / hit=1` in the evidence, meaning the
+# readiness probe advanced the counter for a path Maven never uses. Harmless for
+# `/` itself, but the same mistake against a real path would silently turn a 429
+# into a 200. Waiting on a fixed short sleep avoids touching the counter at all.
+sleep 1
 rm -rf "$WORK/repo-once"
 out="$(retry_on_registry_fault mvn mvn_against "$PORT_ONCE" "$WORK/repo-once" 2>&1)"; rc=$?
 outer="$(printf '%s\n' "$out" | grep -c 'registry fault on attempt')"
@@ -232,7 +246,9 @@ else
   printf '%s\n' "$out" | tail -12 | sed 's/^/       /'
   printf '       --- server hits ---\n'
   grep -c 'GET ' "$WORK/once.log" 2>/dev/null | sed 's/^/       requests: /'
-  tail -4 "$WORK/once.log" 2>/dev/null | sed 's/^/       /'
+  tail -6 "$WORK/once.log" 2>/dev/null | sed 's/^/       /'
+  printf '       --- what the local repository cached ---\n'
+  find "$WORK/repo-once" -name '*.pom' -exec sh -c 'printf "       %s %s bytes\n" "$1" "$(wc -c < "$1")"' _ {} \; 2>/dev/null | head -3
 fi
 
 echo
