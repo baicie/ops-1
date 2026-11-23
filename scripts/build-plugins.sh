@@ -302,11 +302,26 @@ retry_on_registry_fault() {
   # rather than something that has to be recovered. The behaviour is identical
   # where both work - verified side by side, same exit code and same byte count -
   # and there is one fewer thing that can differ under a runner.
-  log="$(mktemp)"
+  if ! log="$(mktemp)"; then
+    # A RETRY POLICY THAT CANNOT SEE THE OUTPUT IS NOT A RETRY POLICY.
+    #
+    # Measured: with an unwritable log the command's own failure is returned and the
+    # fault is never classified, so a 429 is treated as a permanent build error. The
+    # run then reports "the build failed" for something that would have succeeded on
+    # a second attempt - and it does so SILENTLY.
+    #
+    # There is no safe way to guess, so this says what happened and runs the command
+    # ONCE. Failing closed here would mean refusing to build at all because a temp
+    # file could not be created, which is worse for a publish path than an
+    # unretried attempt that names its own limitation.
+    printf '%s: cannot create a log file; running once with NO retry classification\n' "$label" >&2
+    "$@"
+    return $?
+  fi
   # shellcheck disable=SC2064  # expand $log now, not at trap time
   trap "rm -f '$log'" RETURN
   while :; do
-    : > "$log"
+    : > "$log" || { printf '%s: cannot truncate %s; aborting the retry loop\n' "$label" "$log" >&2; return 1; }
     # `PIPESTATUS` must be read before anything else runs, and `set -o pipefail` is
     # already in effect, so the `if` sees the command's status even when `tee`
     # succeeds. The array is captured immediately for exactly that reason.
@@ -314,6 +329,18 @@ retry_on_registry_fault() {
       return 0
     else
       rc=${PIPESTATUS[0]}
+    fi
+    # IF THE LOG DID NOT CAPTURE THE OUTPUT, THE CLASSIFICATION IS UNAVAILABLE.
+    #
+    # `tee` can fail while the command also fails - a full disk, a removed temp dir.
+    # `PIPESTATUS[0]` is still the command's code, but `grep` then reads an empty or
+    # missing file and concludes "not a registry fault", so the retry is skipped for
+    # a reason that has nothing to do with the fault. Measured with /dev/full: rc=1,
+    # grep-match=no, zero retries, and the 429 in the command's own output never
+    # reached the classifier.
+    if [ ! -r "$log" ]; then
+      printf '%s: the log is unreadable; returning rc=%d WITHOUT classifying the fault\n' "$label" "$rc" >&2
+      return "$rc"
     fi
     if [ "$attempt" -ge 3 ] || ! grep -qE \
         'Could not (find|transfer|resolve) artifact|status: (429|5[0-9][0-9])' "$log"; then
