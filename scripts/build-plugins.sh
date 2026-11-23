@@ -283,28 +283,38 @@ fi
 retry_on_registry_fault() {
   local label="$1"; shift
   local attempt=1 rc=0 log
-  # STREAMED, NOT BUFFERED. Measured: with `out="$(cmd)"` the first line of a
-  # two-second command appeared only when the command exited, and a Maven build
-  # is minutes long. On CI that means the log shows NOTHING while the build is
-  # failing - the reader learns what went wrong only after it has finished, and
-  # a hung build shows an empty step.
+  # STREAMED, AND THROUGH A REAL PIPELINE RATHER THAN A PROCESS SUBSTITUTION.
   #
-  # The output still has to be kept, because the retry decision depends on it
-  # (`grep` for the fault shapes) and because the last attempt's full text is
-  # what a reader needs. A temp file does both: `tee` writes it as the command
-  # runs, so it is visible immediately and complete afterwards.
+  # The output has to be both visible while the command runs (a Maven build is
+  # minutes long; buffering it means the log is empty while it fails) and readable
+  # afterwards, because the retry decision greps it. `tee` to a temp file does both.
+  #
+  # IT USED TO BE `"$@" > >(tee "$log") 2>&1`, WITH A `wait $!` AFTER IT. That works
+  # on this machine and could NOT be shown to work on CI: across three runs of
+  # `legacy-regression` the build died on a Maven 429 and **not once** did the
+  # retry message appear, while every local reproduction of the same shape -
+  # terminal, pipe, `| tee`, a slow command, `set -euo pipefail` - retried
+  # correctly. Three hypotheses (tee buffering, `$!` resolving to the wrong
+  # process, `set -e` short-circuiting) were each DISPROVEN locally.
+  #
+  # A pipeline removes the whole question: `cmd | tee` has no background process to
+  # wait for, no `$!` to resolve, and `PIPESTATUS[0]` is the command's own status
+  # rather than something that has to be recovered. The behaviour is identical
+  # where both work - verified side by side, same exit code and same byte count -
+  # and there is one fewer thing that can differ under a runner.
   log="$(mktemp)"
   # shellcheck disable=SC2064  # expand $log now, not at trap time
   trap "rm -f '$log'" RETURN
   while :; do
     : > "$log"
-    if "$@" > >(tee "$log") 2>&1; then
+    # `PIPESTATUS` must be read before anything else runs, and `set -o pipefail` is
+    # already in effect, so the `if` sees the command's status even when `tee`
+    # succeeds. The array is captured immediately for exactly that reason.
+    if "$@" 2>&1 | tee "$log"; then
       return 0
     else
-      rc=$?
+      rc=${PIPESTATUS[0]}
     fi
-    # `tee` runs in a process substitution; wait for it to flush before reading.
-    wait $! 2>/dev/null || true
     if [ "$attempt" -ge 3 ] || ! grep -qE \
         'Could not (find|transfer|resolve) artifact|status: (429|5[0-9][0-9])' "$log"; then
       # THE COMMAND'S EXIT CODE, NOT A FLATTENED 1.
