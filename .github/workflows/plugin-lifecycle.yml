@@ -349,6 +349,12 @@ jobs:
           set -o pipefail
           tests/ci/phase7_two_node_failure.sh 2>&1 | tee phase7-two-node.log
 
+      - name: The release verdict is a function of the stages
+        # Runs anywhere, no platform: it drives `verdict_of` with synthetic stage
+        # rows. The VALUES come from the live run below; this pins the DECISION,
+        # including that a WRONG ACTIVE version is never RELEASED.
+        run: bash tests/ci/phase7_release_stages.test.sh
+
       - name: A failed build leaves no stale bundles
         # `dist/plugins` is read by the contract validators and by the negative
         # suite. A failure before the signing stage used to leave the PREVIOUS
