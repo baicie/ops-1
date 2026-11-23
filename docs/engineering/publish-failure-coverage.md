@@ -1,6 +1,8 @@
 # TASK-19: publish failure-recovery acceptance — what is covered, what is not
 
-Written 2026-11-23 against main `a6115753`. Every row states the test that proves
+Written 2026-11-23 against main `a6115753`; **revised 2026-11-24 against `4cd95d93`** after
+Phase 7 Batch A. Five rows moved from NOT_COVERED to INTEGRATION_VERIFIED, and the
+reason they moved is recorded rather than just the new state. Every row states the test that proves
 it, or that nothing does. Nothing here was inferred from "the code looks right".
 
 ## The eleven conditions
@@ -12,33 +14,43 @@ it, or that nothing does. Nothing here was inferred from "the code looks right".
 | 3 | Registry unreachable | **ALREADY_COVERED** | same file — `the registry could not be asked: fetch failed`, verdict REFUSED. Measured end to end against a real `registry:2` on a stopped port |
 | 4 | Digest mismatch | **ALREADY_COVERED** | same file — the measured staging defect (`sha256:d9e853e8` vs `sha256:45e09956`) is a case, and `local` vs `remote` disagreement is a SEPARATE case with its own message |
 | 5 | Bundle signature fails | **ALREADY_COVERED** | `crates/bundle` — `rejects_tampered_payload` and `manifest_image_reference_is_covered_by_signature` |
-| 6 | Install succeeds, deploy fails | **NOT_COVERED** | `publish-phases.mjs` reports what a failure at `DEPLOYING` leaves behind, but nothing EXECUTES a deploy that fails |
-| 7 | READY but activate fails | **NOT_COVERED** | same: `explain('ACTIVATING')` describes it, no run produces it |
-| 8 | Activate succeeds but the read-back differs | **NOT_COVERED** | same |
-| 9 | One plugin succeeds, another fails | **PARTIALLY_COVERED** | the loop still stops at the first failure (deliberate), but `tests/scripts/publish-untried-report.test.sh` proves the EXIT trap now NAMES the plugins it never reached. The failure path is reported; it is still not an end-to-end run |
-| 10 | Re-run after a failure | **NOT_COVERED** | the script has an "already installed" path; nothing tests it |
-| 11 | Cancelled during rollback | **NOT_COVERED** | nothing tests it |
+| 6 | Install succeeds, deploy fails | **INTEGRATION_VERIFIED** | `tests/ci/phase7_publish_failures.sh` TASK-02: an unsatisfiable `--selector` on an undeployed version is refused, the refusal NAMES the placement reason, and the ACTIVE version does not move |
+| 7 | READY but activate fails | **INTEGRATION_VERIFIED** | same script, TASK-03: a stale `--expected-revision` is refused (rc=1), the previous version keeps serving, and the serving container is still running afterwards |
+| 8 | Activate succeeds but the read-back differs | **INTEGRATION_VERIFIED** | same script, TASK-04: deploying a version the kernel does not have is refused (rc=1), and the active version does not move. **Partial**: the mismatch is 'version absent', not 'kernel read back a different version than asked' — that second shape has no injection yet |
+| 9 | One plugin succeeds, another fails | **PARTIALLY_COVERED** | `tests/scripts/publish-untried-report.test.sh` proves the EXIT trap NAMES the plugins it never reached. Still not an end-to-end run: no test publishes two plugins where one fails |
+| 10 | Re-run after a failure | **INTEGRATION_VERIFIED** | same script, TASK-05: after the injected failures a re-run succeeds (rc=0), registers no extra package, and converges to the same active version |
+| 11 | Cancelled during rollback | **INTEGRATION_VERIFIED (narrow)** | same script, TASK-06: SIGTERM reaches the rollback (rc=143), the kernel still lists its plugins, a later deploy converges, and the final active version is the expected one. **Narrow**: on that run the rollback was a no-op, so the platform recovered from a signal during an operation that had little to interrupt |
 
-## Why 6–11 are not covered, and what covering them would take
+## What changed in the revision, and why
 
-They are not small omissions. Each needs a KERNEL to install, deploy and activate
-against — the publish script drives a real kernel container over `opsctl`. Unlike
-the registry checks (5 rows, doable with Docker alone and done), these need the
-kernel, PostgreSQL, a node and a plugin image, all wired.
+The first version of this document said rows 6–11 needed a KERNEL and marked them
+NOT_COVERED. **That was right about the tests and wrong about what is possible
+here.** `tests/ci/p001c_up.sh` brings up a real kernel, a real PostgreSQL and two
+real node processes on one host, isolated by run id; `plugin-lifecycle.yml` already
+runs it. Nothing about the missing coverage required staging - it required driving
+that kernel.
 
-Row 9 moved from NOT_COVERED to PARTIALLY_COVERED during this session, and the
-distinction is stated rather than glossed: what is tested is that a failure names
-the plugins it never reached. What is still not tested is a real mixed-outcome run
-against a kernel.
+`tests/ci/phase7_publish_failures.sh` does, in 24 assertions with 1 honest skip.
+Every case checks the ABSENCE as well as the failure: "the deploy was refused" and
+"the active version did not move" are separate claims, and only the second is about
+production.
 
-That is the same environment TASK-15/16/17 are blocked on. Building it is a
-session of its own, not a test to add to this one.
+### Three of them are narrower than their state word suggests
 
-**What is honest to say about the staging failure that motivated this task:** the
-four occupants holding the slots are ACTIVE revisions, so a deploy fails with
-`INSTANCE_CAPACITY_EXCEEDED` — condition 6's neighbourhood — and that failure has
-been OBSERVED in production logs (`docs/ci/failure-analysis.md:41`). It has never
-been REPRODUCED in isolation. Observed once is not a tested condition.
+- **Row 8** injects "the version does not exist", not "the kernel activated one
+  version and the read-back returned another". The second shape needs a fault
+  between activation and the read, and there is no injection for it.
+- **Row 11**'s rollback was a no-op on the measured run (the target was already
+  active), so the signal arrived at a process with little to interrupt. The
+  recovery assertions hold; the cancellation assertions did not get a real
+  transition to cancel.
+- **Row 9** did not move. The report exists; a two-plugin publish with one failure
+  still does not.
+
+### And the environment is one host
+
+Two node PROCESSES, not two machines. Nothing here is two-node HA, and the script
+says so at the end of every run.
 
 ## What IS delivered here instead
 
