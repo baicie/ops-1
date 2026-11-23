@@ -61,8 +61,36 @@ q() { psql -h 127.0.0.1 -p 5432 -d "$DB" -tAc "$1" 2>/dev/null; }
 op() { ./target/debug/opsctl --url "$KERNEL_URL" "$@" 2>&1; }
 
 # One row per stage: name, state, detail. States are deliberately not booleans.
-declare -a STAGE_NAME=() STAGE_STATE=() STAGE_DETAIL=()
-stage() { STAGE_NAME+=("$1"); STAGE_STATE+=("$2"); STAGE_DETAIL+=("${3:-}"); }
+declare -a STAGE_NAME=() STAGE_STATE=() STAGE_DETAIL=() STAGE_ATTEMPT=()
+
+# EVERY STAGE CARRIES THE ATTEMPT IT WAS OBSERVED UNDER.
+#
+# TASK-11: without this, `HOST_UP` from one deployment and `PLUGIN_ACTIVE` from the
+# next can be assembled into a RELEASED that never happened as a whole. The stages
+# are collected seconds apart, and a publish or a rollback landing in between is
+# not hypothetical - it is what `--deploy` does two lines above the collection.
+#
+# The identity is (plugin, version, deployment id, generation). The generation is
+# the field the kernel increments on every redeploy (`deployments.rs`), so a
+# rollback or a re-publish changes it and the mismatch becomes visible.
+#
+# A stage observed before the identity is known records `?`, and a verdict that sees
+# two DIFFERENT non-`?` identities refuses - see `verdict_of`.
+ATTEMPT_ID="?"
+stage() {
+  STAGE_NAME+=("$1"); STAGE_STATE+=("$2"); STAGE_DETAIL+=("${3:-}"); STAGE_ATTEMPT+=("$ATTEMPT_ID")
+}
+
+# Read the current identity. Called once the package/active rows are queryable.
+refresh_attempt() {
+  local gen
+  gen="$(q "SELECT generation FROM kernel.plugin_deployments WHERE plugin_id='$PLUGIN' AND version='$VERSION' ORDER BY updated_at DESC LIMIT 1" || echo "")"
+  local dep
+  dep="$(q "SELECT id::text FROM kernel.plugin_deployments WHERE plugin_id='$PLUGIN' AND version='$VERSION' ORDER BY updated_at DESC LIMIT 1" || echo "")"
+  if [ -n "$dep" ] && [ -n "$gen" ]; then
+    ATTEMPT_ID="${PLUGIN}@${VERSION}:${dep:0:8}:g${gen}"
+  fi
+}
 
 if [ "$DO_DEPLOY" = "1" ]; then
   op install "dist/plugins/${PLUGIN#opsweave.}-$VERSION.plugin.zip" >/dev/null 2>&1 || true
@@ -98,6 +126,10 @@ elif [ "$NODES_READY" -ge 1 ]; then
 else
   stage NODE_READY NO_NODE "0/${NODES_TOTAL} node(s) READY - nothing can be placed"
 fi
+
+# The identity is knowable once a deployment row exists. Refreshed here so every
+# stage from PLUGIN_INSTALLED onward carries the same attempt.
+refresh_attempt
 
 # --- 4. the plugin is installed --------------------------------------------
 PKG="$(q "SELECT count(*) FROM kernel.plugin_packages WHERE plugin_id='$PLUGIN' AND version='$VERSION'" || echo "")"
@@ -219,8 +251,29 @@ STATE_OF() { local i; for i in "${!STAGE_NAME[@]}"; do [ "${STAGE_NAME[$i]}" = "
 #   RELEASED_WITHOUT_WEB_REMOTE     backend released, the browser remote was not checked
 #   BLOCKED_AT_<STAGE>              that stage did not meet its requirement
 verdict_of() {
-  # stdin: "<stage> <state>" lines. Prints "<verdict>|<reason>".
+  # stdin: "<stage> <state> <attempt>" lines. Prints "<verdict>|<reason>".
   local host kernel node installed running active gw remote
+
+  # ONE RELEASE, ONE ATTEMPT - and this is checked FIRST, before any state.
+  #
+  # A set of stages that individually pass but were observed under different
+  # attempts is not a release; it is two releases spliced together. The failure it
+  # prevents is concrete: a rollback between the PLUGIN_RUNNING check and the
+  # PLUGIN_ACTIVE check would produce "running and active" from two different
+  # generations, and the verdict would be RELEASED for a state the platform was
+  # never in.
+  #
+  # `?` means the stage ran before the identity was knowable, which is honest
+  # rather than a mismatch - those are ignored here and the stage's own state still
+  # has to pass.
+  local attempts
+  attempts="$(awk '$3 != "?" && $3 != "" {print $3}' <<<"$1" | sort -u)"
+  local n_attempts
+  n_attempts="$(printf '%s' "$attempts" | grep -c . || true)"
+  if [ "${n_attempts:-0}" -gt 1 ]; then
+    echo "BLOCKED_AT_MIXED_ATTEMPT|the stages were observed under ${n_attempts} different release attempts: $(printf '%s' "$attempts" | tr '\n' ' ')"
+    return
+  fi
   host=$(awk '$1=="HOST_UP"{print $2}' <<<"$1")
   kernel=$(awk '$1=="KERNEL_READY"{print $2}' <<<"$1")
   node=$(awk '$1=="NODE_READY"{print $2}' <<<"$1")
@@ -247,7 +300,7 @@ verdict_of() {
 
 STAGE_SUMMARY=""
 for i in "${!STAGE_NAME[@]}"; do
-  STAGE_SUMMARY+="${STAGE_NAME[$i]} ${STAGE_STATE[$i]}"$'\n'
+  STAGE_SUMMARY+="${STAGE_NAME[$i]} ${STAGE_STATE[$i]} ${STAGE_ATTEMPT[$i]}"$'\n'
 done
 # ONE CALL. Calling the function twice to split on the separator would run the
 # whole decision twice, and the first version of this line was
