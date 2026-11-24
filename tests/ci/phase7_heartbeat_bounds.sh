@@ -224,13 +224,31 @@ else
 fi
 
 node_pid() { cat "$STATE/$1.pid" 2>/dev/null; }
-NODE_A_PID="$(node_pid node-a)"
-NODE_B_PID="$(node_pid node-b)"
-NODE_A_ROW="$(q "SELECT id FROM kernel.nodes WHERE name='node-a'")"
-echo "   node-a pid=$NODE_A_PID row=$NODE_A_ROW"
+
+# KILL THE NODE THAT HOLDS THE INSTANCE, NOT A FIXED ONE.
+#
+# The first version always killed node-a and asserted its instance was told to
+# STOP. Placement chose node-b on CI, so node-a had no instance and the
+# assertion failed for a reason the case never established (run 45410012787).
+# Killing whichever node holds the instance makes the claim the same under either
+# placement, and leaves the other node as the control.
+VICTIM="node-a"; SURVIVOR="node-b"
+if [ "$DEPLOYED" = "1" ]; then
+  HOLDER="$(q "SELECT n.name FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog' AND i.desired_action='START' LIMIT 1")"
+  if [ -n "$HOLDER" ]; then
+    VICTIM="$HOLDER"
+    [ "$VICTIM" = "node-a" ] && SURVIVOR="node-b" || SURVIVOR="node-a"
+  fi
+fi
+echo "   victim=${VICTIM} survivor=${SURVIVOR} (victim holds the instance)"
+
+NODE_A_PID="$(node_pid "$VICTIM")"
+NODE_B_PID="$(node_pid "$SURVIVOR")"
+NODE_A_ROW="$(q "SELECT id FROM kernel.nodes WHERE name='${VICTIM}'")"
+echo "   ${VICTIM} pid=$NODE_A_PID row=$NODE_A_ROW"
 
 if [ -z "$NODE_A_PID" ] || [ -z "$NODE_A_ROW" ]; then
-  skip "no node-a pid or row; the failure half cannot run"
+  skip "no ${VICTIM} pid or row; the failure half cannot run"
 else
   # ---------------------------------------------------------------------------
   echo "== 1. the bound BELOW: at stale/2 the node must still be READY"
@@ -240,13 +258,13 @@ else
   # any plausible jitter on a loaded runner and strictly below the threshold.
   HALF=$(( STALE_SRC / 2 ))
   KILLED_AT="$(date +%s)"
-  kill "$NODE_A_PID" 2>/dev/null && ok "node-a process stopped (SIGTERM)" \
-    || bad "could not stop node-a"
+  kill "$NODE_A_PID" 2>/dev/null && ok "${VICTIM} process stopped (SIGTERM)" \
+    || bad "could not stop ${VICTIM}"
   sleep "$HALF"
-  ST_AT_HALF="$(q "SELECT status FROM kernel.nodes WHERE name='node-a'")"
+  ST_AT_HALF="$(q "SELECT status FROM kernel.nodes WHERE name='${VICTIM}'")"
   [ "$ST_AT_HALF" = "READY" ] \
-    && ok "${HALF}s after the process died (stale/2), node-a is still READY" \
-    || bad "node-a is $ST_AT_HALF at ${HALF}s, which is before the ${STALE_SRC}s threshold - the sweep fired early"
+    && ok "${HALF}s after the process died (stale/2), ${VICTIM} is still READY" \
+    || bad "${VICTIM} is $ST_AT_HALF at ${HALF}s, which is before the ${STALE_SRC}s threshold - the sweep fired early"
 
   # ---------------------------------------------------------------------------
   echo "== 2. the bound ABOVE: by stale + margin the node must be gone"
@@ -260,14 +278,14 @@ else
   GONE=0
   WAITED=0
   while [ "$WAITED" -lt "$LIMIT" ]; do
-    ST_NOW="$(q "SELECT status FROM kernel.nodes WHERE name='node-a'")"
+    ST_NOW="$(q "SELECT status FROM kernel.nodes WHERE name='${VICTIM}'")"
     if [ "$ST_NOW" != "READY" ]; then GONE=1; break; fi
     sleep 1
     WAITED=$(( WAITED + 1 ))
     [ "$(( $(date +%s) - KILLED_AT ))" -ge "$LIMIT" ] && break
   done
-  [ "$GONE" = "1" ] && ok "node-a left READY within ${LIMIT}s (stale + heartbeat + 5)" \
-    || bad "node-a was still READY after ${LIMIT}s; the sweep is not bounded by the protocol"
+  [ "$GONE" = "1" ] && ok "${VICTIM} left READY within ${LIMIT}s (stale + heartbeat + 5)" \
+    || bad "${VICTIM} was still READY after ${LIMIT}s; the sweep is not bounded by the protocol"
   # An explicit counter, not `$_`: `for _ in ...` consumes the loop variable and
   # `$_` is not a bash variable at all - the first version died on
   # "node: unbound variable" under `set -u` after the bound had already passed.
@@ -296,14 +314,21 @@ else
     bad "the change happened at ${ELAPSED}s, before ${EARLIEST}s is possible even with a fresh heartbeat at the kill"
   fi
 
-  # An instance on a node the kernel considers gone must be told to stop - but
-  # only if there IS one. Without a container there is no instance row, and
-  # asserting on an absent row would report a red for a missing environment
-  # rather than a missing behaviour.
+  # THE INSTANCE ON THE NODE THAT JUST DIED MUST BE TOLD TO STOP.
+  #
+  # THE FIRST VERSION ALWAYS KILLED node-a and required that. On CI the scheduler
+  # placed the replica on node-b, so node-a had no instance row and the case
+  # reported `desired_action=<none>, expected STOP` - a red for a placement it
+  # never established (run 45410012787). Locally node-a happened to win, which is
+  # why the assumption survived.
+  #
+  # The fix is not a branch for each placement: it is to kill the node that HOLDS
+  # the instance (see VICTIM above). Then this assertion means the same thing
+  # under either placement, and the other node stays as the control.
   if [ "$DEPLOYED" = "1" ]; then
-    DESIRED_A="$(q "SELECT i.desired_action FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id WHERE n.name='node-a'")"
-    [ "$DESIRED_A" = "STOP" ] && ok "node-a's instance is told to STOP" \
-      || bad "node-a's instance desired_action=${DESIRED_A:-<none>}, expected STOP"
+    DESIRED_A="$(q "SELECT i.desired_action FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id WHERE n.name='${VICTIM}'")"
+    [ "$DESIRED_A" = "STOP" ] && ok "the instance on ${VICTIM} (the node that died) is told to STOP" \
+      || bad "${VICTIM}'s instance desired_action=${DESIRED_A:-<none>}, expected STOP"
   else
     skip "no instance to tell STOP: the deployment never activated on this host"
   fi
@@ -316,67 +341,71 @@ else
   # restarting with the same directory must bring the SAME row back to READY and
   # must not create a second row with the same name (the schema has
   # `name text NOT NULL UNIQUE`, so a duplicate would fail outright).
-  ROWS_BEFORE="$(q "SELECT count(*) FROM kernel.nodes WHERE name='node-a'")"
+  ROWS_BEFORE="$(q "SELECT count(*) FROM kernel.nodes WHERE name='${VICTIM}'")"
   # The data port comes from `run.json`, not from a guess. A wrong port would make
   # the restarted node advertise an endpoint the kernel rejects, and the failure
   # would look like a recovery bug.
   NODE_A_PORT="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["nodePorts"][0])' "$STATE/run.json" 2>/dev/null || echo "")"
   if [ -z "$NODE_A_PORT" ]; then
-    bad "could not read node-a's data port from run.json; the restart below would target a guessed port"
+    bad "could not read ${VICTIM}'s data port from run.json; the restart below would target a guessed port"
   fi
   nohup env \
     HOME="$STATE/home" \
     OPSWEAVE_KERNEL_URL="$KERNEL_URL" \
-    OPSWEAVE_NODE_NAME=node-a \
+    OPSWEAVE_NODE_NAME=${VICTIM} \
     OPSWEAVE_NODE_LABELS="role=node,zone=local" \
     OPSWEAVE_NODE_DATA_BIND="127.0.0.1:${NODE_A_PORT}" \
     OPSWEAVE_NODE_DATA_ENDPOINT="http://127.0.0.1:${NODE_A_PORT}" \
-    OPSWEAVE_NODE_STATE_DIR="$STATE/node-a" \
+    OPSWEAVE_NODE_STATE_DIR="$STATE/${VICTIM}" \
     OPSWEAVE_CONTAINER_LABELS="opsweave.test-run=${RUN_ID}" \
     OPSWEAVE_DOCKER_HOST="${OPSWEAVE_DOCKER_HOST:-unix:///var/run/docker.sock}" \
-    ./target/debug/opsweave-node > "$STATE/logs/node-a-restarted.log" 2>&1 &
+    ./target/debug/opsweave-node > "$STATE/logs/${VICTIM}-restarted.log" 2>&1 &
   RESTARTED_PID=$!
 
   RECOVERED=0
   for _ in $(seq 1 40); do
-    ST_R="$(q "SELECT status FROM kernel.nodes WHERE name='node-a'")"
+    ST_R="$(q "SELECT status FROM kernel.nodes WHERE name='${VICTIM}'")"
     [ "$ST_R" = "READY" ] && { RECOVERED=1; break; }
     sleep 1
   done
-  [ "$RECOVERED" = "1" ] && ok "node-a is READY again after restarting with its own state dir" \
-    || bad "node-a did not return to READY within 40s; see $STATE/logs/node-a-restarted.log"
+  [ "$RECOVERED" = "1" ] && ok "${VICTIM} is READY again after restarting with its own state dir" \
+    || bad "${VICTIM} did not return to READY within 40s; see $STATE/logs/${VICTIM}-restarted.log"
 
-  ROWS_AFTER="$(q "SELECT count(*) FROM kernel.nodes WHERE name='node-a'")"
-  [ "$ROWS_BEFORE" = "$ROWS_AFTER" ] && ok "there is still exactly one node-a row ($ROWS_AFTER)" \
-    || bad "node-a rows went from $ROWS_BEFORE to $ROWS_AFTER; the restart created a second node"
+  ROWS_AFTER="$(q "SELECT count(*) FROM kernel.nodes WHERE name='${VICTIM}'")"
+  [ "$ROWS_BEFORE" = "$ROWS_AFTER" ] && ok "there is still exactly one ${VICTIM} row ($ROWS_AFTER)" \
+    || bad "${VICTIM} rows went from $ROWS_BEFORE to $ROWS_AFTER; the restart created a second node"
 
-  ROW_SAME="$(q "SELECT id FROM kernel.nodes WHERE name='node-a'")"
+  ROW_SAME="$(q "SELECT id FROM kernel.nodes WHERE name='${VICTIM}'")"
   [ "$ROW_SAME" = "$NODE_A_ROW" ] && ok "the recovered row is the SAME row ($ROW_SAME)" \
     || bad "the recovered row is $ROW_SAME, but the original was $NODE_A_ROW"
 
-  GEN_NOW="$(q "SELECT generation FROM kernel.nodes WHERE name='node-a'")"
+  GEN_NOW="$(q "SELECT generation FROM kernel.nodes WHERE name='${VICTIM}'")"
   [ "${GEN_NOW:-0}" -ge 2 ] && ok "the generation advanced to ${GEN_NOW} (a restart is a new generation, not a new node)" \
     || bad "generation is ${GEN_NOW:-?}; a restart should have incremented it"
 
   # ---------------------------------------------------------------------------
   echo "== 4. INSTANCE RECONCILIATION: the node's instance goes back to START"
   # ---------------------------------------------------------------------------
-  BPID="$(node_pid node-b)"
-  [ -n "$BPID" ] && ok "node-b was never touched and is still running" \
-    || bad "node-b's pid is gone; the test disturbed the wrong node"
+  BPID="$(node_pid "$SURVIVOR")"
+  [ -n "$BPID" ] && ok "${SURVIVOR} was never touched and is still running" \
+    || bad "${SURVIVOR}'s pid is gone; the test disturbed the wrong node"
 
   # The reconciler places on a READY node within a few ticks; 30 s is generous
   # against a 2 s tick and does not encode a guess about placement itself.
+  #
+  # The instance was on VICTIM by construction (that is how VICTIM was chosen), so
+  # after VICTIM recovers it must be back on START. No branch for the other
+  # placement: there is no other placement in which this node holds the instance.
   if [ "$DEPLOYED" = "1" ]; then
     RESTARTED=0
     D_A=""
     for _ in $(seq 1 30); do
-      D_A="$(q "SELECT i.desired_action FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id WHERE n.name='node-a'")"
+      D_A="$(q "SELECT i.desired_action FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog' AND n.name='${VICTIM}'")"
       [ "$D_A" = "START" ] && { RESTARTED=1; break; }
       sleep 1
     done
-    [ "$RESTARTED" = "1" ] && ok "node-a's instance returned to START after the node recovered" \
-      || bad "node-a's instance is still desired_action=${D_A:-<none>} after recovery"
+    [ "$RESTARTED" = "1" ] && ok "the instance, lost with ${VICTIM}, is back on START after recovery" \
+      || bad "the instance that lived on ${VICTIM} is desired_action=${D_A:-<none>} after recovery"
   else
     skip "no instance to reconcile: the deployment never activated on this host"
   fi
