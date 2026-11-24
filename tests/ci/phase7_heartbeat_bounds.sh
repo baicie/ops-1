@@ -118,9 +118,32 @@ if ! docker push "${REGISTRY}/opsweave/data-catalog:0.0.3" >/dev/null 2>&1; then
 fi
 
 echo "== the protocol's own numbers, read from the source that defines them"
-HEARTBEAT_SRC="$(grep -oE 'OPSWEAVE_NODE_HEARTBEAT_SECONDS", *5' apps/kernel/src/config.rs | grep -oE '[0-9]+$' || true)"
-STALE_SRC="$(grep -oE 'OPSWEAVE_NODE_STALE_SECONDS", *[0-9]+' apps/kernel/src/config.rs | grep -oE '[0-9]+$' || true)"
-LEASE_SRC="$(grep -oE 'OPSWEAVE_NODE_LEASE_SECONDS' -A 2 apps/node/src/config.rs | grep -oE 'default_value_t = [0-9]+' | grep -oE '[0-9]+' || true)"
+read -r HEARTBEAT_SRC STALE_SRC LEASE_SRC <<EOF
+$(python3 - <<'PY'
+import re
+kern = open('apps/kernel/src/config.rs').read()
+node = open('apps/node/src/config.rs').read()
+
+def kern_default(env):
+    # `env_i64("NAME", N)` - the name and its default are one expression.
+    m = re.search(rf'{env}"\s*,\s*(\d+)', kern)
+    return m.group(1) if m else ""
+
+def node_default(env):
+    # The env name and `default_value_t = N` share one `#[arg(...)]` block, but
+    # are not adjacent. Search the block that contains the name.
+    i = node.find(f'"{env}"')
+    if i < 0:
+        return ""
+    m = re.search(r'default_value_t\s*=\s*(\d+)', node[i:i + 400])
+    return m.group(1) if m else ""
+
+print(kern_default("OPSWEAVE_NODE_HEARTBEAT_SECONDS"),
+      kern_default("OPSWEAVE_NODE_STALE_SECONDS"),
+      node_default("OPSWEAVE_NODE_LEASE_SECONDS"))
+PY
+)
+EOF
 echo "   heartbeat=${HEARTBEAT_SRC:-?}s  stale=${STALE_SRC:-?}s  lease=${LEASE_SRC:-?}s"
 
 if [ -z "$HEARTBEAT_SRC" ] || [ -z "$STALE_SRC" ] || [ -z "$LEASE_SRC" ]; then
