@@ -388,21 +388,20 @@ jobs:
             plugins/data-catalog/backend/identity.mjs \
             plugins/data-catalog/backend/quality.mjs 2>/dev/null \
             | shasum -a 256 | awk '{print $1}')"
-          # THE BASE IMAGE IS COMPUTED ON ITS OWN LINE, NOT INLINE IN THE ARG.
+          # `|| true` IS REQUIRED, AND ITS ABSENCE IS WHAT FAILED TWO CI RUNS.
           #
-          # Inline, with the command substitution split across a line
-          # continuation, the value reached docker as
+          # The step runs under `set -euo pipefail`. `docker inspect` on an image
+          # that is not local exits 1; inside `$( ... )` under `set -e` that
+          # aborts the whole step - before the `[ -n "$BASE_IMAGE" ]` fallback
+          # could ever run. Measured on run 45335754806: the entire block printed
+          # NOTHING after `build-data-plugins.sh` finished, and the step exited 1
+          # with no error line, because the substitution killed the shell.
           #
-          #     BASE_IMAGE="\nnode:22-bookworm-slim"
-          #     ERROR: failed to parse stage name "\nnode:22-bookworm-slim"
-          #
-          # because `docker inspect` printed nothing (the image is not local under
-          # that name), the `||` fallback ran, and the leading whitespace of the
-          # continued line went into the value. Measured on run 45332918824, the
-          # first CI execution of this step.
+          # `scripts/build-data-plugins.sh:48` already carries `|| true` for
+          # exactly this reason; my version dropped it while copying the shape.
           BASE_IMAGE="$(docker inspect node:22-bookworm-slim \
-            --format '{{index .RepoDigests 0}}' 2>/dev/null | head -1)"
-          [ -n "$BASE_IMAGE" ] || BASE_IMAGE="node:22-bookworm-slim"
+            --format '{{index .RepoDigests 0}}' 2>/dev/null | head -1 || true)"
+          if [ -z "$BASE_IMAGE" ]; then BASE_IMAGE="node:22-bookworm-slim"; fi
           echo "0.0.4 base image: $BASE_IMAGE"
           docker build \
             --build-arg BASE_IMAGE="$BASE_IMAGE" \
