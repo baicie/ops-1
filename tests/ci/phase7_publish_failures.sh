@@ -290,6 +290,25 @@ if [ -f "$EVIDENCE/01-deploy.log" ] && grep -q 'DEGRADED\|timed out waiting' "$E
     echo "== node log lines that name a cause"
     grep -hiE "does not match|pull failed|startup probe|readiness probe|supervisor error" \
       "$STATE"/logs/node-*.log 2>/dev/null | tail -6
+    # THE FILTER CAN MATCH NOTHING, AND ON CI IT DID.
+    #
+    # Run 45349769192 produced a `01-why-degraded.log` whose cause section was
+    # empty: the instance was UNHEALTHY with a container, and no line in the node
+    # log matched any of the patterns above. An empty section reads like "no
+    # error", which is the opposite of what was true.
+    #
+    # The raw tail is printed whenever the filtered section is empty, so the file
+    # is never silent about a failed instance.
+    filtered="$(grep -chiE "does not match|pull failed|startup probe|readiness probe|supervisor error" \
+      "$STATE"/logs/node-*.log 2>/dev/null || echo 0)"
+    if [ "${filtered:-0}" -eq 0 ]; then
+      echo "   (no line matched the patterns above; raw tail follows)"
+      for log in "$STATE"/logs/node-*.log; do
+        [ -f "$log" ] || continue
+        echo "   --- $(basename "$log") (last 25) ---"
+        tail -25 "$log"
+      done
+    fi
   } > "$EVIDENCE/01-why-degraded.log" 2>&1
   echo "   (the failure reason is in 01-why-degraded.log)"
 fi
