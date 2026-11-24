@@ -38,10 +38,18 @@
  * shorter than a suite's own p95 would fail healthy runs, which is the failure
  * mode that teaches people to bypass the gate.
  *
- * `DEFAULT_BUDGET_MS` is 35 minutes. It was 30, which was BELOW the 34-minute p95
- * of data-foundation - the earlier table in this comment said `p95 1530s`, which
- * was one run's duration from a small sample, not a percentile. A healthy
- * data-foundation run at p95 would have timed the gate out.
+ * `DEFAULT_BUDGET_MS` is 60 minutes. It was 35, and 30 before that, each time
+ * because the figure described the previous behaviour of the suites rather than
+ * their current one. The 35-minute version cited `plugin-lifecycle.yml 1174 s`;
+ * run 45372261894 measured **2963 s** once the Phase 7 steps actually executed
+ * their assertions instead of skipping. `ci-gate` timed out at 2100 s with
+ * `delegated-timeout: 1 suite(s) still running` - correctly, against a stale
+ * input.
+ *
+ * The lesson is in the shape, not the number: a wait budget derived from how long
+ * a suite took WHILE IT WAS DOING NOTHING will be too small the moment it starts
+ * doing its job. Raise it with the measurement in hand, and never in the same
+ * change that makes a suite slower without saying so.
  *
  * The caller may pass a larger or smaller one explicitly; `ci.yml` does, via
  * `GATE_BUDGET_MS`.
@@ -58,8 +66,8 @@
 
 import { checkState, UNFINISHED_STATUS } from './check-run-ledger.mjs';
 
-/** 35 minutes. See the measured p95 table above. */
-export const DEFAULT_BUDGET_MS = 35 * 60 * 1000;
+/** 60 minutes. See the rationale above. */
+export const DEFAULT_BUDGET_MS = 60 * 60 * 1000;
 /** Start tight, then relax: cheap to catch the 146 s suites, still fine for 25 min ones. */
 export const DEFAULT_POLL_MS = 20_000;
 export const MAX_POLL_MS = 60_000;

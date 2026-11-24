@@ -315,7 +315,7 @@ export const REQUIRE_ANY_CHECK = new Set(['browser-e2e']);
  * trusted. The pair only exists so an operator who raises `GATE_BUDGET_MS` gets a
  * CONFIGURATION_ERROR instead of a job killed at 45 minutes reporting `cancelled`.
  */
-export const GATE_JOB_TIMEOUT_MS = 45 * 60 * 1000;
+export const GATE_JOB_TIMEOUT_MS = 70 * 60 * 1000;
 export const GATE_TIMEOUT_SLACK_MS = 10 * 60 * 1000;
 
 export const GATE_OWNERSHIP = {

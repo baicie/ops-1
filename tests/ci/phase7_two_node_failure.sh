@@ -40,7 +40,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 KEEP=0
-[ "${1:-}" = "--keep" ] && KEEP=1
+# See the BLOCKED block below: without this flag a missing image is exit 3.
+ALLOW_SKIP=0
+for arg in "$@"; do
+  case "$arg" in
+    --keep) KEEP=1 ;;
+    --allow-skip) ALLOW_SKIP=1 ;;
+    *) echo "unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
 
 PASS=0; FAIL=0; SKIP=0
 ok()   { PASS=$((PASS + 1)); printf '  ok   %s\n' "$1"; }
@@ -65,14 +73,35 @@ q() { psql -h 127.0.0.1 -p 5432 -d "$DB" -tAc "$1" 2>/dev/null; }
 command -v docker >/dev/null || { echo "docker required" >&2; exit 2; }
 docker info >/dev/null 2>&1 || { echo "docker daemon not running" >&2; exit 2; }
 
+# A MISSING IMAGE IS NOT A PASS.
+#
+# Same defect as `phase7_publish_failures.sh`, measured on the same five runs:
+# `skip the data-catalog:0.0.3 image is not local` followed by
+# `0 passed, 0 failed, 1 skipped` and a SUCCESS step. The image is built by
+# `scripts/build-data-plugins.sh`, which `plugin-lifecycle.yml` never calls, so
+# this suite has never asserted anything on CI.
+#
+# Exit 3 (BLOCKED) rather than 0. `--allow-skip` restores the old behaviour for
+# a caller that genuinely treats this as optional; CI does not pass it.
+REGISTRY_PORT="${OPSWEAVE_P7_REGISTRY_PORT:-15001}"
+REGISTRY="127.0.0.1:${REGISTRY_PORT}"
 echo "== registry and images"
 docker rm -f osw-p7-registry >/dev/null 2>&1 || true
 docker run -d --name osw-p7-registry --label opsweave.p7.registry=yes \
-  -p 127.0.0.1:15001:5000 registry:2 >/dev/null || { echo "no registry" >&2; exit 2; }
-for _ in $(seq 1 30); do curl -fsS -m 2 http://127.0.0.1:15001/v2/ >/dev/null 2>&1 && break; sleep 1; done
-docker push 127.0.0.1:15001/opsweave/data-catalog:0.0.3 >/dev/null 2>&1 || {
-  skip "the data-catalog:0.0.3 image is not local; run scripts/build-plugins.sh first"
-  echo; echo "$PASS passed, $FAIL failed, $SKIP skipped"; exit 0; }
+  -p "127.0.0.1:${REGISTRY_PORT}:5000" registry:2 >/dev/null || { echo "no registry" >&2; exit 2; }
+for _ in $(seq 1 30); do curl -fsS -m 2 "http://${REGISTRY}/v2/" >/dev/null 2>&1 && break; sleep 1; done
+if ! docker push "${REGISTRY}/opsweave/data-catalog:0.0.3" >/dev/null 2>&1; then
+  if [ "${ALLOW_SKIP:-0}" = "1" ]; then
+    skip "the data-catalog:0.0.3 image is not local and --allow-skip was given; NOTHING RAN"
+    echo; echo "$PASS passed, $FAIL failed, $SKIP skipped"; exit 0
+  fi
+  echo "BLOCKED: the data-catalog:0.0.3 image is not in this daemon, so the two-node" >&2
+  echo "         placement below cannot be observed. Build it first:" >&2
+  echo "           OPSWEAVE_REGISTRY=${REGISTRY} OPSWEAVE_DATA_VERSION=0.0.3 \\" >&2
+  echo "             scripts/build-data-plugins.sh" >&2
+  echo "         0 assertions ran. Exiting 3 (BLOCKED) so a green job cannot mean this." >&2
+  exit 3
+fi
 
 echo "== bring up two nodes"
 RUN_ID="$(tests/ci/p001c_up.sh 2>/dev/null | sed -n 's/^RUN_ID=//p' | tail -1)"
