@@ -146,10 +146,28 @@ jobs:
   lifecycle:
     name: full TypeScript lifecycle
     runs-on: ubuntu-24.04
-    # Measured locally at ~7 min for the lifecycle plus ~2 min to build the
-    # bundles and images. 45 minutes leaves room for a slow runner without
-    # letting a hang hold the queue.
-    timeout-minutes: 45
+    # MEASURED, NOT GUESSED. Run 45357080188, the first run where the Phase 7
+    # steps executed their assertions:
+    #
+    #   lifecycle            4m51s
+    #   injected negatives   6m40s
+    #   Go/Java matrix       3m24s
+    #   data-plugin build    12s
+    #   Phase 7 publish      16m05s   (two deliberate 300 s waits)
+    #   two-node             43s
+    #   Maven 429            CUT OFF at 11m46s by the old 45-minute budget
+    #
+    # That is 32 minutes before Maven starts, so the old bound cancelled the job
+    # mid-step and the two steps after it were skipped. The previous 45 minutes
+    # was sized when these steps asserted nothing - they exited in seconds. A
+    # budget that was right for a suite that did not run is not right for one
+    # that does.
+    #
+    # 100 minutes: the measured ~44 min plus headroom for a slow runner and
+    # Maven's documented 16-minute worst case under a persistent 429. This is a
+    # ceiling that lets a real run finish, NOT a way to make a hang pass - a hang
+    # still consumes the budget and fails.
+    timeout-minutes: 100
     env:
       # The runner is dedicated to this job, so it is safe to run the container
       # cleanup. On a developer's machine the same script refuses unless this is
