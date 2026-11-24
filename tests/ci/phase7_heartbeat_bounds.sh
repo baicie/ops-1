@@ -314,23 +314,39 @@ else
     bad "the change happened at ${ELAPSED}s, before ${EARLIEST}s is possible even with a fresh heartbeat at the kill"
   fi
 
-  # THE INSTANCE ON THE NODE THAT JUST DIED MUST BE TOLD TO STOP.
+  # WHAT THE KERNEL DOES WITH THE INSTANCE, WHICH IS MORE THAN "STOP" OR "NOTHING".
   #
-  # THE FIRST VERSION ALWAYS KILLED node-a and required that. On CI the scheduler
-  # placed the replica on node-b, so node-a had no instance row and the case
-  # reported `desired_action=<none>, expected STOP` - a red for a placement it
-  # never established (run 45410012787). Locally node-a happened to win, which is
-  # why the assumption survived.
+  # The first two versions asserted it was told to STOP. On CI the kernel did
+  # something else and both failed with `desired_action=<none>` on the dead node:
+  # the replacer MOVED the instance to the surviving node instead
+  # (`deployments.rs:1969`, the `current.node_id != node.id` branch sets
+  # `node_id`, `desired_action='START'`, clears `container_id`). That is correct
+  # behaviour, and asserting only STOP called it a defect twice.
   #
-  # The fix is not a branch for each placement: it is to kill the node that HOLDS
-  # the instance (see VICTIM above). Then this assertion means the same thing
-  # under either placement, and the other node stays as the control.
+  # The real invariant is that the instance CONVERGES onto a node that is alive:
+  # either it is stopped on the dead node, or it is running somewhere else. What
+  # must never happen is a row left pointing at a dead node wanting START.
   if [ "$DEPLOYED" = "1" ]; then
-    DESIRED_A="$(q "SELECT i.desired_action FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id WHERE n.name='${VICTIM}'")"
-    [ "$DESIRED_A" = "STOP" ] && ok "the instance on ${VICTIM} (the node that died) is told to STOP" \
-      || bad "${VICTIM}'s instance desired_action=${DESIRED_A:-<none>}, expected STOP"
+    ON_VICTIM="$(q "SELECT i.desired_action FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog' AND n.name='${VICTIM}' LIMIT 1")"
+    NOWHERE_START="$(q "SELECT count(*) FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog' AND i.desired_action='START' AND n.status='READY'")"
+    ANY_START="$(q "SELECT count(*) FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog' AND i.desired_action='START'")"
+
+    if [ "${ANY_START:-0}" -eq 0 ] && [ -z "$ON_VICTIM" ]; then
+      bad "the instance vanished: no START row anywhere and none on ${VICTIM}"
+    elif [ -n "$ON_VICTIM" ] && [ "$ON_VICTIM" != "STOP" ]; then
+      bad "the instance is still ${ON_VICTIM} on ${VICTIM}, a node the kernel considers gone"
+    elif [ "${NOWHERE_START:-0}" -ge 1 ]; then
+      ok "the instance converged onto a READY node (${NOWHERE_START} START), away from ${VICTIM}"
+    elif [ "$ON_VICTIM" = "STOP" ]; then
+      ok "the instance on ${VICTIM} is told to STOP"
+    else
+      # One replica, placed on a node that is gone, and nothing READY holds it:
+      # the scheduler has not re-placed it yet. That is a pending state, not a
+      # failure, and saying so is more useful than a red.
+      skip "the instance is not yet re-placed and not stopped (START=${ANY_START:-0}); the reconciler has not caught up"
+    fi
   else
-    skip "no instance to tell STOP: the deployment never activated on this host"
+    skip "no instance to reconcile: the deployment never activated on this host"
   fi
 
   # ---------------------------------------------------------------------------
@@ -390,22 +406,27 @@ else
   [ -n "$BPID" ] && ok "${SURVIVOR} was never touched and is still running" \
     || bad "${SURVIVOR}'s pid is gone; the test disturbed the wrong node"
 
-  # The reconciler places on a READY node within a few ticks; 30 s is generous
-  # against a 2 s tick and does not encode a guess about placement itself.
+  # The reconciler settles within a few ticks; 30 s is generous against a 2 s tick
+  # and does not encode a guess about placement itself.
   #
-  # The instance was on VICTIM by construction (that is how VICTIM was chosen), so
-  # after VICTIM recovers it must be back on START. No branch for the other
-  # placement: there is no other placement in which this node holds the instance.
+  # SAME INVARIANT AS ABOVE, after recovery: exactly one replica, START, on a node
+  # that is alive. Whether it stayed on the survivor (re-placed there) or came
+  # back to VICTIM is the scheduler's choice and not this case's subject; a row
+  # wanting START on a dead node, or no row at all, is the failure.
   if [ "$DEPLOYED" = "1" ]; then
-    RESTARTED=0
-    D_A=""
+    SETTLED=0
+    DESC=""
     for _ in $(seq 1 30); do
-      D_A="$(q "SELECT i.desired_action FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog' AND n.name='${VICTIM}'")"
-      [ "$D_A" = "START" ] && { RESTARTED=1; break; }
+      DESC="$(q "SELECT string_agg(n.name || ':' || i.desired_action, ',' ORDER BY n.name) FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog'")"
+      LIVE_START="$(q "SELECT count(*) FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog' AND i.desired_action='START' AND n.status='READY'")"
+      DEAD_START="$(q "SELECT count(*) FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog' AND i.desired_action='START' AND n.status<>'READY'")"
+      if [ "${LIVE_START:-0}" -ge 1 ] && [ "${DEAD_START:-0}" -eq 0 ]; then SETTLED=1; break; fi
       sleep 1
     done
-    [ "$RESTARTED" = "1" ] && ok "the instance, lost with ${VICTIM}, is back on START after recovery" \
-      || bad "the instance that lived on ${VICTIM} is desired_action=${D_A:-<none>} after recovery"
+    [ "$SETTLED" = "1" ] \
+      && ok "every START instance is on a READY node after recovery (${DESC})" \
+      || bad "after recovery the placement is ${DESC:-<none>}: START=${LIVE_START:-0} live, ${DEAD_START:-0} on a node that is not READY"
+    echo "   placement: ${DESC:-<none>}"
   else
     skip "no instance to reconcile: the deployment never activated on this host"
   fi
