@@ -69,6 +69,23 @@ EVIDENCE=""
 
 cleanup() {
   local rc=$?
+  # PRESERVE THE EVIDENCE BEFORE TEARDOWN DELETES IT.
+  #
+  # `p001c_teardown.sh` removes `/tmp/p001c-$RUN_ID`, and every case writes its
+  # only evidence there. Measured on run 45338279966: TASK-01 failed on CI, the
+  # step printed `see 01-deploy.log`, and that file no longer existed by the time
+  # the workflow tried to upload - so a red run was undiagnosable from its own
+  # artifact. That is the defect TASK-22 names ("the next agent should not have
+  # to re-run a 20-minute flow to learn where it failed").
+  #
+  # Copied to `artifacts/`, which the workflow already uploads. Best-effort: a
+  # copy failure must not change the suite's verdict.
+  if [ -n "$EVIDENCE" ] && [ -d "$EVIDENCE" ]; then
+    local dest="artifacts/phase7-publish-failures"
+    rm -rf "$dest"
+    mkdir -p "$dest" 2>/dev/null && cp -R "$EVIDENCE/." "$dest/" 2>/dev/null || \
+      echo "   WARNING: could not copy evidence to $dest" >&2
+  fi
   if [ "$KEEP" = "0" ] && [ -n "$RUN_ID" ]; then
     echo "== teardown $RUN_ID"
     tests/ci/p001c_teardown.sh "$RUN_ID" >/dev/null 2>&1 || \

@@ -515,6 +515,7 @@ jobs:
             lifecycle-negatives.log
             lifecycle-multilang.log
             phase7-publish-failures.log
+            artifacts/phase7-publish-failures/
             phase7-two-node.log
             artifacts/p001c-multilang-lifecycle/
           if-no-files-found: warn
