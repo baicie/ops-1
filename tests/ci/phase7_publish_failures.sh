@@ -264,6 +264,35 @@ if grep -q 'activated opsweave.data-catalog@0.0.3' "$EVIDENCE/01-deploy.log"; th
 else
   bad "deploy did not activate; see 01-deploy.log"
 fi
+# WHY IT FAILED, COLLECTED AT THE MOMENT IT FAILED.
+#
+# `DEGRADED 0/1 ready (0/1 replicas READY; 1 failed)` says an instance failed and
+# not why. Measured on run 45343855200: the first CI run that preserved
+# `01-deploy.log` showed exactly that line 150 times and nothing else, and the
+# node's own log - which carries "Runtime Info does not match signed manifest",
+# "docker pull failed", or a startup timeout - lives under `$STATE/logs`, which
+# teardown deletes.
+#
+# Collected here rather than in the trap so it is captured at the failure, not at
+# exit, and so an operator reading this report sees the reason beside the
+# symptom.
+if [ -f "$EVIDENCE/01-deploy.log" ] && grep -q 'DEGRADED\|timed out waiting' "$EVIDENCE/01-deploy.log"; then
+  {
+    echo "== deployment rows"
+    psql -h 127.0.0.1 -p 5432 -d "$DB" -c \
+      "SELECT version, status, status_reason FROM kernel.plugin_deployments WHERE plugin_id='opsweave.data-catalog'" 2>&1
+    echo "== instances"
+    psql -h 127.0.0.1 -p 5432 -d "$DB" -c \
+      "SELECT i.state, i.desired_action, i.container_id IS NOT NULL AS has_container, n.name
+         FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id
+         JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+        WHERE d.plugin_id='opsweave.data-catalog'" 2>&1
+    echo "== node log lines that name a cause"
+    grep -hiE "does not match|pull failed|startup probe|readiness probe|supervisor error" \
+      "$STATE"/logs/node-*.log 2>/dev/null | tail -6
+  } > "$EVIDENCE/01-why-degraded.log" 2>&1
+  echo "   (the failure reason is in 01-why-degraded.log)"
+fi
 if grep -q 'effectiveVersion=0.0.3 (verified' "$EVIDENCE/01-deploy.log"; then
   ok "the publisher READ THE ACTIVE VERSION BACK and it matched"
 else
