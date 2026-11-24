@@ -85,6 +85,39 @@ expect 'a container that is not READY blocks at PLUGIN_RUNNING' \
 
 expect 'RUNNING (the only value that passes) is accepted' "$ALL_GOOD" RELEASED
 
+# --- ONE RELEASE, ONE ATTEMPT (TASK-11) --------------------------------------
+#
+# Every stage carries the attempt it was observed under. A set of stages that
+# individually pass but were observed under DIFFERENT attempts is two releases
+# spliced together, and the concrete failure is a rollback landing between two
+# checks: PLUGIN_RUNNING from generation 3 and PLUGIN_ACTIVE from generation 4 would
+# read as "running and active" for a state the platform was never in.
+
+with_attempt() { # attempt id -> the ALL_GOOD summary with it appended
+  local a="$1" out=""
+  while IFS= read -r line; do
+    out+="${line} ${a}"$'\n'
+  done <<<"$ALL_GOOD"
+  printf '%s' "$out"
+}
+
+expect 'one attempt throughout is RELEASED' "$(with_attempt 'p@1:d:g1')" RELEASED
+
+expect 'TWO attempts among the stages blocks, even when every state passes' \
+  "$(printf '%s' "$(with_attempt 'p@1:d:g1')" | sed 's/^PLUGIN_ACTIVE ACTIVE p@1:d:g1$/PLUGIN_ACTIVE ACTIVE p@1:d:g2/')" \
+  BLOCKED_AT_MIXED_ATTEMPT
+
+expect 'a stage observed before the identity was known (?) does not block' \
+  "$(printf '%s' "$(with_attempt 'p@1:d:g1')" | sed 's/^HOST_UP UP p@1:d:g1$/HOST_UP UP ?/')" \
+  RELEASED
+
+# The attempt check must come BEFORE the state checks: a mixed set with a failing
+# state is a mixed set, and saying "PLUGIN_ACTIVE is WRONG_VERSION" would point the
+# reader at the wrong problem.
+expect 'mixed attempts win over a failing stage in the reason' \
+  "$(printf '%s' "$(with_attempt 'p@1:d:g1')" | sed 's/^PLUGIN_ACTIVE ACTIVE p@1:d:g1$/PLUGIN_ACTIVE WRONG_VERSION p@1:d:g2/')" \
+  BLOCKED_AT_MIXED_ATTEMPT
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]
