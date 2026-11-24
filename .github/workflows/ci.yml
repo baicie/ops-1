@@ -1621,23 +1621,32 @@ jobs:
   # wired, cancelled counted as pass).
   ci-gate:
     runs-on: ubuntu-24.04
-    # 45 minutes: the wait budget (35) plus the rest of the step (~1) plus a
-    # quarter-hour of headroom. 40 was measured to leave only 240 s of slack
-    # against a 2100 s budget, which is not enough for a slow checkout or an API
-    # retry storm - and a job killed by its own timeout reports as `cancelled`,
-    # which is a worse failure than a timeout with a reason.
+    # 70 minutes: the wait budget (60) plus the rest of the step (~1) plus the
+    # same quarter-hour of headroom the 45-minute version documented. 40 was
+    # measured to leave only 240 s of slack against a 2100 s budget, which is not
+    # enough for a slow checkout or an API retry storm - and a job killed by its
+    # own timeout reports as `cancelled`, which is a worse failure than a timeout
+    # with a reason.
     #
     # The relationship that must hold:
     #   job timeout  >  GATE_BUDGET_MS  +  (checkout + ledger reads)
-    # 2700 s     >  2100 s          +  ~60-120 s, with margin.
+    # 4200 s     >  3600 s          +  ~60-120 s, with margin.
     #
     # The gate now WAITS for the suites other workflows produce instead of reading
-    # whatever happened to exist when it started. The budget is 30 minutes
-    # (`DEFAULT_BUDGET_MS`), derived from measured p95: data-foundation.yml is
-    # 1530 s, plugin-lifecycle.yml 1174 s. A job timeout below the wait budget
-    # would kill the gate mid-wait and report a cancelled check, which is a
-    # different and less useful failure than a timeout with a reason.
-    timeout-minutes: 45
+    # whatever happened to exist when it started. The budget was 30 minutes
+    # (`DEFAULT_BUDGET_MS`), derived from measured p95 with data-foundation.yml at
+    # 1530 s and plugin-lifecycle.yml at **1174 s**.
+    #
+    # THAT 1174 s WAS A MEASUREMENT OF A SUITE THAT WAS NOT RUNNING ITS
+    # ASSERTIONS. Run 45372261894, the first one where the Phase 7 steps executed
+    # for real, took **2963 s** - 49.4 minutes - and `ci-gate` timed out waiting
+    # for it at 2100 s with `delegated-timeout: 1 suite(s) still running`. The
+    # gate was right and its input was stale: the previous figure described the
+    # old behaviour, not this one.
+    #
+    # 3600 s covers 2963 s with 21% headroom for a slower runner. It is not a
+    # licence to let a hang pass: a hang still exhausts the budget and fails.
+    timeout-minutes: 70
     if: always()
     # `checks: read` is what lets this job stop taking the other workflows on
     # faith. It queries the check runs on THIS commit - by name, AND by the
@@ -1696,7 +1705,7 @@ jobs:
           # the wiring that was missing: `--budget-ms "${GATE_BUDGET_MS:-...}"`
           # appeared in the run block but nothing ever set the variable, so the
           # default was the only value it could take.
-          GATE_BUDGET_MS: ${{ vars.OPSWEAVE_GATE_BUDGET_MS || '2100000' }}
+          GATE_BUDGET_MS: ${{ vars.OPSWEAVE_GATE_BUDGET_MS || '3600000' }}
         run: |
           set -euo pipefail
           # The files this commit changed.
