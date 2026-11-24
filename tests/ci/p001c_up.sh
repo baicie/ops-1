@@ -283,6 +283,41 @@ fi
 
 PUBLIC_KEY="$(cat keys/publisher.pub)"
 
+# WHERE A PLUGIN CONTAINER FINDS THIS HOST'S POSTGRESQL.
+#
+# The Kernel defaults `plugin_db_host` to `host.docker.internal` and bakes it into
+# the `OPSWEAVE_PLUGIN_DATABASE_URL` every workload receives. That name exists on
+# Docker Desktop (Mac/Windows) and does NOT resolve on a plain Linux daemon,
+# which is what a GitHub `ubuntu-24.04` runner is.
+#
+# Measured on run 45349769192 - the first CI run that collected a diagnostic:
+#
+#     version | status   | status_reason
+#     0.0.3   | DEGRADED | 0/1 replicas READY; 1 failed
+#     state = UNHEALTHY, has_container = t
+#
+# and the container's own output explains it:
+#
+#     Error: connect ECONNREFUSED 127.0.0.1:5432
+#
+# The plugin could not reach PostgreSQL, so it never became healthy. Every local
+# run passed because Docker Desktop makes `host.docker.internal` work; the CI
+# failures were not a flaky test, a slow runner, or a bad image - they were a
+# host name that only exists on one of the two daemons.
+#
+# The gateway of Docker's default bridge is reachable from a container on BOTH
+# platforms and needs no `--add-host`. Asked of the daemon rather than assumed to
+# be `172.17.0.1`, because a custom `bip` changes it. Falls back to the
+# Docker-Desktop-only name only if the daemon cannot answer, which keeps a Mac
+# developer working even in that case.
+PLUGIN_DB_HOST="${OPSWEAVE_PLUGIN_DB_HOST:-}"
+if [ -z "$PLUGIN_DB_HOST" ]; then
+  PLUGIN_DB_HOST="$(docker network inspect bridge \
+    --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null)"
+  PLUGIN_DB_HOST="${PLUGIN_DB_HOST:-host.docker.internal}"
+fi
+echo "== plugin containers reach this host's PostgreSQL at ${PLUGIN_DB_HOST}"
+
 echo "== start kernel on :${KERNEL_PORT}"
 nohup env \
   HOME="$HOME_DIR" \
@@ -300,6 +335,7 @@ nohup env \
   OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT=1 \
   OPSWEAVE_ALLOWED_NODE_DATA_HOSTS=127.0.0.1,localhost,::1 \
   OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS=host.docker.internal \
+  OPSWEAVE_PLUGIN_DB_HOST="$PLUGIN_DB_HOST" \
   OPSWEAVE_LOG_FORMAT=json \
   ./target/debug/opsweave-kernel > "$STATE/logs/kernel.log" 2>&1 &
 PIDF="$STATE/kernel.pid"
