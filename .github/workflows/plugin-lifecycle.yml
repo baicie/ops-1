@@ -388,9 +388,24 @@ jobs:
             plugins/data-catalog/backend/identity.mjs \
             plugins/data-catalog/backend/quality.mjs 2>/dev/null \
             | shasum -a 256 | awk '{print $1}')"
+          # THE BASE IMAGE IS COMPUTED ON ITS OWN LINE, NOT INLINE IN THE ARG.
+          #
+          # Inline, with the command substitution split across a line
+          # continuation, the value reached docker as
+          #
+          #     BASE_IMAGE="\nnode:22-bookworm-slim"
+          #     ERROR: failed to parse stage name "\nnode:22-bookworm-slim"
+          #
+          # because `docker inspect` printed nothing (the image is not local under
+          # that name), the `||` fallback ran, and the leading whitespace of the
+          # continued line went into the value. Measured on run 45332918824, the
+          # first CI execution of this step.
+          BASE_IMAGE="$(docker inspect node:22-bookworm-slim \
+            --format '{{index .RepoDigests 0}}' 2>/dev/null | head -1)"
+          [ -n "$BASE_IMAGE" ] || BASE_IMAGE="node:22-bookworm-slim"
+          echo "0.0.4 base image: $BASE_IMAGE"
           docker build \
-            --build-arg BASE_IMAGE="$(docker inspect node:22-bookworm-slim \
-              --format '{{index .RepoDigests 0}}' 2>/dev/null || echo node:22-bookworm-slim)" \
+            --build-arg BASE_IMAGE="$BASE_IMAGE" \
             --build-arg PLUGIN_VERSION=0.0.4 \
             --build-arg CAPABILITY_DIGEST="$CAP_DIGEST" \
             --build-arg BUILD_DIGEST="$BUILD_DIGEST" \
