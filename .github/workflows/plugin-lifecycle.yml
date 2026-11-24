@@ -481,6 +481,33 @@ jobs:
           set -o pipefail
           tests/ci/phase7_two_node_failure.sh 2>&1 | tee phase7-two-node.log
 
+      - name: The heartbeat protocol's bounds (Phase 8 TASK-15)
+        # THE BOUND ITSELF, WHERE TASK-12 GIVES A SAMPLE.
+        #
+        # `phase7_two_node_failure.sh` shows a node still READY 2 s after its
+        # process dies, and that it leaves READY eventually. "Eventually" is not a
+        # bound. This derives one from the three protocol numbers in the source
+        # (heartbeat 5 s, staleness 25 s, lease 30 s), asserts staleness < lease so
+        # the kernel never writes off a node that can still serve, and checks both
+        # sides: not before stale-heartbeat, not after stale+heartbeat+5.
+        #
+        # It also corrects a claim in the TASK-12 script: recovery does NOT need a
+        # fresh token. `runtime::enroll` loads the identity from the state dir and
+        # bumps the generation, so a restart resumes the SAME node row - measured
+        # here (same id, one row, generation 2).
+        #
+        # On this runner the deployment half runs for real (the postgres service
+        # publishes 5432 on all interfaces, so a container reaches it through the
+        # bridge gateway). Locally that half is skipped and the script says so.
+        if: success()
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          set -o pipefail
+          tests/ci/phase7_heartbeat_bounds.sh 2>&1 | tee phase7-heartbeat-bounds.log
+
       - name: The release verdict is a function of the stages
         # Runs anywhere, no platform: it drives `verdict_of` with synthetic stage
         # rows. The VALUES come from the live run below; this pins the DECISION,
@@ -535,6 +562,7 @@ jobs:
             phase7-publish-failures.log
             artifacts/phase7-publish-failures/
             phase7-two-node.log
+            phase7-heartbeat-bounds.log
             artifacts/p001c-multilang-lifecycle/
           if-no-files-found: warn
           retention-days: 14
