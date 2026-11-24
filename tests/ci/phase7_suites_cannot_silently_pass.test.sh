@@ -115,6 +115,23 @@ else
   grep -q 'data-catalog-0.0.4.plugin.zip' "$WF" \
     && ok "the workflow produces the second version TASK-06 needs" \
     || bad "no 0.0.4 bundle is produced; TASK-06 will skip again"
+
+  # THE SAME RULE APPLIES TO EVERY SUITE ADDED LATER, so it is checked for the
+  # TASK-15 file by the same reasoning: it must be called, its log must be kept,
+  # and its call must come after the build that gives it an image.
+  hb_line="$(grep -n 'tests/ci/phase7_heartbeat_bounds.sh' "$WF" | head -1 | cut -d: -f1)"
+  [ -n "$hb_line" ] && ok "the job runs the heartbeat-bounds suite (line $hb_line)" \
+    || bad "phase7_heartbeat_bounds.sh is written but nothing runs it"
+  if [ -n "$hb_line" ]; then
+    grep -q 'phase7-heartbeat-bounds.log' "$WF" \
+      && ok "the heartbeat suite's output is uploaded as evidence" \
+      || bad "the heartbeat suite's log is not in the evidence artifact"
+    if [ -n "$build_line" ] && [ "$build_line" -lt "$hb_line" ]; then
+      ok "the build precedes the heartbeat suite ($build_line < $hb_line)"
+    else
+      bad "the heartbeat suite runs before/without the build ($build_line vs $hb_line)"
+    fi
+  fi
 fi
 
 echo
