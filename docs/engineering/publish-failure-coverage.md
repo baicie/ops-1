@@ -69,3 +69,58 @@ describing a release that no longer happens.
 None of rows 6–11 is marked PARTIAL or "effectively covered". A condition that has
 never been executed is NOT_COVERED, and saying so is the point of writing this
 table rather than a design document that reads like an acceptance report.
+
+## Correction, 2026-11-24: rows 6–11 were never executed in CI
+
+Everything above was true of a DEVELOPER MACHINE and false of CI, and this
+document did not distinguish the two. Measured on five consecutive
+`plugin-lifecycle.yml` runs, every one of them SUCCESS:
+
+| run | what the Phase 7 steps printed |
+|---|---|
+| 45172963410 | `0 passed, 0 failed, 1 skipped` (both suites) |
+| 45183654404 | same |
+| 45190236157 | same |
+| 45197291594 | same |
+| 45203998931 | same |
+
+`phase7_publish_failures.sh` said:
+
+    skip no local images to push; TASK-01..06 need a built bundle
+
+`phase7_two_node_failure.sh` said:
+
+    skip the data-catalog:0.0.3 image is not local; run scripts/build-plugins.sh first
+
+Both then `exit 0`. **Zero assertions ran on every CI run**, and the job reported
+success, so a reviewer reading the checks saw two green "Phase 7" steps.
+
+The cause is a build input this job never produced. `scripts/build-plugins.sh`
+builds hello-ops, hello-go and hello-java. The data plugins come from
+`scripts/build-data-plugins.sh`, whose only CI caller is `data-foundation.yml`.
+And TASK-06's second version (`data-catalog-0.0.4.plugin.zip`) was produced by
+nothing at all, in any workflow - which is why the rollback it measured was always
+a no-op, the exact gap the row-11 note above describes.
+
+So the correct reading of rows 6–11 at the time of writing was not
+INTEGRATION_VERIFIED on CI. It was: **verified locally, NOT_RUN in CI.** The
+assertions themselves were real - they pass against a real kernel, and the numbers
+in this table were measured - but nothing executed them on main.
+
+Three things changed, in `plugin-lifecycle.yml` and the two suites:
+
+1. The job builds the data-plugin images and both bundles, including 0.0.4, in a
+   step before the suites that consume them.
+2. Both suites now exit **3 (BLOCKED)** when their artifact is missing, instead of
+   0. `--allow-skip` restores the old behaviour and is never passed by CI.
+3. `tests/ci/phase7_suites_cannot_silently_pass.test.sh` checks that property
+   directly, so a step that runs and proves nothing cannot come back green.
+
+Rows 6–11 are INTEGRATION_VERIFIED when that job's Phase 7 steps report a non-zero
+assertion count. They are not INTEGRATION_VERIFIED because this document says so.
+
+The general defect this corrects is worth naming: **a suite that skips is
+indistinguishable from a suite that passes when both exit 0.** A call site in a
+workflow is necessary and not sufficient; what matters is whether the call reaches
+an assertion.
+

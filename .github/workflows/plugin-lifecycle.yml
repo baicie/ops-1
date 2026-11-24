@@ -310,6 +310,105 @@ jobs:
           set -o pipefail
           tests/ci/p001c_multilang_lifecycle.sh 2>&1 | tee lifecycle-multilang.log
 
+      # ---------------------------------------------------------------------
+      # THE BUILD INPUT THE PHASE 7 SUITES NEED, WHICH THIS JOB NEVER PRODUCED.
+      #
+      # Measured on five consecutive runs (45172963410, 45183654404,
+      # 45190236157, 45197291594, 45203998931), every one of them SUCCESS:
+      #
+      #     skip no local images to push; TASK-01..06 need a built bundle
+      #     0 passed, 0 failed, 1 skipped
+      #     skip the data-catalog:0.0.3 image is not local
+      #     0 passed, 0 failed, 1 skipped
+      #
+      # `scripts/build-plugins.sh` - which the previous step runs - builds
+      # hello-ops, hello-go and hello-java. The data plugins come from
+      # `scripts/build-data-plugins.sh`, whose only CI caller is
+      # `data-foundation.yml`. So the two Phase 7 suites ran against neither the
+      # images nor the bundle they assert on, and reported success for it.
+      #
+      # This step is that missing input. It is deliberately a separate step so a
+      # failure here reads as "the fixtures did not build", not "the platform
+      # mishandled a deploy".
+      #
+      # `OPSWEAVE_P7_REGISTRY_PORT` and the suites' default both stay 15001,
+      # because the image reference is baked into the SIGNED bundle manifest: the
+      # digest the suite verifies against the registry is the digest the bundle
+      # names, and a different port would make the two disagree by construction.
+      - name: Build the data-plugin images and bundles the Phase 7 suites assert on
+        run: |
+          set -euo pipefail
+          docker rm -f osw-p7-registry >/dev/null 2>&1 || true
+          docker run -d --name osw-p7-registry --label opsweave.p7.registry=yes \
+            -p 127.0.0.1:15001:5000 registry:2 >/dev/null
+          for _ in $(seq 1 30); do
+            curl -fsS -m 2 http://127.0.0.1:15001/v2/ >/dev/null 2>&1 && break
+            sleep 1
+          done
+          OPSWEAVE_REGISTRY=127.0.0.1:15001 OPSWEAVE_DATA_VERSION=0.0.3 \
+            scripts/build-data-plugins.sh
+          # The suites refuse to run without them (exit 3), so proving them here
+          # turns a downstream BLOCKED into a clear, early failure.
+          test -f dist/plugins/data-catalog-0.0.3.plugin.zip
+          test -f dist/plugins/data-integration-0.0.3.plugin.zip
+
+          # A SECOND VERSION OF THE SAME PLUGIN, because TASK-06 cannot test a
+          # rollback without one.
+          #
+          # `phase7_publish_failures.sh` TASK-06 says: activate 0.0.4, then roll
+          # back to 0.0.3. It guards on `dist/plugins/data-catalog-0.0.4.plugin.zip`
+          # existing and SKIPS when it does not - and NOTHING in this repository
+          # produced it, so the cancellation case has never run anywhere. The
+          # rollback it measured was to the version already active, which is a
+          # no-op, which is exactly the gap the Phase 7 report recorded.
+          #
+          # Built from the same template at a different version and a different
+          # image digest, so the two deployments are genuinely different: the
+          # rollback has a real transition to perform and a real container to
+          # replace. It is not a copy of 0.0.3 with a new label.
+          # THE DIGESTS MUST BE THE REAL ONES, NOT PLACEHOLDERS.
+          #
+          # A zero digest here builds and pushes an image that the node then
+          # REFUSES at runtime:
+          #
+          #   Runtime Info does not match signed manifest: plugin=...0.0.4
+          #   capability=sha256:000...000
+          #
+          # because the plugin reports the digest baked into the image and the
+          # manifest carries the same zero value - so they match each other and
+          # not the capability set the plugin actually provides. The deployment
+          # ends DEGRADED, 0/1 ready, 1 failed, and TASK-06 skips again.
+          #
+          # `scripts/build-data-plugins.sh` computes both the same way; this
+          # repeats it rather than sourcing the script, because the script builds
+          # 0.0.1 by default and running it twice would overwrite the 0.0.3
+          # bundles the suites just verified.
+          CAP_DIGEST="$(python3 -c 'import hashlib,json;m=json.load(open("plugins/data-catalog/manifest.template.json"));raw=json.dumps(m["provides"],sort_keys=True,separators=(",",":")).encode();print("sha256:"+hashlib.sha256(raw).hexdigest())')"
+          BUILD_DIGEST="sha256:$(cat plugins/data-catalog/backend/server.mjs \
+            plugins/data-catalog/backend/identity.mjs \
+            plugins/data-catalog/backend/quality.mjs 2>/dev/null \
+            | shasum -a 256 | awk '{print $1}')"
+          docker build \
+            --build-arg BASE_IMAGE="$(docker inspect node:22-bookworm-slim \
+              --format '{{index .RepoDigests 0}}' 2>/dev/null || echo node:22-bookworm-slim)" \
+            --build-arg PLUGIN_VERSION=0.0.4 \
+            --build-arg CAPABILITY_DIGEST="$CAP_DIGEST" \
+            --build-arg BUILD_DIGEST="$BUILD_DIGEST" \
+            -t 127.0.0.1:15001/opsweave/data-catalog:0.0.4 \
+            plugins/data-catalog/backend >/dev/null
+          docker push 127.0.0.1:15001/opsweave/data-catalog:0.0.4 >/dev/null
+          DC4_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' \
+            127.0.0.1:15001/opsweave/data-catalog:0.0.4)"
+          rm -rf /tmp/dc4
+          python3 scripts/assemble_plugin.py \
+            --template plugins/data-catalog/manifest.template.json \
+            --out /tmp/dc4 --version 0.0.4 --image-ref "$DC4_DIGEST" \
+            --frontend-dist plugins/data-catalog/web/dist >/dev/null
+          ./target/debug/opsctl bundle --dir /tmp/dc4 \
+            --out dist/plugins/data-catalog-0.0.4.plugin.zip \
+            --key keys/publisher.key >/dev/null
+          test -f dist/plugins/data-catalog-0.0.4.plugin.zip
+
       - name: Publish failures against a real kernel (Phase 7 Batch A)
         # Runs AFTER the happy paths, on the same platform assumptions, and only if
         # they passed - a failure suite on a platform the lifecycle already broke
@@ -321,8 +420,9 @@ jobs:
         # install -> deploy -> READY -> activate -> read-back and then injects five
         # real failures, asserting each time that the ACTIVE version did NOT move.
         #
-        # It builds nothing new: it pushes the local images and checks the bundle's
-        # declared digest against what the registry resolves before installing.
+        # It now builds its input in the step above. Before that step existed this
+        # ran ZERO assertions and exited 0; the script exits 3 (BLOCKED) now, so
+        # the omission cannot come back silently.
         if: success()
         env:
           PGHOST: 127.0.0.1
@@ -371,6 +471,20 @@ jobs:
         # suite. A failure before the signing stage used to leave the PREVIOUS
         # run's zips there, and nothing marks them stale.
         run: bash tests/scripts/build-plugins-stale-output.test.sh
+
+      - name: The Phase 7 suites cannot silently pass
+        # THE GATE FOR THE GATE.
+        #
+        # Five consecutive green runs of this workflow (45172963410, 45183654404,
+        # 45190236157, 45197291594, 45203998931) contained two suites that printed
+        # `0 passed, 0 failed, 1 skipped` and exited 0, because nothing built the
+        # images they assert on. A step that runs and proves nothing is worse than
+        # a missing step: it is cited as evidence.
+        #
+        # This checks the property directly - missing artifact means BLOCKED, the
+        # escape hatch still works, and the build step precedes the consumers -
+        # so the omission cannot come back without a red.
+        run: bash tests/ci/phase7_suites_cannot_silently_pass.test.sh
 
       - name: Upload the acceptance evidence
         if: always()
