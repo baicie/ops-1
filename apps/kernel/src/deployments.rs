@@ -33,6 +33,12 @@ pub struct DeploymentRow {
     pub updated_at: DateTime<Utc>,
     pub activated_at: Option<DateTime<Utc>>,
     pub drain_until: Option<DateTime<Utc>>,
+    /// When this PENDING attempt began; `NULL` when the row is not attempting.
+    ///
+    /// Separate from `created_at` because a re-deploy of the same version keeps the
+    /// original creation time - a timeout read from there would fire immediately
+    /// after an operator's retry. See `migrations/0037`.
+    pub attempt_started_at: Option<DateTime<Utc>>,
 }
 
 #[allow(dead_code)]
@@ -360,7 +366,7 @@ async fn create_deployment_inner(
             || existing.status == "DRAINING"
         {
             sqlx::query(
-                "UPDATE kernel.plugin_deployments SET status='PENDING', status_reason='Redeploy requested', desired_replicas=$2, resources=$3, placement=$4, generation=generation+1, updated_at=now(), drain_until=NULL WHERE id=$1",
+                "UPDATE kernel.plugin_deployments SET status='PENDING', status_reason='Redeploy requested', desired_replicas=$2, resources=$3, placement=$4, generation=generation+1, updated_at=now(), drain_until=NULL, attempt_started_at=now() WHERE id=$1",
             )
             .bind(existing.id)
             .bind(payload.desired_replicas)
@@ -471,8 +477,8 @@ async fn create_deployment_inner(
     sqlx::query(
         r#"
         INSERT INTO kernel.plugin_deployments
-          (id, plugin_id, package_id, version, desired_replicas, generation, placement, resources, status, status_reason)
-        VALUES ($1,$2,$3,$4,$5,1,$6,$7,'PENDING','Waiting for placement')
+          (id, plugin_id, package_id, version, desired_replicas, generation, placement, resources, status, status_reason, attempt_started_at)
+        VALUES ($1,$2,$3,$4,$5,1,$6,$7,'PENDING','Waiting for placement',now())
         "#,
     )
     .bind(id)
@@ -969,7 +975,7 @@ pub async fn enable(
         || deployment.status == "FAILED"
     {
         sqlx::query(
-            "UPDATE kernel.plugin_deployments SET status='PENDING', status_reason='Enable requested', generation=generation+1, updated_at=now() WHERE id=$1",
+            "UPDATE kernel.plugin_deployments SET status='PENDING', status_reason='Enable requested', generation=generation+1, updated_at=now(), attempt_started_at=now() WHERE id=$1",
         )
         .bind(deployment.id)
         .execute(&state.db)
@@ -2264,6 +2270,30 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         None => base,
     };
 
+    // HOW LONG THIS ATTEMPT HAS BEEN TRYING AND PLACING NOTHING.
+    //
+    // Computed here, once, because the PENDING branch needs it to tell "starting"
+    // from "never going to start" - see the comment there. Negative is clamped to
+    // zero so a row whose `attempt_started_at` is marginally ahead of the database
+    // clock (a fixture, or clock skew between the writer and this reader) cannot
+    // report a negative age and read as young forever.
+    //
+    // The basis is `attempt_started_at`, NOT `created_at`: a re-deploy keeps the
+    // version's original creation time, so a timeout read from there would fire
+    // immediately after the operator's retry. When the column is NULL - a row that
+    // was not attempting when the migration ran, or one written before this field
+    // existed - the age is 0, which means "treat as just started". That is the
+    // fail-open direction: it delays declaring FAILED rather than declaring it on a
+    // deployment whose age is unknown.
+    let never_placed_for: i64 = if missing == deployment.desired_replicas {
+        deployment
+            .attempt_started_at
+            .map(|started| (Utc::now() - started).num_seconds().max(0))
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
     let (status, reason) = if deployment.desired_replicas == 0 {
         ("DISABLED", Some("Desired replicas is zero".to_string()))
     } else if missing == deployment.desired_replicas {
@@ -2276,7 +2306,49 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         // enough: the operator's next action depends entirely on whether the
         // occupants are this plugin's own stale attempts, another plugin that
         // should be moved, or a limit that should be raised.
-        ("PENDING", placement_note.clone())
+        //
+        // A DEPLOYMENT THAT HAS NEVER PLACED ANYTHING IS NOT "STARTING".
+        //
+        // The reconciler re-plans every PENDING row every 2 seconds, forever.
+        // Nothing ever gives up. Measured on staging 2026-11-25: nine rows that
+        // had never placed a single replica, the oldest three days old, each still
+        // being planned on every tick. They hold no slot - the capacity aggregates
+        // exclude them because they have no START instance - so they were invisible
+        // to every capacity audit, and the only way to see them was to read the
+        // whole deployment table.
+        //
+        // TWO CONDITIONS, AND BOTH ARE NECESSARY.
+        //
+        // `missing == desired_replicas` means NOT ONE replica is placed. A
+        // deployment with some replicas up is still making progress, and calling it
+        // failed would be a lie about a deployment that is partly serving. That is
+        // the same distinction `partial` reports elsewhere.
+        //
+        // The age is measured from `created_at`, which is when this row began
+        // trying. `updated_at` would be useless here: this very function writes it
+        // on every pass that changes the status, so a row's age would reset each
+        // time the reconciler looked at it.
+        //
+        // WHY FAILED AND NOT DISABLED. `DISABLED` is a state an operator chooses;
+        // it also has a STOP write that assumes there was something to stop.
+        // `FAILED` already means "this deployment did not work" to `diagnostics`,
+        // `plugins.rs:609` and the operator UI, and `create_deployment_inner`
+        // already treats FAILED as redeployable. It is the existing vocabulary.
+        //
+        // Nothing is deleted and no instance is stopped here: a deployment that
+        // never placed has nothing to release, and the brief forbids deleting rows.
+        if never_placed_for > state.config.pending_timeout_seconds {
+            (
+                "FAILED",
+                Some(with_placement(format!(
+                    "never placed after {}s: 0/{} replicas, and the last placement attempt \
+                     was refused; re-deploy to try again",
+                    never_placed_for, deployment.desired_replicas
+                ))),
+            )
+        } else {
+            ("PENDING", placement_note.clone())
+        }
     } else if ready == deployment.desired_replicas {
         if is_effective {
             ("ACTIVE", None)
@@ -2317,8 +2389,29 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         )
     };
     if deployment.status != status || deployment.status_reason != reason {
+        // `attempt_started_at` FOLLOWS THE STATUS, IN BOTH DIRECTIONS.
+        //
+        // Entering PENDING with no attempt on record (a fresh row whose caller set
+        // it, or one that reached PENDING by a path this function did not see) gets
+        // a start time. Leaving PENDING clears it, so a later re-entry starts a new
+        // clock rather than inheriting the age of an attempt that already ended -
+        // which is the bug the previous version would have had: a FAILED row keeps
+        // its old timestamp, and a redeploy would be born expired.
+        //
+        // `COALESCE` on the way in, so re-planning an already-PENDING row does not
+        // keep resetting the clock it is measured against.
         sqlx::query(
-            "UPDATE kernel.plugin_deployments SET status=$2, status_reason=$3, updated_at=now() WHERE id=$1 AND status<>'DRAINING'",
+            r#"
+            UPDATE kernel.plugin_deployments
+               SET status=$2,
+                   status_reason=$3,
+                   updated_at=now(),
+                   attempt_started_at = CASE
+                       WHEN $2 = 'PENDING' THEN COALESCE(attempt_started_at, now())
+                       ELSE NULL
+                   END
+             WHERE id=$1 AND status<>'DRAINING'
+            "#,
         )
         .bind(deployment.id)
         .bind(status)
@@ -6049,6 +6142,410 @@ mod tests {
                 named, still_ready,
                 "a READY candidate must be named and a released one must not \
                  (still_ready={still_ready}, named={named})"
+            );
+        }
+    }
+
+    /// A `PENDING` DEPLOYMENT THAT HAS NEVER PLACED A REPLICA IS NOT "STARTING".
+    ///
+    /// Staging, 2026-11-25: nine rows across two plugins, none of which had ever
+    /// placed a single replica, the oldest three days old, every one still being
+    /// re-planned every two seconds. They hold no slot, so no capacity audit could
+    /// see them; the only way to find them was to read the whole deployment table.
+    ///
+    /// This module is that state, narrowed to its two failure modes: a deployment
+    /// that keeps being told the node is full, and the operator's retry - which must
+    /// NOT be born already expired.
+    #[cfg(test)]
+    mod a_pending_deployment_must_not_attempt_forever {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options)
+                .await
+                .expect("cannot connect to the test database");
+            // The schema is what makes this test meaningful: `attempt_started_at`
+            // arrives in migration 0037, and a fixture that ran against an
+            // unmigrated database would fail on a missing COLUMN rather than on the
+            // behaviour under test.
+            crate::db::migrate(&pool)
+                .await
+                .expect("the test database rejected the migrations");
+            Some(pool)
+        }
+
+        /// A node with NO free slot, a package, and a deployment row in the state
+        /// under test, plus a sibling that fills the node so placement really fails.
+        struct Fixture {
+            deployment: Uuid,
+            plugin: String,
+        }
+
+        async fn full_node_fixture(
+            pool: &PgPool,
+            status: &str,
+            attempt_age_secs: i64,
+            state_limit: i32,
+        ) -> Fixture {
+            let tag = Uuid::new_v4().simple().to_string();
+            let plugin = format!("test.pending.{tag}");
+            let sibling = format!("test.pending.other.{tag}");
+            let publisher = format!("pub-{tag}");
+            let node = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64',$5::jsonb,'{}'::jsonb,
+                         'READY',now(),now(),'http://node:7000',$4)",
+            )
+            .bind(node)
+            .bind(format!("node-{tag}"))
+            .bind(format!("token-{tag}"))
+            // A NODE WITHOUT A RESOURCE SNAPSHOT IS REFUSED OUTRIGHT, and the
+            // scheduler then keeps looking at OTHER nodes - including ones other
+            // tests left with free slots. Measured: without this the deployment
+            // under test placed itself on a parallel test's node and went
+            // PREPARING, which read as "the timeout is broken".
+            //
+            // This node is deliberately LARGE, so the only thing that can prevent
+            // placement is the per-node instance limit the fixture fills.
+            .bind(serde_json::json!({
+                "cpuCores": 64,
+                "memoryTotalBytes": 256i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0,
+                "diskTotalBytes": 1024i64 * 1024 * 1024 * 1024,
+                "diskUsedBytes": 0,
+            }))
+            // THE LABEL IS THE ISOLATION. Every query in this module is global over
+            // the shared test database, so a fixture that says only "any READY node"
+            // will happily place itself on a node some parallel test left with free
+            // slots - which is exactly what happened: the deployment under test went
+            // PREPARING and the failure read as "the timeout is broken". A selector
+            // that names this node and nothing else makes the fixture's own topology
+            // the only thing that can decide the outcome.
+            .bind(serde_json::json!({"fixture": tag.clone()}))
+            .execute(pool)
+            .await
+            .expect("node");
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+
+            // Each package carries its OWN tag in the digests. They share a unique
+            // constraint across the table, so one tag reused for two packages
+            // collides with itself before the second row is even written.
+            let make_package = |plugin: &str, version: &str| {
+                (
+                    Uuid::new_v4(),
+                    plugin.to_string(),
+                    version.to_string(),
+                    Uuid::new_v4().simple().to_string(),
+                )
+            };
+            let (sibling_pkg, sibling_plugin, sibling_version, sibling_tag) =
+                make_package(&sibling, "0.0.1");
+            let (pkg, plugin_owned, version, own_tag) = make_package(&plugin, "0.0.1");
+            for (package_id, plugin_id, ver, pkg_tag) in [
+                (
+                    sibling_pkg,
+                    sibling_plugin.clone(),
+                    sibling_version.clone(),
+                    sibling_tag,
+                ),
+                (pkg, plugin_owned.clone(), version.clone(), own_tag),
+            ] {
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_packages
+                       (package_id, plugin_id, version, schema_version, publisher, manifest,
+                        artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                     VALUES ($1,$2,$3,'1.1',$4,'{}'::jsonb,$5,$6,$7,'INSTALLED','VERIFIED')",
+                )
+                .bind(package_id)
+                .bind(&plugin_id)
+                .bind(&ver)
+                .bind(&publisher)
+                // Unique per run: the suite shares one database and the digests
+                // carry a unique constraint, so a fixed value makes the SECOND run
+                // of this test collide with the first one's rows.
+                .bind(format!("{pkg_tag}-{ver}-artifact"))
+                .bind(format!("{pkg_tag}-{ver}-bundle"))
+                .bind(format!("{pkg_tag}-{ver}-payload"))
+                .execute(pool)
+                .await
+                .expect("package");
+            }
+
+            // The sibling occupies slots until the node's per-node limit is reached.
+            //
+            // ONE sibling is not enough, and the first version of this fixture used
+            // one: `evaluate_node` counts `usage.node_instances` from the GLOBAL
+            // aggregate across every deployment, against
+            // `max_instances_per_node` (default 4), not against this deployment's own
+            // instances. With one occupant the scheduler happily placed the
+            // deployment under test and it went PREPARING - the test then failed with
+            // "left: PREPARING, right: PENDING", which reads like the timeout being
+            // wrong and is really the fixture never having created the condition.
+            //
+            // The limit is read from config rather than hard-coded so a run with
+            // OPSWEAVE_MAX_INSTANCES_PER_NODE set still fills the node.
+            let limit = state_limit;
+            let sibling_dep = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status)
+                 VALUES ($1,$2,$3,$4,$5,1,$6::jsonb,
+                         '{\"cpuMillis\":500,\"memoryMib\":256}'::jsonb,'ACTIVE')",
+            )
+            .bind(sibling_dep)
+            .bind(&sibling_plugin)
+            .bind(sibling_pkg)
+            .bind(&sibling_version)
+            .bind(limit)
+            .bind(serde_json::json!({"nodeSelector": {"fixture": tag.clone()}}))
+            .execute(pool)
+            .await
+            .expect("sibling deployment");
+            for slot in 0..limit {
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_instances
+                       (id, deployment_id, node_id, slot, state, desired_action,
+                        deployment_generation, container_id)
+                     VALUES ($1,$2,$3,$4,'READY','START',1,$5)",
+                )
+                .bind(Uuid::new_v4())
+                .bind(sibling_dep)
+                .bind(node)
+                .bind(slot)
+                .bind(format!("container-{slot}"))
+                .execute(pool)
+                .await
+                .expect("sibling instance");
+            }
+
+            let deployment = Uuid::new_v4();
+            // `created_at` IS DELIBERATELY OLDER THAN THE ATTEMPT CLOCK.
+            //
+            // A real row in this position has been around for a while: it was
+            // created, failed, and is now being retried. Leaving `created_at` at its
+            // `now()` default made the redeploy test pass even against a fix that
+            // timed out on `created_at`, because the two clocks happened to agree -
+            // the test agreed with a bug it was written to catch. Separating them
+            // by a day is what makes "the basis is the attempt, not the row" a
+            // thing this fixture can actually distinguish.
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, status_reason, attempt_started_at,
+                    created_at, updated_at)
+                 VALUES ($1,$2,$3,$4,1,1,$7::jsonb,
+                         '{\"cpuMillis\":500,\"memoryMib\":256}'::jsonb,$5,
+                         'Waiting for placement',
+                         now() - ($6 || ' seconds')::interval,
+                         now() - (($6::bigint + 86400) || ' seconds')::interval,
+                         now() - ($6 || ' seconds')::interval)",
+            )
+            .bind(deployment)
+            .bind(&plugin_owned)
+            .bind(pkg)
+            .bind(&version)
+            .bind(status)
+            .bind(attempt_age_secs.to_string())
+            .bind(serde_json::json!({"nodeSelector": {"fixture": tag.clone()}}))
+            .execute(pool)
+            .await
+            .expect("deployment");
+
+            Fixture {
+                deployment,
+                plugin: plugin_owned,
+            }
+        }
+
+        fn state_for(pool: PgPool, pending_timeout_seconds: i64) -> crate::state::AppState {
+            let mut config = crate::config::Config::from_env();
+            config.pending_timeout_seconds = pending_timeout_seconds;
+            crate::state::AppState {
+                config: std::sync::Arc::new(config),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        async fn status_of(pool: &PgPool, id: Uuid) -> (String, Option<String>) {
+            sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .expect("status")
+        }
+
+        async fn attempt_started(pool: &PgPool, id: Uuid) -> Option<chrono::DateTime<chrono::Utc>> {
+            sqlx::query_scalar(
+                "SELECT attempt_started_at FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .expect("attempt_started_at")
+        }
+
+        /// THE DEFECT. A deployment that has been refused placement for longer than
+        /// the timeout must stop claiming to be starting.
+        ///
+        /// Counterfactual: with the timeout branch removed, this is the only test in
+        /// the module that fails - the row stays PENDING and keeps being re-planned.
+        #[tokio::test]
+        async fn a_deployment_that_never_placed_is_not_pending_forever() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let node_limit = crate::config::Config::from_env().max_instances_per_node as i32;
+            let f = full_node_fixture(&pool, "PENDING", 3600, node_limit).await;
+            let state = state_for(pool.clone(), 600);
+
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+
+            let (status, reason) = status_of(&pool, f.deployment).await;
+            assert_eq!(
+                status, "FAILED",
+                "a deployment with 0 replicas placed for an hour must not still say PENDING \
+                 (plugin={}, reason={reason:?})",
+                f.plugin
+            );
+            let reason = reason.unwrap_or_default();
+            assert!(
+                reason.contains("never placed"),
+                "the reason must say what happened, not just carry the placement rejection: {reason}"
+            );
+            assert!(
+                reason.contains("re-deploy"),
+                "and it must tell the operator what to do about it: {reason}"
+            );
+            assert_eq!(
+                attempt_started(&pool, f.deployment).await,
+                None,
+                "leaving PENDING must clear the attempt clock"
+            );
+        }
+
+        /// A DEPLOYMENT THAT IS STILL INSIDE ITS TIMEOUT IS NOT A FAILURE.
+        ///
+        /// The other half of the same rule. Without it, a fix that failed everything
+        /// would pass the test above.
+        #[tokio::test]
+        async fn a_young_pending_deployment_is_left_alone() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let node_limit = crate::config::Config::from_env().max_instances_per_node as i32;
+            let f = full_node_fixture(&pool, "PENDING", 5, node_limit).await;
+            let state = state_for(pool.clone(), 600);
+
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+
+            let (status, _) = status_of(&pool, f.deployment).await;
+            assert_eq!(
+                status, "PENDING",
+                "five seconds into a ten-minute timeout the deployment is still starting"
+            );
+            assert!(
+                attempt_started(&pool, f.deployment).await.is_some(),
+                "and its clock keeps running - clearing it here would restart the timeout \
+                 on every pass and the row would never expire"
+            );
+        }
+
+        /// THE OPERATOR'S RETRY MUST NOT BE BORN EXPIRED.
+        ///
+        /// This is the defect the first version of the fix had. `created_at` does not
+        /// change when a failed version is re-deployed, so a timeout read from it
+        /// fires on the first pass after the retry: the redeploy is declared FAILED
+        /// before it has had a single chance to place.
+        ///
+        /// The assertion drives that sequence through the real `create_deployment_inner`
+        /// path rather than simulating it, because the reset lives in that statement.
+        #[tokio::test]
+        async fn a_redeploy_starts_a_fresh_clock() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            // An old row that already failed: `created_at` is ancient, the attempt
+            // clock is old too, and nothing is PENDING.
+            let node_limit = crate::config::Config::from_env().max_instances_per_node as i32;
+            let f = full_node_fixture(&pool, "FAILED", 7200, node_limit).await;
+            let state = state_for(pool.clone(), 600);
+
+            // What a redeploy does to the row: back to PENDING with a NEW clock.
+            sqlx::query(
+                "UPDATE kernel.plugin_deployments
+                    SET status='PENDING', status_reason='Redeploy requested',
+                        generation=generation+1, updated_at=now(),
+                        drain_until=NULL, attempt_started_at=now()
+                  WHERE id=$1",
+            )
+            .bind(f.deployment)
+            .execute(&pool)
+            .await
+            .expect("redeploy");
+
+            let age: i64 = sqlx::query_scalar(
+                "SELECT EXTRACT(EPOCH FROM (now() - attempt_started_at))::bigint \
+                   FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(f.deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("age");
+            assert!(
+                age < 60,
+                "the redeploy's clock must start now, not inherit the failed attempt's age \
+                 (age={age}s)"
+            );
+
+            // And one reconcile pass must leave it PENDING rather than declaring it
+            // failed on the strength of its `created_at`.
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+            let (status, reason) = status_of(&pool, f.deployment).await;
+            assert_eq!(
+                status, "PENDING",
+                "a just-redeployed version must get its full timeout, not be failed on the \
+                 first pass (reason={reason:?})"
             );
         }
     }
