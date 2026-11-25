@@ -1919,22 +1919,35 @@ jobs:
           if [ "$IDX_RC" -ne 0 ]; then
             echo "::warning::the evidence index is incomplete (rc=$IDX_RC); see index.json"
           fi
+          # The summary is produced by a FILE, not an inline -e string.
+          #
+          # The inline version was correct and shellcheck rejected it (SC2016:
+          # "expressions don't expand in single quotes") because `${k}` inside a
+          # single-quoted argument reads as a shell template to the linter. It is
+          # JavaScript's template literal, so nothing was wrong - but the lint is
+          # a gate, and a false positive that has to be suppressed once will be
+          # suppressed again by someone who does not check. A script file has no
+          # quoting to misread.
+          cat > artifacts/evidence-index/summary.mjs <<'SUMMARY_EOF'
+          import { readFileSync } from 'node:fs';
+          try {
+            const d = JSON.parse(readFileSync('./artifacts/evidence-index/index.json', 'utf8'));
+            for (const [k, v] of Object.entries(d.summary)) console.log(k + ': ' + v);
+            if (d.passedNoEvidence.length) {
+              console.log('');
+              console.log('passed with NO artifact of their own (not the same as verified):');
+              for (const n of d.passedNoEvidence) console.log('  ' + n);
+            }
+          } catch (e) {
+            console.log('index.json unreadable: ' + e.message);
+          }
+          SUMMARY_EOF
           {
             echo "## Evidence index"
             echo
             echo "Every check on this commit, with whether it has evidence of its own."
             echo '```'
-            node -e '
-              try {
-                const d = require("./artifacts/evidence-index/index.json");
-                for (const [k, v] of Object.entries(d.summary)) console.log(`${k}: ${v}`);
-                if (d.passedNoEvidence.length) {
-                  console.log("");
-                  console.log("passed with NO artifact of their own (not the same as verified):");
-                  for (const n of d.passedNoEvidence) console.log("  " + n);
-                }
-              } catch (e) { console.log("index.json unreadable: " + e.message); }
-            '
+            node artifacts/evidence-index/summary.mjs || echo "summary could not be produced"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit 0
