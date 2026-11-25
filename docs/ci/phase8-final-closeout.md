@@ -1,14 +1,20 @@
 # Phase 8 — closeout
 
-Written 2026-11-25. Baseline `a039cf6c` (#212). Head at time of writing `aedc7680`
-plus #222 in flight.
+Written 2026-11-25. Baseline `a039cf6c` (#212). Head at time of writing `a1f468ff`
+(#223).
 
 **Conclusion: `COMPLETE_WITH_DOCUMENTED_NON_BLOCKING_LIMITATIONS`.**
 
-Not `COMPLETE`. Two things are load-bearing and are not done: the live branch
-ruleset enforces **no required status check at all**, and no real staging
-acceptance was performed. Both are `BLOCKED_AUTH` / `BLOCKED_ENV` and neither is
-paperable over.
+Not `COMPLETE`. Three things are load-bearing and are not done: the live branch
+ruleset enforces **no required status check at all**, no real staging acceptance
+passed, and **the fix for the staging capacity defect was deployed on 2026-11-25
+and did not take effect**. The first is `BLOCKED_AUTH`; the second and third were
+attempted and measured, and the measurement is negative.
+
+A negative measurement is not a reason to withhold the whole phase — the phase's
+defects were real, their fixes are verified against PostgreSQL and committed, and
+every claim below is one of `fixture` / `component` / `real`. It is a reason not to
+write `COMPLETE`.
 
 ---
 
@@ -17,8 +23,8 @@ paperable over.
 | | |
 |---|---|
 | main at start | `a039cf6c79856985985f8a22fc28eaf6704af64c` (#212) |
-| main at close | `aedc7680` (#221), with #222 in flight |
-| PRs merged this phase | 9 — #213, #214, #215, #216, #217, #218, #219, #220, #221 (and #222) |
+| main at close | `a1f468ff57a12cdbdf396373f7f9b6ff74826f4e` (#223) |
+| PRs merged this phase | 11 — #213, #214, #215, #216, #217, #218, #219, #220, #221, #222, #223 |
 | open PRs at start | 0 |
 
 ## 2. Task status
@@ -37,8 +43,8 @@ The brief listed 41 tasks. What was actually executed:
 | **35** | **NOT DONE** — CI cost was not measured. No claim is made about it |
 | **36** | **PARTIAL** — the central rule is verified and asserted (the gate cannot read a classification); the full contract re-verification was not run |
 | **38** | **NOT DONE** — no failure-injection matrix. The one injection that mattered is a kernel test in #220 |
-| **39** | **BLOCKED_ENV** — real staging acceptance. No staging access |
-| **40** | **PARTIAL** — main CI was read for each merge; see §4 |
+| **39** | **ATTEMPTED, RESULT NEGATIVE** — a real staging deploy was authorised and run; the fix is on the host and did not release the four rows. See §6 |
+| **40** | **PARTIAL** — main CI was read for each merge; see §4. Now also a tool (`verify-main.mjs`), not only a habit |
 | **41** | this document |
 
 ## 3. Defects confirmed this phase
@@ -80,6 +86,8 @@ commits. Measured:
 | `a1634d62` (#219) | success | success | success | failure |
 | `a7d6cd65` (#220) | **cancelled** | **cancelled** | success | failure |
 | `aedc7680` (#221) | **success** (`ci-gate` included) | **success** | **success** | failure (capacity) |
+| `079f8fce` (#222) | success | success | success | failure (capacity) |
+| `a1f468ff` (#223) | **success** (`ci-gate` included) | **success** | **success** | **failure (capacity, with the fix deployed and installed)** |
 
 Verified at `aedc7680` on 2026-11-25: `ci` (run 45593146700) completed **success**
 with `ci-gate` success among its jobs, `data-foundation` (45593146075) success, and
@@ -94,11 +102,31 @@ runs on `main`, not from the pull request.
 run is the one that counts.
 
 **`staging-preview` fails on every commit, including the baseline.** That is the
-capacity defect #220 fixes. Confirmed on the current head, `aedc7680`
-(run 45593146217, 10:15Z): the log still reads `INSTANCE_CAPACITY_EXCEEDED` and
-`4 instances already scheduled`. **The fix is merged and not deployed** — the four
-rows are still there. Releasing them requires a staging deploy, which is TASK-39
-and needs authorization this session does not have.
+capacity defect #220 fixes. `aedc7680` (run 45593146217, 10:15Z) reads
+`INSTANCE_CAPACITY_EXCEEDED` and `4 instances already scheduled`.
+
+The last row is the one that matters, and it changes what the rest of this table
+means: at `a1f468ff` the fix **is on the host** — `served_commit` and the image
+digest say so — and the publish still fails on the same four occupants. **A merged
+fix and a deployed fix are different facts, and neither is a fix that works.** The
+measurement is in §6.
+
+`a1f468ff`'s own `ci` run completed **success** with `ci-gate` success and zero
+failed or cancelled jobs; it was still `in_progress` when this table was first
+drafted, and that draft said `success` anyway. See §12.2.
+
+Running `verify-main` against the head gives the answer this phase is built on:
+
+```
+$ node tests/ci/verify-main.mjs --sha a1f468ff
+FAILED  a1f468ff
+  1 workflow(s) failed on this commit: staging-preview.yml: failure
+  verified: ci.yml
+```
+
+Exit 1. The commit is on `main`, it is green where it is green, and **it is not a
+verified commit** — one workflow that must run on every push failed. That is the
+distinction TASK-40 exists to preserve, applied to this phase's own head.
 
 ## 5. Fixture vs. real execution — kept apart
 
@@ -106,23 +134,112 @@ Every claim in this phase is one of three kinds, and they are not mixed:
 
 | kind | what was run | where |
 |---|---|---|
-| **fixture** | committed JSON, no network | classifier's 10 counterexamples; index's 16 assertions; sanitizer's 17 |
-| **component** | real PostgreSQL, real kernel process, real Docker | 346 kernel tests; the Phase 7 suites; capacity preflight |
-| **real staging** | — | **nothing** |
+| **fixture** | committed JSON, no network | classifier's 10 counterexamples; index's 16 assertions; sanitizer's 17; verify-main's 19 |
+| **component** | real PostgreSQL, real kernel process, real Docker | the kernel suite; the Phase 7 suites; capacity preflight |
+| **real staging** | **one deploy, 2026-11-25, result negative** | §6 — run 45608152539 |
 
 The staging capacity audit (#220) reads a **failed run's own uploaded artifacts**
 plus the kernel source. No query was executed against staging, no row was deleted,
 and no capacity limit was raised.
 
+The one real staging action taken this phase is the deploy in §6, authorised
+explicitly for this task. Its evidence is the run's own artifacts and log; it
+established that the fix is running and did not work, and it established nothing
+beyond that.
+
 ## 6. Staging: what is actually true
 
-- The node was at 4/4 and every publish failed after a full build.
-- The rule in #222 releases **two of the four** rows: `data-catalog@0.0.2` and
-  `data-catalog@0.0.3590`, both superseded by `0.0.65450`.
-- The other two — `dev.opsweave.hello@0.0.1` and `data-integration@0.0.2` — are each
-  their plugin's only version and are **not touched**. Whether they are genuinely
-  `ACTIVE` needs the staging database.
-- **The fix is not deployed.** The four rows are still there right now.
+The four occupants, the capacity failure, and the audit that found the defect
+(`READY` deployments that were never activated held their node slots forever) are
+recorded in `phase8b-capacity-audit.md`. What changed on 2026-11-25 is that the
+fix was **deployed and measured**, and the measurement was negative.
+
+### The deploy
+
+`staging-preview` run **45608152539**, `push` on `a1f468ff`, 11:50Z–12:00Z. A
+dispatch for `079f8fce` (45607268815) was cancelled by this run through the shared
+concurrency group — **my ordering error**, not a workflow fault: the deploy was
+triggered before the merge instead of after. `a1f468ff` contains the same fix, so
+the push run is an equally valid deploy of it.
+
+| step | result |
+|---|---|
+| build image | success |
+| deploy to staging host, steps 1–10 (checkout, SSH, install, pull, deploy, health) | **success** |
+| step 13, `Publish the data plugin bundles` | **failure** |
+| collect host status / upload evidence | success |
+
+The host's own status file puts the fix on staging:
+
+```json
+"current": {"sha": "a1f468ff57a12cdbdf396373f7f9b6ff74826f4e",
+            "digest": "sha256:36f3feb046921332c384ceae77e708d0e19da8d604383adc2d52e6080344057d",
+            "deployed_at": "2026-11-25T11:54:29Z", "healthy": true}
+"health": {"livez": "pass", "readyz": "pass", "root": "pass"}
+```
+
+### The measurement
+
+The publish step ran 11:54:35 → 11:59:53 — five minutes on a kernel six seconds
+old — and for the whole window the same line repeated:
+
+```
+PENDING 0/0 ready ([INSTANCE_CAPACITY_EXCEEDED] node staging-node: 4 instances
+already scheduled against a per-node limit of 4; occupied by
+dev.opsweave.hello@0.0.1, opsweave.data-catalog@0.0.2,
+opsweave.data-catalog@0.0.3590, opsweave.data-integration@0.0.2)
+Error: timed out waiting for deployment readiness
+```
+
+**The same four occupants as before the deploy. None released.**
+
+| claim | status |
+|---|---|
+| the fix is running on staging | **verified** — `served_commit` is `a1f468ff`, digest measured |
+| it releases the two `data-catalog` rows | **DISPROVEN on this deploy** |
+| the four are "superseded and never activated" | **no longer supported** — that was an inference, never an observation |
+| staging's plugin path works | **no** |
+
+### Why the prediction failed, and what is still unknown
+
+The rule matches on `d.status = 'READY'`. **That premise was inferred, never
+verified** — nothing in any artifact carries a deployment's status. Two facts from
+the source narrow it without closing it:
+
+1. `capacity_occupants` lists only instances with `desired_action='START'`
+   (`deployments.rs:2685`), and a deployment that cannot place a slot has its rows
+   written to `STOP` (`:2092`). So all four occupants did place an instance at some
+   point.
+2. A version that already exists in `PENDING`/`PREPARING`/`READY` is answered with
+   202 and returned untouched (`deployments.rs:352`) — no new row, no state
+   advance. `data-catalog@0.0.65450` therefore stays `PENDING` for as long as it
+   is asked for.
+
+Which clause of the rule failed needs the four rows' `status` and `created_at`.
+This session has no path to them: `opsctl capacity --json` prints exactly that,
+read-only, but it needs a session on the host, and the host is not reachable from
+here.
+
+> Recorded because it was nearly written down wrongly: `http://<staging>:3000/livez`
+> answers **502** from this machine, which reads as "staging is down". It is the
+> local proxy — `connect=0.0003s` with `Proxy-Connection: keep-alive`, and
+> `--noproxy '*'` gives `000`. **The 502 is my machine.** Staging's only real
+> evidence is its own status endpoint, which said healthy.
+
+### What this does not license
+
+- **Not "the fix is wrong."** It is "deployed, no effect, clause unknown".
+- **Not "raise the limit."** The brief forbids it
+  (「禁止仅通过提高 Staging 实例容量来掩盖插件生命周期问题」), and 4/4 with four
+  named occupants is a condition, not a cause.
+- **No row was deleted, no limit changed.** The run's only writes were a deploy's.
+
+### The instrument that is missing
+
+No artifact carries deployment state. The next cheap step is to have the deploy job
+run `opsctl capacity --json` into the `staging-deploy` artifact, so the question
+this task turned on — which row is `READY`, and since when — is answerable from the
+run instead of by inference. **That is a follow-up; it is not in this phase.**
 
 ## 7. Required Check status
 
@@ -185,8 +302,9 @@ identity problem ADR-025 describes remains `NEEDS_DECISION`.
 | item | status |
 |---|---|
 | Ruleset migration (required checks) | `BLOCKED_AUTH` — payload and rollback ready, write not authorised |
-| Real staging acceptance (TASK-39) | `BLOCKED_ENV` — no access |
-| The four staging rows | still present; two are releasable by #222 once deployed |
+| The staging capacity fix | **deployed 2026-11-25 and ineffective** — four rows unreleased, failing clause unknown (§6) |
+| Real staging acceptance (TASK-39) | **attempted, negative** — the deploy succeeded and the plugin path still fails |
+| Deployment state in an artifact | missing — no artifact carries per-deployment status; `opsctl capacity --json` would |
 | `RECLAIM_REQUIRED` reaching a caller | kernel returns it; `opsctl` still times out unchanged |
 | TASK-33/34 release identity | not started |
 | TASK-35 CI cost | not measured |
@@ -194,18 +312,71 @@ identity problem ADR-025 describes remains `NEEDS_DECISION`.
 
 ## 12. The pattern worth carrying forward
 
-Four times this phase, the deliverable was **correct and connected to nothing**:
+**Five** times this phase, the deliverable was **correct and connected to nothing**:
 
 1. a Phase 7 suite with a CI step and zero assertions (#215);
 2. a classifier and a collector no workflow invoked (#219 → measured in #221);
 3. a capacity preflight the deploy path never called (#220);
-4. `ci.yml` uploading nothing at all (#221).
+4. `ci.yml` uploading nothing at all (#221);
+5. **the deploy job never runs `opsctl capacity`** — the one read-only command that
+   prints per-deployment status, in a phase whose central question was "which row
+   is READY". Found while trying to answer that question and discovering no
+   artifact could (§6).
 
 Each was found by asking **"who calls this"**, never by reading the code. The
 cheapest gate this repository could add is one that asks that question about every
 tool it builds.
 
-The second pattern: **a test suite that passes because no fixture reaches the hard
-case.** The version-ordering defect in #222 passed all five tests in its module;
-the counterfactual only failed once a fixture straddled a digit boundary. A rule can
-be wrong in exactly the case nobody built.
+### 12.1 The second pattern, and this phase produced its strongest instance
+
+**A conclusion that was reasoning all the way down, and never touched.** §6 is one
+inference stacked on another: the four rows are `READY` → therefore superseded →
+therefore released. Every step is defensible and none was measured. The deploy
+turned the last step false without contradicting either of the first two — the
+actual clause that failed is still unknown.
+
+The tell is in what the earlier version of this document said: *"reasoned from the
+rule + the occupant list, not observed"* — and then, four lines later, a table row
+reading *"the fix resolves staging: not verified and not claimed"*. The distinction
+was already written down correctly. It just was not load-bearing, because nothing
+downstream depended on it. **A caveat that changes no decision is decoration.**
+
+What fixed it was cheap: one authorised deploy. What it cost was being wrong in
+public. What it bought is the only sentence in this phase that is worth anything
+about staging — *the fix is on the host and did not work* — plus the knowledge that
+the instrument to explain it does not exist yet.
+
+### 12.2 A number must come from the sample it describes
+
+Nearly written down twice, in two shapes:
+
+- `http://<staging>:3000/livez` → **502**, which reads as "staging is down". It was
+  the local HTTP proxy: `connect=0.0003s`, `Proxy-Connection: keep-alive`, and
+  `--noproxy '*'` → `000`. **The sample was my machine.**
+- the closeout table row for `a1f468ff` was set to `success` before `ci.yml` had
+  finished. It was `in_progress` at that moment, and it was only caught because the
+  row was being cross-checked against the API rather than against the memory of a
+  green PR.
+
+Both are the same mistake as 「PR 通过不等于 main 通过」, which this phase spent a
+whole task building a tool for. The tool is now right and the habit is not yet.
+
+### 12.3 A suite that passes because no fixture reaches the hard case
+
+The version-ordering defect in #222 passed all five tests in its module. The
+counterfactual only failed once a fixture straddled a digit boundary — `0.0.9`
+before `0.0.10` with an older `created_at`. A rule can be wrong in exactly the case
+nobody built.
+
+Then the same shape appeared in a test rather than in a rule, and this time the fix
+was found by running the counterfactual rather than by reading the code. The test
+that was supposed to catch "this suite dirties the working tree" asserted only
+`git status | grep '^ M'` — so when the fixtures were files that had just been
+**deleted** from the index, the pollution appeared as `??` and the assertion passed.
+Measured: the counterfactual reported `ok and rewrote no tracked fixture` while
+seven files had been written into the repository. Fixed to `grep -v '^D '`, which
+catches both shapes.
+
+The lesson is the same one as above: **an assertion is only worth its
+counterfactual.** Reading it told me it was correct; running it told me it was
+not.

@@ -106,6 +106,138 @@ is ready and cheap, not as something done.
 
 ---
 
+# TASK-39, executed: the fix was deployed and did not take effect
+
+**This section replaces the "not performed" above. A real staging deploy was
+authorised and run on 2026-11-25, and it measured the opposite of what the
+reasoning predicted.** The earlier sections are left as they were written, because
+what they got wrong is the point.
+
+## What ran
+
+`staging-preview` run **45608152539**, `push` on `a1f468ff`, 11:50Z–12:00Z. The
+dispatch attempt before it (45607268815, for `079f8fce`) was **cancelled by this
+run** through the shared `staging-preview-deploy` concurrency group — my ordering
+error, stated plainly at the time: the deploy should have been triggered after the
+merge, not before.
+
+`a1f468ff` contains both `newer.created_at > d.created_at` and the
+`RELEASE A SUPERSEDED CANDIDATE` statement, so the push-driven run is an equally
+valid deploy of the same fix.
+
+## What the host actually reports
+
+`host-status.json`, from the run's own `staging-deploy` artifact, `11:59:57Z`:
+
+```json
+"current": {"sha": "a1f468ff57a12cdbdf396373f7f9b6ff74826f4e",
+            "digest": "sha256:36f3feb046921332c384ceae77e708d0e19da8d604383adc2d52e6080344057d",
+            "deployed_at": "2026-11-25T11:54:29Z", "healthy": true, "rolled_back": false}
+"health": {"livez": "pass", "readyz": "pass", "root": "pass"}
+"served_commit": {"sha": "a1f468ff…", "state": "observed"}
+"services": postgres running, registry running, kernel running, node running
+```
+
+Steps 1–10 of the deploy job were **success**. The kernel and node were replaced
+with the build that contains the fix, and they are healthy.
+
+## What the publish step then did
+
+Step 13, `Publish the data plugin bundles`, ran **11:54:35 → 11:59:53** — five
+minutes on a kernel that had been up for six seconds. For the whole window the
+same line repeated:
+
+```
+PENDING 0/0 ready (No eligible healthy node matches the placement selector
+[INSTANCE_CAPACITY_EXCEEDED] node staging-node: 4 instances already scheduled on
+this node against a per-node limit of 4; occupied by dev.opsweave.hello@0.0.1,
+opsweave.data-catalog@0.0.2, opsweave.data-catalog@0.0.3590,
+opsweave.data-integration@0.0.2)
+Error: timed out waiting for deployment readiness
+```
+
+**The four occupants are exactly the four from before the deploy.** Not one was
+released.
+
+| claim | status |
+|---|---|
+| the fix is running on staging | **verified** — `served_commit` is `a1f468ff`, digest measured |
+| the fix releases the two rows | **DISPROVEN on this deploy** — both are still occupants |
+| the four are "superseded, never activated" | **no longer supported** — see below |
+| staging's plugin path now works | **no** |
+
+## Why the earlier reasoning was wrong
+
+The audit reasoned: two `data-catalog` rows are superseded by `0.0.65450`, so the
+rule releases them. The rule matches on `d.status = 'READY'`. **The premise that
+these rows are `READY` was never verified, and could not be from outside.**
+
+Two things are certain from the code, and both narrow the failure:
+
+1. **`capacity_occupants` only lists instances with `desired_action='START'`**
+   (`deployments.rs:2685`). A deployment that could never place a slot has its
+   rows written to `STOP` by the `missing` branch (`:2092`). So all four occupants
+   **did place an instance at some point**.
+2. **A version that already exists in `PENDING`/`PREPARING`/`READY` is returned
+   untouched** — `create_deployment_inner` answers 202 and returns the existing
+   view (`deployments.rs:352-356`) without inserting a row or advancing a state.
+   So `data-catalog@0.0.65450` stays `PENDING` for as long as it is ever asked
+   for, and every later publish of that version short-circuits the same way.
+
+What this does **not** establish is which of the four rows the rule should have
+matched. That needs their `status` and `created_at`, and **this session has no
+path to them**: `opsctl capacity` returns exactly that, but it needs a session on
+the host, and the host's port is not reachable from here.
+
+> A note on how that limit was established, because the first answer was wrong.
+> Probing `http://82.156.234.84:3000/livez` returns **502**, which looks like a
+> dead staging host. It is not: `connect=0.0003s` and `Proxy-Connection: keep-alive`
+> are the local proxy answering, and `--noproxy '*'` returns `000` — no connection
+> at all. **The 502 is my machine, not staging.** Staging was measured healthy by
+> its own status endpoint four minutes earlier, and that is the only evidence
+> about it this session has.
+
+## What this does not license
+
+- **It is not "the fix is wrong."** The rule did not match; which clause failed is
+  unknown. The honest statements are "deployed, no effect" and "the reason is not
+  observable from here".
+- **It is not "capacity should be raised."** The brief forbids it
+  (「禁止仅通过提高 Staging 实例容量来掩盖插件生命周期问题」) and the deploy gives
+  no evidence for it — 4/4 with four named occupants is the condition, not the
+  cause.
+- **No row was deleted, no limit changed, no cleanup was attempted.** The run's
+  only writes were the ones a deploy makes.
+
+## The next instrument, and it is a small one
+
+The gap is that **no artifact carries deployment state**. `host-status.json` has
+services and health; the occupants appear only inside an error string. A run
+therefore cannot answer "which of these is READY, and since when" — which is the
+single question this task turned on.
+
+`opsctl capacity --json` already prints `status`, `replicas`, `active` and
+`statusReason` per deployment, read-only. The deploy job does not call it. Wiring
+that output into `staging-deploy` would make the next deploy self-explaining
+instead of requiring another round of inference.
+
+**What it would change, concretely** — otherwise it is a nice sentence:
+
+| with the artifact | which clause of the rule is failing |
+|---|---|
+| a row is `READY` and older than `0.0.65450` | the rule should have matched; look at `waiting` and `activation_revisions` |
+| a row is `ACTIVE` | the rule was right to skip it, and the defect is elsewhere entirely |
+| a row is `PENDING` | the rule never had a candidate; the defect is in what leaves rows `PENDING` |
+
+Those three lead to three different fixes. Without the artifact they are
+indistinguishable, and picking one would be guessing — which is exactly what the
+earlier version of this document did.
+
+That is a follow-up, not a claim. **It is not in this phase's changes.**
+
+
+---
+
 # TASK-40: the rule had no tool, so it was a sentence
 
 The brief's five TASK-40 requirements, and where each is enforced:

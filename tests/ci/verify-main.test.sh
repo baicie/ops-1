@@ -24,9 +24,21 @@ ok()  { PASS=$((PASS + 1)); printf '  ok   %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1"; }
 
 TOOL=tests/ci/verify-main.mjs
-FIX=tests/ci/fixtures/mainruns
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+# THE FIXTURES LIVE IN A TEMPORARY DIRECTORY, NOT IN THE REPOSITORY.
+#
+# This test used to write them to `tests/ci/fixtures/mainruns/` and commit them,
+# and it regenerated them on every run. The `runId` was `hash(wf) % 10000`, and
+# Python's string hash is RANDOMIZED PER PROCESS (`PYTHONHASHSEED`), so every run
+# produced different bytes: a clean tree became dirty merely by running the
+# suite. That is a test with a side effect, and it surfaced as `git checkout`
+# aborting on a "modified" fixture nobody had edited.
+#
+# Nothing outside this file reads those fixtures (verified: the only reference is
+# the FIX assignment that used to be here), and no assertion reads `runId`. So the
+# whole set is generated into $WORK and thrown away with it.
+FIX="$WORK/fixtures"
 mkdir -p "$FIX"
 
 state_of() { node "$TOOL" --from-json "$1" --json 2>/dev/null | python3 -c 'import json,sys;print(json.load(sys.stdin)["state"])'; }
@@ -35,11 +47,16 @@ state_of() { node "$TOOL" --from-json "$1" --json 2>/dev/null | python3 -c 'impo
 # Fixtures. Each models one real commit on main.
 # ---------------------------------------------------------------------------
 python3 - "$FIX" <<'PY'
-import json, sys, os
+import json, sys, os, zlib
 d = sys.argv[1]
+# A DETERMINISTIC runId. `hash()` is randomized per process, so it made the
+# fixtures differ on every run; nothing asserts this field, it exists so a
+# reader can tell two runs apart. crc32 is stable across processes and
+# versions, which is all this needs to be.
 def run(wf, concl, status="completed", created="2026-11-25T00:00:00Z", attempt=1):
     return {"workflow": wf, "name": wf.replace(".yml", ""), "status": status,
-            "conclusion": concl, "createdAt": created, "attempt": attempt, "runId": hash(wf) % 10000}
+            "conclusion": concl, "createdAt": created, "attempt": attempt,
+            "runId": zlib.crc32(wf.encode()) % 10000}
 
 # VERIFIED: the three unfiltered workflows all succeeded.
 json.dump({"sha": "aaa", "runs": [
@@ -179,6 +196,51 @@ assert "pull request" in d["note"].lower(), d["note"]
 
 echo "== 11. no network is needed for any case above"
 grep -qE -- '--sha [0-9a-f]{7,}' "$0" && bad "this self-test calls the live API" || ok "no live sha appears in this file"
+
+echo "== 12. running this suite does not modify the working tree"
+# A test that dirties the repository on every run is a test that lies about the
+# state of the checkout: `git checkout` starts refusing, and a real uncommitted
+# change hides among regenerated fixtures. This repository had exactly that - the
+# fixtures were written into `tests/ci/fixtures/mainruns/` with a randomized
+# `hash()` in them, so the bytes changed on every invocation.
+#
+# WHAT THIS COMPARES, AND WHY IT IS A DELTA.
+#
+# The first version asserted that `git status -- tests/ci/fixtures` was empty. It
+# was wrong the moment the fixtures were deleted from the repository: a staged
+# deletion is a legitimate state of the checkout, and the assertion reported the
+# author's own `git rm` as "this suite modified the repository". A test that
+# fails on someone else's edit teaches a reader to skip it.
+#
+# The question is "did THIS RUN change anything", so it is answered as a
+# difference between the tree before and after. Whatever the checkout already
+# carried is not this suite's business.
+# THE CHECK RUNS AT THE END OF THE FILE, WHICH IS THE RIGHT PLACE FOR IT.
+#
+# Every fixture was generated at the top and every case above has run, so if this
+# suite writes into the repository it has already done so by now. No before/after
+# pair is needed - and taking one around a nested `bash "$0"` would be unbounded
+# recursion.
+UNTRACKED="$(git status --porcelain --untracked-files=all -- tests/ci/fixtures 2>/dev/null | grep '^??' || true)"
+[ -z "$UNTRACKED" ] && ok "this suite left no new files in tests/ci/fixtures/" \
+  || bad "this suite wrote into the repository: $UNTRACKED"
+# And nothing under the repository's fixture directory is a leftover of this run.
+#
+# TWO SHAPES, AND THE FIRST VERSION ONLY CAUGHT ONE. A fixture written back into a
+# tracked directory shows as ` M` once the file is committed, but as `??` while it
+# is still deleted from the index - and the first version asserted only ` M`, so
+# the counterfactual passed the assertion that was supposed to catch it. Found by
+# running the counterfactual rather than by reading this block.
+#
+# The staged deletion of the directory is `D ` and is not this suite's doing, so
+# it is the one status that is allowed here.
+LEFTOVER="$(git status --porcelain --untracked-files=all -- tests/ci/fixtures 2>/dev/null \
+  | grep -v '^D ' || true)"
+[ -z "$LEFTOVER" ] && ok "and left nothing behind under tests/ci/fixtures/" \
+  || bad "this suite wrote into the repository: $LEFTOVER"
+[ ! -d tests/ci/fixtures/mainruns ] \
+  && ok "and no fixture set is written into the repository" \
+  || bad "tests/ci/fixtures/mainruns/ exists again - fixtures belong in \$WORK"
 
 echo
 [ "$FAIL" -eq 0 ] && { echo "$PASS passed, 0 failed"; exit 0; }
