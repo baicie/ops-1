@@ -221,6 +221,18 @@ single question this task turned on.
 that output into `staging-deploy` would make the next deploy self-explaining
 instead of requiring another round of inference.
 
+**What it would change, concretely** — otherwise it is a nice sentence:
+
+| with the artifact | which clause of the rule is failing |
+|---|---|
+| a row is `READY` and older than `0.0.65450` | the rule should have matched; look at `waiting` and `activation_revisions` |
+| a row is `ACTIVE` | the rule was right to skip it, and the defect is elsewhere entirely |
+| a row is `PENDING` | the rule never had a candidate; the defect is in what leaves rows `PENDING` |
+
+Those three lead to three different fixes. Without the artifact they are
+indistinguishable, and picking one would be guessing — which is exactly what the
+earlier version of this document did.
+
 That is a follow-up, not a claim. **It is not in this phase's changes.**
 
 
