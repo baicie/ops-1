@@ -79,7 +79,13 @@ commits. Measured:
 | `b217284a` (#218) | success | — | — | failure |
 | `a1634d62` (#219) | success | success | success | failure |
 | `a7d6cd65` (#220) | **cancelled** | **cancelled** | success | failure |
-| `aedc7680` (#221) | see §7 | see §7 | see §7 | see §7 |
+| `aedc7680` (#221) | **success** (`ci-gate` included) | **success** | **success** | failure (capacity) |
+
+Verified at `aedc7680` on 2026-11-25: `ci` (run 45593146700) completed **success**
+with `ci-gate` success among its jobs, `data-foundation` (45593146075) success, and
+`platform-linux-acceptance` (45593146573) success. This is the check the brief
+requires and the one a green PR cannot substitute for — it was read from the push
+runs on `main`, not from the pull request.
 
 **The two `cancelled` rows are correct behaviour, not a defect.** `ci.yml` sets
 `cancel-in-progress: true` for pushes on a shared ref, so merging #221 while #220's
