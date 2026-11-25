@@ -27,6 +27,26 @@ pub struct Config {
     pub session_hours: i64,
     pub heartbeat_interval_seconds: u32,
     pub node_stale_seconds: i64,
+    /// How long a deployment may sit in `PENDING` with nothing placed before it is
+    /// declared `FAILED`.
+    ///
+    /// `PENDING` means "placement has not succeeded yet", and the reconciler
+    /// re-plans it every 2 seconds forever. On staging that produced nine rows
+    /// which had never placed a single replica, some of them days old, all still
+    /// being re-planned. They hold no slot, so they were invisible in every
+    /// capacity count, but they are work the platform keeps doing for a deployment
+    /// that cannot succeed, and an operator reading the table cannot tell "starting"
+    /// from "never going to start".
+    ///
+    /// 600 seconds is chosen against the *waiter*, not against a guess: `opsctl
+    /// deploy --wait` polls for a bounded time and a publish that succeeds on
+    /// staging does so well inside a minute. A deployment still PENDING after ten
+    /// minutes has had 300 reconcile passes fail at the same placement. That is a
+    /// conclusion, not a delay.
+    ///
+    /// Raise it for a cluster where a legitimate placement can take longer; the
+    /// cost of raising it is only that a hopeless row is declared later.
+    pub pending_timeout_seconds: i64,
     pub workload_token_seconds: i64,
     pub workload_token_refresh_grace_seconds: i64,
     pub max_instances_per_node: u32,
@@ -151,6 +171,10 @@ impl Config {
             session_hours: env_i64("OPSWEAVE_SESSION_HOURS", 12),
             heartbeat_interval_seconds: env_i64("OPSWEAVE_NODE_HEARTBEAT_SECONDS", 5) as u32,
             node_stale_seconds: env_i64("OPSWEAVE_NODE_STALE_SECONDS", 25),
+            // Floor of 1 so an operator cannot disable the transition by setting 0,
+            // which would make every PENDING deployment FAILED on creation and break
+            // the normal path. The default is 600; see the field's comment.
+            pending_timeout_seconds: env_i64("OPSWEAVE_PENDING_TIMEOUT_SECONDS", 600).max(1),
             workload_token_seconds: env_i64("OPSWEAVE_WORKLOAD_TOKEN_SECONDS", 3600).max(1),
             workload_token_refresh_grace_seconds: env_i64(
                 "OPSWEAVE_WORKLOAD_TOKEN_REFRESH_GRACE_SECONDS",
