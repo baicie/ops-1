@@ -1864,6 +1864,103 @@ jobs:
             echo "::error::ci-gate failed (exit $GATE_RC). The summary above says why."
             exit "$GATE_RC"
           fi
+      # THE EVIDENCE INDEX, PRODUCED AND UPLOADED.
+      #
+      # Until now this repository built two diagnostic tools (the classifier and
+      # the evidence collector) and invoked neither from any workflow, and `ci.yml`
+      # - the gate workflow - uploaded no artifact at all. Measured on the run for
+      # the 8A merge commit: `gh api .../runs/45576929658/artifacts --jq .total_count`
+      # returned 0. A reader asking "what did this commit actually prove" had no
+      # artefact to read and no index to find one with.
+      #
+      # `if: always()` because the index is MOST useful on a red run, which is
+      # exactly when a normal step would be skipped.
+      #
+      # It cannot change the verdict: this step runs AFTER the gate has already
+      # written its result, and a failure here is reported without failing the job
+      # (the gate's own exit is what decides). That is deliberate - an index that
+      # can turn a red gate green, or a green gate red, would be a second gate.
+      - name: Evidence index
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts/evidence-index
+          rc=0
+          gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" > artifacts/evidence-index/artifacts.json 2>artifacts/evidence-index/artifacts.err || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::the artifact list could not be read (rc=$rc); the index will report every check as PARTIAL"
+            printf '{"total_count":0,"artifacts":[]}' > artifacts/evidence-index/artifacts.json
+          fi
+          # The gate's own verdict, as the check picture. `/tmp/gate.txt` is the
+          # gate's stdout from the step above, which `tee`s JSON followed by a
+          # human summary - so take the JSON document and nothing after it.
+          if [ -s /tmp/gate.txt ]; then
+            node -e '
+              const fs = require("fs");
+              const raw = fs.readFileSync("/tmp/gate.txt", "utf8");
+              const end = raw.lastIndexOf("\n}");
+              const json = end >= 0 ? raw.slice(0, end + 2) : "{}";
+              let parsed = {};
+              try { parsed = JSON.parse(json); } catch { parsed = {}; }
+              fs.writeFileSync("artifacts/evidence-index/gate.json", JSON.stringify(parsed, null, 2));
+            ' || echo "::warning::the gate output could not be parsed as JSON"
+          fi
+          IDX_RC=0
+          node tests/ci/evidence-index.mjs \
+            --gate-json artifacts/evidence-index/gate.json \
+            --artifacts artifacts/evidence-index/artifacts.json \
+            --out artifacts/evidence-index/index.json >> "$GITHUB_STEP_SUMMARY" 2>&1 || IDX_RC=$?
+          # The index prints to stdout as well; keep it out of the summary twice.
+          if [ "$IDX_RC" -ne 0 ]; then
+            echo "::warning::the evidence index is incomplete (rc=$IDX_RC); see index.json"
+          fi
+          # The summary is produced by a FILE, not an inline -e string.
+          #
+          # The inline version was correct and shellcheck rejected it (SC2016:
+          # "expressions don't expand in single quotes") because `${k}` inside a
+          # single-quoted argument reads as a shell template to the linter. It is
+          # JavaScript's template literal, so nothing was wrong - but the lint is
+          # a gate, and a false positive that has to be suppressed once will be
+          # suppressed again by someone who does not check. A script file has no
+          # quoting to misread.
+          cat > artifacts/evidence-index/summary.mjs <<'SUMMARY_EOF'
+          import { readFileSync } from 'node:fs';
+          try {
+            const d = JSON.parse(readFileSync('./artifacts/evidence-index/index.json', 'utf8'));
+            for (const [k, v] of Object.entries(d.summary)) console.log(k + ': ' + v);
+            if (d.passedNoEvidence.length) {
+              console.log('');
+              console.log('passed with NO artifact of their own (not the same as verified):');
+              for (const n of d.passedNoEvidence) console.log('  ' + n);
+            }
+          } catch (e) {
+            console.log('index.json unreadable: ' + e.message);
+          }
+          SUMMARY_EOF
+          {
+            echo "## Evidence index"
+            echo
+            echo "Every check on this commit, with whether it has evidence of its own."
+            echo '```'
+            node artifacts/evidence-index/summary.mjs || echo "summary could not be produced"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: Upload the evidence index
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-index
+          path: artifacts/evidence-index/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: The gate's own selftest
         run: |
           set -eu
@@ -1954,6 +2051,12 @@ jobs:
           # budget measured in UTF-8 BYTES rather than JavaScript characters.
           # Every case reads a fixture; none touches the network.
           bash tests/ci/collect-failure-evidence.test.sh
+          # TASK-37: the evidence index. The defect it was built to remove is real
+          # and measured - the run for the 8A merge commit had ZERO artifacts, and
+          # the two Phase 8A diagnostic tools were invoked by no workflow at all.
+          # The cases here include the one that caught the index itself crediting a
+          # single artifact to 27 checks.
+          bash tests/ci/evidence-index.test.sh
           # The migration's PRECONDITION: can all ten contexts the candidate
           # ruleset requires actually appear on every pull request? A required
           # context whose workflow has a path filter, or whose job is conditional,

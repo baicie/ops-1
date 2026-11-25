@@ -165,6 +165,41 @@ test('a conclusion of neutral is not a pass', () => {
 // TASK 4: cancelled is a FAIL, and the summary should still say why.
 // ---------------------------------------------------------------------------
 
+// A `completed` check whose conclusion is NULL is not a success, and the gate must
+// not read it as one.
+//
+// GitHub can return `status: "completed"` with `conclusion: null` - the API
+// documents it as transient, but the gate does not get to assume it resolves. The
+// behaviour today is correct: `state` becomes the string "completed", which is in
+// neither `RED_CONCLUSIONS` nor the gate's `success` filter, so it falls through to
+// `absent` and fails closed.
+//
+// It was correct by ACCIDENT and asserted by nothing, which is one refactor from
+// turning a finished-but-unreported check into a pass. An audit flagged it as a
+// live defect; it is not one, but the absence of this test is.
+test('a completed check with a NULL conclusion is not a success and not a pass', () => {
+  const ledger = attributeChecks(
+    [check('golden-path', 'completed', null, 21)],
+    [wf('.github/workflows/plugin-lifecycle.yml', 21)],
+  );
+  const st = checkState(ledger.byName, 'golden-path', { workflow: 'plugin-lifecycle.yml' });
+  assert.notEqual(st.state, 'success',
+    'a null conclusion must never be reported as success');
+  assert.notEqual(st.state, 'skipped',
+    'and it is not "skipped" either - nothing said it was');
+  assert.equal(st.state, 'completed',
+    'the state falls through as its literal status, which the gate then treats as absent');
+});
+
+test('an in_progress check with a null conclusion is pending, not completed', () => {
+  const ledger = attributeChecks(
+    [check('golden-path', 'in_progress', null, 22)],
+    [wf('.github/workflows/plugin-lifecycle.yml', 22)],
+  );
+  const st = checkState(ledger.byName, 'golden-path', { workflow: 'plugin-lifecycle.yml' });
+  assert.equal(st.state, 'pending', 'a running check is pending and must never read as success');
+});
+
 test('a cancelled check that was never re-answered explains itself as unanswered', () => {
   const only = { ...check('rust', 'completed', 'cancelled', 12), started_at: '2026-01-01T00:00:00Z', id: 1 };
   const ledger = attributeChecks([only], [wf('.github/workflows/ci.yml', 12)]);
