@@ -1937,6 +1937,15 @@ jobs:
           # rather than by duration, and that a 151-second swing is attributed to
           # the step it came from rather than to "noise".
           bash tests/ci/golden-path-baseline.test.sh
+          # TASK-21: the failure classifier. The asymmetry it implements is the
+          # point - PRODUCT_REGRESSION needs no evidence, every other category
+          # needs positive evidence, and an unproven cause is UNKNOWN rather than
+          # "probably external". Driven from synthetic logs so a signature change
+          # is caught without waiting for a real 429.
+          bash tests/ci/classify-failure.test.sh
+          # TASK-22: the evidence collector's two constraints. Redaction is a pure
+          # function of the input, so it is driven here; the live half needs `gh`.
+          bash tests/ci/collect-failure-evidence.test.sh
           # The migration's PRECONDITION: can all ten contexts the candidate
           # ruleset requires actually appear on every pull request? A required
           # context whose workflow has a path filter, or whose job is conditional,
