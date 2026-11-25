@@ -1644,9 +1644,23 @@ jobs:
     # gate was right and its input was stale: the previous figure described the
     # old behaviour, not this one.
     #
-    # 3600 s covers 2963 s with 21% headroom for a slower runner. It is not a
-    # licence to let a hang pass: a hang still exhausts the budget and fails.
-    timeout-minutes: 70
+    # MEASURED AGAIN ON 2026-11-25, AND THE NUMBER WAS STILL SHORT.
+    #
+    # Run 45542879466 waited 4076 s (67.9 min) for one suite and timed out at
+    # 3600 s. The suite itself took 3013 s - the gap is the QUEUE: `ci-gate`
+    # starts waiting at 03:57, the job it waits for is not scheduled until 04:15.
+    # A budget that measures how long the work takes is not the same as one that
+    # measures how long a gate must WAIT, and only the second is what this value
+    # has to cover.
+    #
+    # 4076 s observed. The TASK-25 capacity suite added ~10 minutes to the job
+    # that contains it, which is why the previous 3600 (sized from 2963) stopped
+    # fitting: the baseline moved because I made the suite do more, not because
+    # the runner got slower.
+    #
+    # 5400 s = 90 min, 32% headroom over the observed 4076 s. It is not a licence
+    # to let a hang pass: a hang still exhausts the budget and fails.
+    timeout-minutes: 110
     if: always()
     # `checks: read` is what lets this job stop taking the other workflows on
     # faith. It queries the check runs on THIS commit - by name, AND by the
@@ -1705,7 +1719,7 @@ jobs:
           # the wiring that was missing: `--budget-ms "${GATE_BUDGET_MS:-...}"`
           # appeared in the run block but nothing ever set the variable, so the
           # default was the only value it could take.
-          GATE_BUDGET_MS: ${{ vars.OPSWEAVE_GATE_BUDGET_MS || '3600000' }}
+          GATE_BUDGET_MS: ${{ vars.OPSWEAVE_GATE_BUDGET_MS || '5400000' }}
         run: |
           set -euo pipefail
           # The files this commit changed.

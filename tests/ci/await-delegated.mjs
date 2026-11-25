@@ -67,7 +67,7 @@
 import { checkState, UNFINISHED_STATUS } from './check-run-ledger.mjs';
 
 /** 60 minutes. See the rationale above. */
-export const DEFAULT_BUDGET_MS = 60 * 60 * 1000;
+export const DEFAULT_BUDGET_MS = 90 * 60 * 1000;
 /** Start tight, then relax: cheap to catch the 146 s suites, still fine for 25 min ones. */
 export const DEFAULT_POLL_MS = 20_000;
 export const MAX_POLL_MS = 60_000;

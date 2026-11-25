@@ -209,9 +209,22 @@ test('ci.yml gives the gate a job timeout above its wait budget', async () => {
   const budgetMs = Number(budgetMatch[1]);
 
   // The gate job block, then its timeout-minutes.
+  //
+  // Sliced to the NEXT job rather than a fixed character count. The 2000-char
+  // window this used was a guess about how much comment a job could carry, and
+  // it stopped being true when `ci-gate` gained a measured budget rationale: the
+  // `timeout-minutes:` line fell outside the window and the test failed with
+  // "ci-gate must declare timeout-minutes" while the declaration was right there.
+  //
+  // A test that breaks when a comment grows is measuring the comment.
   const gateStart = ci.indexOf('  ci-gate:');
   assert.ok(gateStart > 0, 'ci-gate job must exist');
-  const gateBlock = ci.slice(gateStart, gateStart + 2000);
+  const rest = ci.slice(gateStart + 1);
+  const nextJob = rest.search(/\n  [a-z0-9-]+:\s*\n/);
+  const gateBlock = nextJob > 0 ? rest.slice(0, nextJob) : rest;
+  // `ci-gate` is the LAST job in the file, so "everything after it" is a
+  // legitimate 24 KB. The guard only needs to catch a scan that failed to start.
+  assert.ok(gateBlock.length > 200, `the ci-gate block is implausibly small (${gateBlock.length} chars)`);
   const timeoutMatch = /timeout-minutes:\s*(\d+)/.exec(gateBlock);
   assert.ok(timeoutMatch, 'ci-gate must declare timeout-minutes');
   const timeoutSec = Number(timeoutMatch[1]) * 60;
