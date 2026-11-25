@@ -436,6 +436,38 @@ async fn create_deployment_inner(
     // blue/green contract and a deploy-time drain empties the route before the new
     // version may serve. The acceptance suite asserts it directly:
     // `10/10 requests left v1 while v2 was not activated`.
+    // THE CAPACITY PLAN, ATTACHED TO THE ACCEPTANCE.
+    //
+    // Staging learns it has no slots by timing out after a full image build
+    // (`deploy --wait` → `timed out waiting for deployment readiness`). The
+    // condition is knowable NOW, and `placement_preflight` already answers it with
+    // the scheduler's own `evaluate_node`.
+    //
+    // This does NOT refuse the deploy. A placement refusal that blocked the create
+    // would change the contract of an endpoint whose callers already handle "accepted
+    // and PENDING", and would make a transient capacity state look like a permanent
+    // rejection. What it does is make the answer available in the response the
+    // caller already reads, so `deploy --wait` can fail with `RECLAIM_REQUIRED` and
+    // the names of the rows in the way, instead of with a timeout.
+    //
+    // Read-only, and failure to compute it must not fail the deploy: a plan is
+    // advice, and an advisory that can reject a valid deploy is worse than none.
+    let capacity_plan = crate::placement_preflight::gather(
+        &state.db,
+        None,
+        payload.node_selector.clone(),
+        resources.clone(),
+        payload.desired_replicas,
+        max_per_node as usize,
+        state.config.max_instances_per_node as usize,
+    )
+    .await
+    .map_err(|error| {
+        tracing::warn!(error = %error, "capacity plan could not be computed; the deploy proceeds");
+        error
+    })
+    .ok();
+
     sqlx::query(
         r#"
         INSERT INTO kernel.plugin_deployments
@@ -471,7 +503,16 @@ async fn create_deployment_inner(
     )
     .await?;
     let row = fetch_deployment(state, id).await?;
-    let body = serde_json::to_value(deployment_view(state, row).await?).map_err(AppError::from)?;
+    let mut body =
+        serde_json::to_value(deployment_view(state, row).await?).map_err(AppError::from)?;
+    if let Some(plan) = capacity_plan {
+        if let Some(object) = body.as_object_mut() {
+            object.insert(
+                "capacityPlan".into(),
+                serde_json::to_value(plan).map_err(AppError::from)?,
+            );
+        }
+    }
     Ok((StatusCode::ACCEPTED, body))
 }
 
@@ -1736,11 +1777,90 @@ async fn reconcile_once_locked(
     .bind(stale_seconds)
     .execute(&state.db)
     .await?;
+    // RELEASE A SUPERSEDED CANDIDATE THAT WAS NEVER ACTIVATED.
+    //
+    // Staging run 45570951551 filled its node with four instances and every later
+    // publish failed with INSTANCE_CAPACITY_EXCEEDED. The rows that accumulated
+    // were NOT superseded-by-activation versions: `deploy --wait` times out on
+    // capacity, so `activate` never runs, so the DRAINING write inside it never
+    // runs. They are deployments that reached READY and were then overtaken by a
+    // newer version of the SAME plugin without either one being activated.
+    //
+    // `reconcile_once` plans every READY row, so each of them kept re-asserting
+    // `desired_action='START'` forever. Nothing released them: the only writes
+    // that reach DISABLED need a DRAINING row (which needs activate), an
+    // uninstall, or an operator setting desired_replicas to zero.
+    //
+    // WHAT THIS DOES NOT DO. It does not delete a row, does not touch an ACTIVE
+    // deployment, does not cross plugin boundaries, and does not pick "the newest"
+    // by timestamp - it asks whether a NEWER VERSION OF THE SAME PLUGIN exists and
+    // has already been deployed. A plugin with one candidate is never affected,
+    // which is what keeps a first deploy and a rollback target alone.
+    //
+    // It reuses DRAINING rather than disabling directly, for the reasons the
+    // ADR-027 test asserts: DRAINING keeps the row observable, the reconcile sweep
+    // owns the transition to DISABLED, and the existing STOP write below is what
+    // actually frees the slot. A second delete path would duplicate all three.
+    //
+    // The grace is 0 seconds because there is no route to protect: a deployment
+    // that was never activated serves no traffic, so there is nothing to drain.
+    // That is the difference from `activate`'s 15 seconds, and it is the reason
+    // this must not be folded into the activation path.
+    //
+    // IT ONLY MAKES ROOM WHEN SOMETHING IS WAITING FOR ONE, and that clause was
+    // added because the first version of this statement broke rollback.
+    //
+    // Measured: `rollback` to a version with no deployment creates one and returns
+    // "wait for it to reach READY, then activate it". Between READY and that
+    // activate call the row is exactly what this statement looks for - READY,
+    // never activated, superseded by a newer version because a rollback goes
+    // BACKWARD. The unguarded version drained 0.0.1 while an operator was in the
+    // middle of rolling back to it, and the rollback failed with "no deployment"
+    // a second time. `a_rollback_target_is_not_reclaimed_while_it_is_being_activated`
+    // is that counterexample.
+    //
+    // So the candidate is released only when the same plugin has a deployment in
+    // PENDING or PREPARING - i.e. something is actively blocked on a slot right
+    // now. A rollback target has nothing pending (the newer version is READY), so
+    // it is left alone. Staging's data-catalog@0.0.65450 WAS PENDING, which is
+    // what the same rule releases for.
+    sqlx::query(
+        r#"
+        UPDATE kernel.plugin_deployments d
+        SET status='DRAINING',
+            status_reason='Superseded by a newer candidate; never activated',
+            drain_until=now(),
+            updated_at=now()
+        WHERE d.status = 'READY'
+          AND EXISTS (
+            SELECT 1 FROM kernel.plugin_deployments newer
+            WHERE newer.plugin_id = d.plugin_id
+              AND newer.id <> d.id
+              AND newer.version > d.version
+              AND newer.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM kernel.activation_revisions r
+            WHERE r.deployment_id = d.id AND r.status = 'ACTIVE'
+          )
+          -- ONLY WHEN SOMETHING IS WAITING. Without this a rollback target is
+          -- drained before the operator can activate it; see the comment above.
+          AND EXISTS (
+            SELECT 1 FROM kernel.plugin_deployments waiting
+            WHERE waiting.plugin_id = d.plugin_id
+              AND waiting.id <> d.id
+              AND waiting.status IN ('PENDING','PREPARING')
+          )
+        "#,
+    )
+    .execute(&state.db)
+    .await?;
     sqlx::query(
         "UPDATE kernel.plugin_deployments SET status='DISABLED', status_reason='Drain window elapsed', updated_at=now() WHERE status='DRAINING' AND drain_until IS NOT NULL AND drain_until < now()",
     )
     .execute(&state.db)
     .await?;
+
     // A deployment that is no longer active must not keep asking for slots.
     //
     // The loop below only plans the ACTIVE set, so an instance whose deployment
@@ -5348,6 +5468,505 @@ mod tests {
                 .execute(&pool)
                 .await
                 .ok();
+        }
+    }
+
+    /// Phase 8B TASK-30 D-1: a deployment that reached READY and was never
+    /// activated keeps its node slot forever.
+    ///
+    /// The live evidence is staging run 45570951551:
+    ///
+    /// ```text
+    /// PENDING 0/0 ready (No eligible healthy node matches the placement selector
+    /// [INSTANCE_CAPACITY_EXCEEDED] node staging-node: 4 instances already
+    /// scheduled on this node against a per-node limit of 4; occupied by
+    /// dev.opsweave.hello@0.0.1, opsweave.data-catalog@0.0.2,
+    /// opsweave.data-catalog@0.0.3590, opsweave.data-integration@0.0.2)
+    /// ```
+    ///
+    /// ADR-027 was withdrawn because its premise was false: `activate` DOES drain
+    /// the previous version. But `activate` only runs after a deploy succeeds, and
+    /// the publish never gets there - `deploy --wait` times out on capacity first.
+    /// So the rows that accumulate are not "superseded versions". They are
+    /// deployments that were created and never activated, and `reconcile_once`
+    /// plans every `READY` row, so their instances keep `desired_action='START'`
+    /// and keep counting against the per-node limit.
+    ///
+    /// This test is the counterexample. It must FAIL on the current code, and it
+    /// fails at the LAST assertion: nothing reclaims the candidate.
+    #[cfg(test)]
+    mod unactivated_candidate_holds_a_slot {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options)
+                .await
+                .expect("cannot connect to the test database");
+            crate::db::migrate(&pool)
+                .await
+                .expect("the test database rejected the migrations");
+            Some(pool)
+        }
+
+        /// A node plus one READY deployment of `plugin@version` holding one
+        /// START instance, which is the shape a failed publish leaves behind.
+        async fn candidate_on(pool: &PgPool, node_id: Uuid, plugin: &str, version: &str) -> Uuid {
+            let package_id = Uuid::new_v4();
+            let deployment_id = Uuid::new_v4();
+            let tag = Uuid::new_v4().simple().to_string();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,$3,'1.1','test-publisher','{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            // Digests are unique per test run. The suite shares one database and
+            // `plugin_packages` has a unique constraint on them, so a fixed value
+            // makes the SECOND run of this test fail on the first one's rows.
+            .bind(package_id)
+            .bind(plugin)
+            .bind(version)
+            .bind(format!("{tag}-{version}-artifact"))
+            .bind(format!("{tag}-{version}-bundle"))
+            .bind(format!("{tag}-{version}-payload"))
+            .execute(pool)
+            .await
+            .expect("insert package");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status)
+                 VALUES ($1,$2,$3,$4,1,1,'{\"nodeSelector\":{}}'::jsonb,
+                         '{\"cpuMillis\":500,\"memoryMib\":256}'::jsonb,'READY')",
+            )
+            .bind(deployment_id)
+            .bind(plugin)
+            .bind(package_id)
+            .bind(version)
+            .execute(pool)
+            .await
+            .expect("insert deployment");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_instances
+                   (id, deployment_id, node_id, slot, state, desired_action,
+                    deployment_generation, container_id)
+                 VALUES ($1,$2,$3,0,'READY','START',1,'container-1')",
+            )
+            .bind(Uuid::new_v4())
+            .bind(deployment_id)
+            .bind(node_id)
+            .execute(pool)
+            .await
+            .expect("insert instance");
+            deployment_id
+        }
+
+        async fn node(pool: &PgPool) -> Uuid {
+            let node_id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64','{}'::jsonb,'{}'::jsonb,
+                         'READY',now(),now(),'http://node:7000')",
+            )
+            .bind(node_id)
+            .bind(format!("node-{}", Uuid::new_v4()))
+            .bind(format!("token-{}", Uuid::new_v4()))
+            .execute(pool)
+            .await
+            .expect("insert node");
+            node_id
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        /// THE COUNTEREXAMPLE. Four READY-but-never-activated deployments are
+        /// placed, which is what staging accumulated; a fifth is then asked for.
+        ///
+        /// Before the fix this ends with five slots consumed and the fifth
+        /// deployment refusing placement. After it, a candidate that has been
+        /// superseded by a newer candidate of the SAME plugin is drained, and the
+        /// newer one takes the slot.
+        #[tokio::test]
+        async fn a_superseded_candidate_that_was_never_activated_stops_holding_its_slot() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let node_id = node(&pool).await;
+            let plugin = format!("test.candidate.{}", Uuid::new_v4());
+
+            // The staging shape: several versions of ONE plugin, each deployed
+            // and READY, none ever activated. `0.0.2` is the oldest still here.
+            let mut candidates = Vec::new();
+            for version in ["0.0.2", "0.0.3590", "0.0.65450"] {
+                candidates.push(candidate_on(&pool, node_id, &plugin, version).await);
+            }
+            // The shape staging actually had: the newest candidate is PENDING,
+            // asking for a slot it cannot get. That is the condition the
+            // reclamation keys on - it makes room only when something is waiting.
+            sqlx::query(
+                "UPDATE kernel.plugin_deployments
+                 SET status='PENDING', status_reason='Waiting for placement' WHERE id=$1",
+            )
+            .bind(candidates[2])
+            .execute(&pool)
+            .await
+            .unwrap();
+            // A different plugin's ACTIVE deployment, which must never be touched.
+            // Its id is per-run for the same reason the digests are: the suite
+            // shares one database and `plugin_packages` is unique on
+            // (plugin_id, version).
+            //
+            // ACTIVE means an ACTIVATION REVISION is active, not a status flag on
+            // the deployment row. Setting only the flag makes the reconciler
+            // rewrite it to READY on the next pass (`is_effective` asks
+            // `activation_revisions`), which is what this fixture did before -
+            // a fixture that cannot express "active" tests the wrong thing.
+            let sibling = format!("test.sibling.{}", Uuid::new_v4());
+            let other = candidate_on(&pool, node_id, &sibling, "0.0.1").await;
+            sqlx::query("UPDATE kernel.plugin_deployments SET status='ACTIVE' WHERE id=$1")
+                .bind(other)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO kernel.activation_revisions
+                   (id, plugin_id, package_id, version, deployment_id, generation,
+                    status, policy_digest, activated_at, created_at)
+                 SELECT $1,$2,p.package_id,p.version,p.id,1,'ACTIVE','digest',now(),now()
+                 FROM kernel.plugin_deployments p WHERE p.id=$3",
+            )
+            .bind(Uuid::new_v4())
+            .bind(&sibling)
+            .bind(other)
+            .execute(&pool)
+            .await
+            .expect("insert activation revision");
+
+            let occupied = |pool: PgPool, plugin: String| async move {
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT count(*)::bigint FROM kernel.plugin_instances i
+                     JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+                     WHERE d.plugin_id=$1 AND i.desired_action='START'",
+                )
+                .bind(&plugin)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            };
+
+            // The precondition is asserted, but not as a race against the other
+            // tests: a global reconcile in a parallel test can already have swept
+            // these rows, and then this is 1 and the number below is also 1.
+            //
+            // What the test actually claims is the CONVERGENCE, and the claim is
+            // only meaningful if the candidates were occupying slots to begin
+            // with. So the count before the sweep is recorded and asserted to be
+            // 1 or 3 - never 0, which would mean the fixture never placed them.
+            let before = occupied(pool.clone(), plugin.clone()).await;
+            assert!(
+                before == 3 || before == 1,
+                "the fixture placed the three candidates (before={before})"
+            );
+
+            // The reconciler runs. On current code it plans all three (READY is in
+            // the planned set) and reclaims none of them.
+            //
+            // `Some(..)` is what makes this WAIT for the planner lock instead of
+            // returning early with `pg_try_advisory_lock`. Measured: with `None`
+            // this test passed alone and failed in the module run with three slots
+            // still occupied, because a parallel test held the lock and this call
+            // quietly planned nothing.
+            //
+            // The reclamation under test is a GLOBAL statement in the sweep, so it
+            // runs whichever deployment is named here - passing the newest
+            // candidate keeps the per-deployment planning scoped to this fixture
+            // while still executing the statement that is being asserted on.
+            super::super::reconcile_once_scoped(&state_for(pool.clone()), Some(candidates[2]))
+                .await
+                .expect("reconcile runs");
+
+            // THE ASSERTION THAT FAILS TODAY.
+            //
+            // `0.0.2` and `0.0.3590` are superseded by `0.0.65450`: same plugin,
+            // newer version present, neither is ACTIVE. Leaving them START-able is
+            // what filled staging's node. One slot - the newest candidate - is the
+            // correct steady state.
+            let after = occupied(pool.clone(), plugin.clone()).await;
+            assert_eq!(
+                after, 1,
+                "only the newest candidate of a plugin should hold a slot; \
+                 the superseded ones were never activated and must be released \
+                 (before={before}, after={after})"
+            );
+
+            // And the two things the brief forbids touching.
+            let active: String =
+                sqlx::query_scalar("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
+                    .bind(other)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(active, "ACTIVE", "an ACTIVE deployment is never reclaimed");
+            assert_eq!(
+                occupied(pool.clone(), sibling.clone()).await,
+                1,
+                "and a different plugin's slot is untouched"
+            );
+        }
+
+        /// THE DEPLOY RESPONSE CARRIES THE PLAN, AND A PLAN FAILURE IS NOT A
+        /// DEPLOY FAILURE.
+        ///
+        /// Two claims, both taken from the code shape rather than from a comment:
+        ///
+        ///   * the plan is attached to the 202 body under `capacityPlan`, so a
+        ///     caller does not have to poll to learn the deployment cannot place;
+        ///   * `gather` returning an error is swallowed with `.ok()`, so an
+        ///     advisory that cannot be computed never rejects a valid deploy.
+        ///
+        /// A behavioural test would need a full router; what can go wrong here is
+        /// someone turning the advisory into a gate, and that is a source fact.
+        #[test]
+        fn the_capacity_plan_is_an_advisory_not_a_gate() {
+            let source = include_str!("deployments.rs");
+            let start = source
+                .find("let capacity_plan = crate::placement_preflight::gather(")
+                .expect("the deploy path computes a capacity plan");
+            let block = &source[start..start + 900];
+
+            assert!(
+                block.contains(".ok()"),
+                "a failed plan must not fail the deploy: {block}"
+            );
+            assert!(
+                !block.contains('?'),
+                "and it must not propagate: a `?` here makes the advisory a gate: {block}"
+            );
+            assert!(
+                block.contains("tracing::warn!"),
+                "a swallowed plan failure must still be visible in the log: {block}"
+            );
+
+            let attach = source
+                .find("\"capacityPlan\".into()")
+                .expect("the response body carries the plan");
+            let around = &source[attach.saturating_sub(300)..attach + 100];
+            assert!(
+                around.contains("ACCEPTED") || around.contains("body.as_object_mut()"),
+                "the plan is attached to the acceptance body: {around}"
+            );
+        }
+
+        /// A ROLLBACK TARGET MUST NOT BE RECLAIMED WHILE IT WAITS TO BE ACTIVATED.
+        ///
+        /// `rollback` to a version that has no deployment creates one and returns:
+        ///
+        /// ```text
+        /// "the deployment did not exist; wait for it to reach READY, then activate it"
+        /// ```
+        ///
+        /// That is a deliberate, multi-step operator flow. Between READY and the
+        /// activate call the row is exactly what the reclamation looks for - READY,
+        /// never activated, and (after a rollback to an OLD version) superseded by a
+        /// newer one. Without this guard, my own fix would drain the version an
+        /// operator was in the middle of rolling back to, and the rollback would
+        /// fail with "no deployment" a second time.
+        #[tokio::test]
+        async fn a_rollback_target_is_not_reclaimed_while_it_is_being_activated() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let node_id = node(&pool).await;
+            let plugin = format!("test.rollback.{}", Uuid::new_v4());
+
+            // The newer version that is deployed, and the OLD version an operator
+            // has just asked to roll back to - READY, not yet activated.
+            let newer = candidate_on(&pool, node_id, &plugin, "0.0.9").await;
+            let target = candidate_on(&pool, node_id, &plugin, "0.0.1").await;
+
+            super::super::reconcile_once_scoped(&state_for(pool.clone()), Some(newer))
+                .await
+                .expect("reconcile runs");
+
+            let status: String =
+                sqlx::query_scalar("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
+                    .bind(target)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                status, "READY",
+                "the rollback target must still be READY and waiting for activation; \
+                 a reclaim that drains it turns an operator's rollback into a missing deployment"
+            );
+            let action: String = sqlx::query_scalar(
+                "SELECT desired_action FROM kernel.plugin_instances WHERE deployment_id=$1",
+            )
+            .bind(target)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                action, "START",
+                "and its instance is still meant to be running"
+            );
+        }
+
+        /// THE PREFLIGHT MUST NOT PROMISE A RECLAIM THE SWEEP WILL NOT PERFORM.
+        ///
+        /// `placement_preflight::gather` counts reclaimable candidates with a copy
+        /// of the sweep's predicate, and a copy is a thing that drifts. If the
+        /// preflight over-counted, an operator would be told "reclaim will fix
+        /// this" and then wait for a reclaim that never comes; if it under-counted,
+        /// a perfectly fixable capacity block would read as `CAPACITY_BLOCKED` and
+        /// send someone to add a node.
+        ///
+        /// So the two numbers are measured against each other on one fixture,
+        /// before and after a real reconcile.
+        #[tokio::test]
+        async fn preflight_reclaims_what_the_sweep_releases() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let node_id = node(&pool).await;
+            let plugin = format!("test.reclaim.{}", Uuid::new_v4());
+            let mut candidates = Vec::new();
+            for version in ["0.0.1", "0.0.2"] {
+                candidates.push(candidate_on(&pool, node_id, &plugin, version).await);
+            }
+            // The newer one is PENDING, waiting for the slot the older one holds -
+            // the condition the reclamation keys on.
+            sqlx::query(
+                "UPDATE kernel.plugin_deployments
+                 SET status='PENDING', status_reason='Waiting for placement' WHERE id=$1",
+            )
+            .bind(candidates[1])
+            .execute(&pool)
+            .await
+            .unwrap();
+
+            // Before: exactly one candidate (`0.0.1`, superseded by `0.0.2`) is
+            // reclaimable, and the preflight must say so.
+            let before = crate::placement_preflight::gather(
+                &pool,
+                None,
+                Default::default(),
+                opsweave_contracts::ResourceRequirements {
+                    cpu_millis: 100,
+                    memory_mib: 64,
+                },
+                1,
+                1,
+                4,
+            )
+            .await
+            .expect("preflight runs");
+            // NOT asserted as an exact list. Another test's global sweep shares
+            // this database and may release the candidate between the insert and
+            // this query - measured: `left: []` in 2 of 4 module runs, while the
+            // test passed alone. The claim that survives a concurrent sweep is the
+            // INVARIANT: whatever the preflight lists is a subset of what exists,
+            // and a listed row is not ACTIVE.
+            for candidate in &before.reclaim.candidates {
+                if candidate.plugin_id != plugin {
+                    continue;
+                }
+                assert!(
+                    candidate.version == "0.0.1",
+                    "only the superseded candidate is named, never the newest: {}",
+                    candidate.version
+                );
+                assert_eq!(
+                    candidate.superseded_by, "0.0.2",
+                    "and it says what supersedes it"
+                );
+            }
+            assert_eq!(
+                before.reclaim.slots_freed,
+                before.reclaim.candidates.len(),
+                "slots_freed is the number of candidates, not a second calculation"
+            );
+
+            // The sweep runs. Now the preflight must promise NOTHING for this
+            // plugin - the rows it named are gone from the reclaimable set.
+            super::super::reconcile_once_scoped(&state_for(pool.clone()), Some(candidates[1]))
+                .await
+                .expect("reconcile runs");
+            let after = crate::placement_preflight::gather(
+                &pool,
+                None,
+                Default::default(),
+                opsweave_contracts::ResourceRequirements {
+                    cpu_millis: 100,
+                    memory_mib: 64,
+                },
+                1,
+                1,
+                4,
+            )
+            .await
+            .expect("preflight runs");
+            let still_promised: Vec<String> = after
+                .reclaim
+                .candidates
+                .iter()
+                .filter(|c| c.plugin_id == plugin)
+                .map(|c| c.version.clone())
+                .collect();
+            assert!(
+                still_promised.is_empty(),
+                "the sweep released what the preflight promised: {still_promised:?}"
+            );
+
+            // The invariant that makes this test worth having even under a
+            // concurrent sweep: the sweep and the preflight cannot disagree about
+            // a row that still EXISTS. If `0.0.1` is still READY, the preflight
+            // must still name it; if it is gone or drained, it must not.
+            let still_ready: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM kernel.plugin_deployments
+                               WHERE id=$1 AND status='READY')",
+            )
+            .bind(candidates[0])
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            let named = after
+                .reclaim
+                .candidates
+                .iter()
+                .any(|c| c.deployment_id == candidates[0]);
+            assert_eq!(
+                named, still_ready,
+                "a READY candidate must be named and a released one must not \
+                 (still_ready={still_ready}, named={named})"
+            );
         }
     }
 }
