@@ -1,0 +1,1 @@
+{"verdict": "FAIL", "required": ["ci-gate", "slow", "gone"], "failed": [], "verified": ["ci-gate"], "absent": ["gone"], "pending": ["slow"], "skippedRequired": [], "notWired": [], "impostor": [], "ambiguous": [], "unverifiable": []}
