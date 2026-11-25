@@ -245,8 +245,42 @@ a historical attempt that never placed. They hold no slots (`instancesReady: 3`)
 and nothing removes them: `reconcile_once` plans `PENDING` forever, the version
 cannot be re-created because `create_deployment_inner` returns an existing
 `PENDING` unchanged, and the 4/4 the scheduler counts comes from the four
-non-`PENDING` rows. **That is the defect to fix next**, and it is a different one
-from the one #220/#222 addressed.
+non-`PENDING` rows. That is a different defect from the one #220/#222 addressed,
+and **#227 fixes it**: a deployment with zero replicas placed becomes `FAILED`
+after `OPSWEAVE_PENDING_TIMEOUT_SECONDS` (default 600), its reason names what
+happened, and one re-deploy starts a fresh attempt on a new clock
+(`attempt_started_at`, migration 0037 — not `created_at`, which survives a
+redeploy and would make the retry born expired). It was observed working on the
+real host; see §6.1a.
+
+### 6.1a #227 on the real host: the nine rows became FAILED
+
+The first staging deploy running #227 (`be7e9254`, run 45676555140, 2026-11-25)
+produced a new `capacity.json`:
+
+| status | count |
+|---|---|
+| `ACTIVE` | 3 |
+| `FAILED` | **9** |
+| `DEGRADED` | 1 |
+
+All nine `PENDING` rows became `FAILED`, and the reason is the one the code
+writes, with the original rejection preserved:
+
+```
+never placed after 388203s: 0/1 replicas, and the last placement attempt was
+refused; re-deploy to try again; No eligible healthy node matches the placement
+selector [INSTANCE_CAPACITY_EXCEEDED] ...
+```
+
+The three `ACTIVE` deployments kept their `activatedAt` values unchanged
+(2026-10-28T15:03:14Z, 2026-10-28T15:20:17Z, 2026-10-30T09:39:10Z) — the change
+touches only rows that never placed, which is what the brief requires of anything
+that runs against staging.
+
+`verdict` is still `CAPACITY_AVAILABLE` with `freeSlotsTotal: 1`, and the publish
+still fails: this change stops the platform re-planning hopeless rows, it does
+**not** make room. That is a separate defect and it is still open.
 
 ### 6.2 A wrong answer from the tool built to give the right one
 
@@ -389,7 +423,8 @@ identity problem ADR-025 describes remains `NEEDS_DECISION`.
 | Ruleset migration (required checks) | `BLOCKED_AUTH` — payload and rollback ready, write not authorised |
 | The staging capacity fix | **deployed 2026-11-25, and it addressed a condition the host did not have** — three occupants are `ACTIVE`, one `DEGRADED`, none `READY`; the rule had no candidate (§6.1) |
 | Real staging acceptance (TASK-39) | **attempted, negative** — the deploy succeeded and the plugin path still fails |
-| The real capacity defect | **nine `PENDING` deployments** that never place and are never removed (§6.1); not fixed |
+| The real capacity defect | **nine `PENDING` deployments** that never place and are never removed (§6.1) — **fixed in #227 and observed on staging**: all nine became `FAILED` with a named reason on the first deploy running it, and the three `ACTIVE` rows kept their `activatedAt` (§6.1a) |
+| Making room on staging | **still open** — `freeSlotsTotal` is 1 while the publish needs a slot the scheduler counts as taken; #227 stops futile re-planning, it does not free capacity |
 | `opsctl capacity`'s own verdict | **wrong on a full node** — reports `CAPACITY_AVAILABLE` at 4/4 because it compares READY replicas, not the per-node limit (§6.2) |
 | Deployment state in an artifact | **built and exercised** — `capacity.json` appeared in `staging-deploy` on the first run after the change, and it reversed the diagnosis (§6.1) |
 | `RECLAIM_REQUIRED` reaching a caller | kernel returns it; `opsctl` still times out unchanged |
