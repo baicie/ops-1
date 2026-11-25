@@ -44,7 +44,7 @@ printf '%s' "$out" | grep -q 'FAIL deploy did not activate' && ok "a FAIL line s
 printf '%s' "$out" | grep -q 'the deployment activated' && ok "a passing assertion survives intact" || bad "an 'ok' line was mangled"
 
 echo "== 5. the notice says what is NOT covered, rather than implying completeness"
-node "$TOOL" --run 45419909269 --json 2>/dev/null > "$WORK/ev.json"
+node "$TOOL" --from-json tests/ci/fixtures/failed-run-45419909269.json --json 2>/dev/null > "$WORK/ev.json"
 python3 - "$WORK/ev.json" <<'PY' && ok "the artifact carries a redaction notice naming its own limit" || bad "no redaction notice"
 import json,sys
 d=json.load(open(sys.argv[1]))
@@ -94,9 +94,18 @@ got="\t".join(lp.split("\t")[:2])
 assert got==want, f"last pass is from {got!r}, failure is in {want!r}"
 PY
 
-echo "== 9. a run that does not exist is an error, not an empty artifact"
-node "$TOOL" --run 999999999999 >/dev/null 2>&1; rc=$?
-[ "$rc" -ne 0 ] && ok "a missing run exits non-zero (rc=$rc)" || bad "a missing run produced an artifact"
+echo "== 9. a fixture with no run is an error, not an empty artifact"
+printf '{}' > "$WORK/empty.json"
+node "$TOOL" --from-json "$WORK/empty.json" >/dev/null 2>&1; rc=$?
+[ "$rc" -ne 0 ] && ok "a fixture without run.id exits non-zero (rc=$rc)" || bad "an empty fixture produced an artifact"
+
+echo "== 10. THE SELF-TEST NEEDS NO NETWORK"
+# It used to call --run against a live run, which is green where `gh` has
+# credentials and red on a CI runner - five assertions failed on PR #218 for that
+# reason alone. Every case above now reads a committed fixture.
+grep -q -- '--from-json' "$0" && ! grep -qE -- '--run [0-9]{6,}' "$0" \
+  && ok "every live lookup in this file was replaced by a fixture" \
+  || bad "this self-test still calls the live API"
 
 echo
 [ "$FAIL" -eq 0 ] && { echo "$PASS passed, 0 failed"; exit 0; }

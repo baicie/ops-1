@@ -95,8 +95,21 @@ if (argv.includes('--redact-only')) {
   process.exit(0);
 }
 
-if (!RUN) {
+// OFFLINE MODE, SO THE TOOL CAN BE TESTED WITHOUT GITHUB.
+//
+// The self-test used `--run <id>` against a live run, which passes on a machine
+// with `gh` credentials and fails on a CI runner without them (measured: five
+// assertions red on PR #218, all with "no redaction notice" / "a required field is
+// missing" because the artifact came back empty). A test that needs the network is
+// a test that is red for reasons that have nothing to do with the code.
+//
+// `--from-json <file>` takes the two API responses this tool needs, saved in one
+// object, plus the log text. Everything after the fetches is identical.
+const FROM_JSON = arg('--from-json');
+
+if (!RUN && !FROM_JSON && !argv.includes('--redact-only')) {
   process.stderr.write('usage: collect-failure-evidence.mjs --run <id> [--context 60] [--out path]\n' +
+    '       collect-failure-evidence.mjs --from-json <fixture.json> [--out path]\n' +
     '       collect-failure-evidence.mjs --redact-only < text\n');
   process.exit(2);
 }
@@ -105,13 +118,17 @@ if (!RUN) {
 // ---------------------------------------------------------------------------
 // Gather metadata.
 // ---------------------------------------------------------------------------
-const run = JSON.parse(tryGh(['api', `repos/${REPO}/actions/runs/${RUN}`]) || '{}');
+const fixture = FROM_JSON ? JSON.parse(readFileSync(FROM_JSON, 'utf8')) : null;
+
+const run = fixture ? (fixture.run ?? {}) : JSON.parse(tryGh(['api', `repos/${REPO}/actions/runs/${RUN}`]) || '{}');
 if (!run.id) {
-  process.stderr.write(`could not read run ${RUN}\n`);
+  process.stderr.write(fixture ? `the fixture has no run.id\n` : `could not read run ${RUN}\n`);
   process.exit(2);
 }
 
-const jobs = JSON.parse(tryGh(['api', `repos/${REPO}/actions/runs/${RUN}/jobs`]) || '{"jobs":[]}').jobs ?? [];
+const jobs = fixture
+  ? (fixture.jobs?.jobs ?? fixture.jobs ?? [])
+  : (JSON.parse(tryGh(['api', `repos/${REPO}/actions/runs/${RUN}/jobs`]) || '{"jobs":[]}').jobs ?? []);
 const failedJobs = [];
 for (const j of jobs) {
   const failedSteps = (j.steps ?? []).filter((s) => s.conclusion === 'failure').map((s) => ({
@@ -130,7 +147,7 @@ for (const j of jobs) {
 // ---------------------------------------------------------------------------
 // The log, bounded and classified.
 // ---------------------------------------------------------------------------
-const log = tryGh(['run', 'view', String(RUN), '--repo', REPO, '--log']);
+const log = fixture ? String(fixture.log ?? '') : tryGh(['run', 'view', String(RUN), '--repo', REPO, '--log']);
 const lines = log.split('\n');
 
 // The FIRST line that carries a failure marker. Chosen over "the last error"
