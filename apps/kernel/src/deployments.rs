@@ -6410,11 +6410,13 @@ mod tests {
         }
 
         async fn attempt_started(pool: &PgPool, id: Uuid) -> Option<chrono::DateTime<chrono::Utc>> {
-            sqlx::query_scalar("SELECT attempt_started_at FROM kernel.plugin_deployments WHERE id=$1")
-                .bind(id)
-                .fetch_one(pool)
-                .await
-                .expect("attempt_started_at")
+            sqlx::query_scalar(
+                "SELECT attempt_started_at FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .expect("attempt_started_at")
         }
 
         /// THE DEFECT. A deployment that has been refused placement for longer than
