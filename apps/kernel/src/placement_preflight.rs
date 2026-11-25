@@ -472,16 +472,20 @@ pub async fn gather(
                (SELECT newer.version FROM kernel.plugin_deployments newer
                 WHERE newer.plugin_id = d.plugin_id
                   AND newer.id <> d.id
-                  AND newer.version > d.version
+                  -- created_at, NOT version: a version here is `0.0.<hash mod 100000>`,
+                  -- a content fingerprint with no ordering (ADR-025). Ordering by it
+                  -- would name the wrong superseder whenever two versions straddle a
+                  -- digit boundary, and `"0.0.9" > "0.0.10"` is true as a string.
+                  AND newer.created_at > d.created_at
                   AND newer.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
-                ORDER BY newer.version DESC LIMIT 1) AS superseded_by
+                ORDER BY newer.created_at DESC LIMIT 1) AS superseded_by
         FROM kernel.plugin_deployments d
         WHERE d.status = 'READY'
           AND EXISTS (
             SELECT 1 FROM kernel.plugin_deployments newer
             WHERE newer.plugin_id = d.plugin_id
               AND newer.id <> d.id
-              AND newer.version > d.version
+              AND newer.created_at > d.created_at
               AND newer.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
           )
           AND NOT EXISTS (

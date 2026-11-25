@@ -1792,10 +1792,23 @@ async fn reconcile_once_locked(
     // uninstall, or an operator setting desired_replicas to zero.
     //
     // WHAT THIS DOES NOT DO. It does not delete a row, does not touch an ACTIVE
-    // deployment, does not cross plugin boundaries, and does not pick "the newest"
-    // by timestamp - it asks whether a NEWER VERSION OF THE SAME PLUGIN exists and
-    // has already been deployed. A plugin with one candidate is never affected,
-    // which is what keeps a first deploy and a rollback target alone.
+    // deployment, and does not cross plugin boundaries.
+    //
+    // IT DOES NOT COMPARE VERSIONS, AND THE FIRST VERSION OF THIS DID.
+    //
+    // The first draft asked `newer.version > d.version`. That looks like a
+    // recency test and is not one: this repository's versions are
+    // `0.0.$(src_hash % 100000)` - a CONTENT FINGERPRINT, not a counter. ADR-025
+    // says so directly: "the number is a content fingerprint, not a counter:
+    // there is no ordering". `0.0.9` is not older than `0.0.10`; string-compared,
+    // `"0.0.9" > "0.0.10"` is even true, which would make the rule reclaim the
+    // WRONG candidate the moment two versions straddle a digit boundary.
+    //
+    // The real question is "was this row superseded", and the answer the kernel
+    // already keeps is `created_at`: a redeploy always inserts a NEW row, and the
+    // codebase sorts by `created_at DESC` wherever it asks for "the latest"
+    // (deployments.rs:228, :956). A plugin with one candidate is never affected,
+    // which is what keeps a first deploy alone.
     //
     // It reuses DRAINING rather than disabling directly, for the reasons the
     // ADR-027 test asserts: DRAINING keeps the row observable, the reconcile sweep
@@ -1836,7 +1849,9 @@ async fn reconcile_once_locked(
             SELECT 1 FROM kernel.plugin_deployments newer
             WHERE newer.plugin_id = d.plugin_id
               AND newer.id <> d.id
-              AND newer.version > d.version
+              -- created_at, NOT version: see the comment above. A version is a
+              -- content hash with no ordering.
+              AND newer.created_at > d.created_at
               AND newer.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
           )
           AND NOT EXISTS (
@@ -5781,6 +5796,74 @@ mod tests {
             assert!(
                 around.contains("ACCEPTED") || around.contains("body.as_object_mut()"),
                 "the plan is attached to the acceptance body: {around}"
+            );
+        }
+
+        /// A VERSION IS A CONTENT HASH, NOT A COUNTER — so the reclamation must
+        /// not order by it.
+        ///
+        /// `scripts/publish-data-plugins.sh:175` computes
+        ///
+        /// ```text
+        /// version="0.0.$(( 0x$src_hash % 100000 ))"
+        /// ```
+        ///
+        /// and ADR-025 says of it: "the number is a content fingerprint, not a
+        /// counter: there is no ordering". `0.0.9` is not older than `0.0.10`; they
+        /// are two unrelated hash values. String-compared, `"0.0.9" > "0.0.10"` is
+        /// even true, which is what would make a version-ordered rule reclaim the
+        /// WRONG row the moment two versions straddle a digit boundary.
+        ///
+        /// This fixture is built so the two rules DISAGREE: `0.0.9` is inserted
+        /// FIRST (older, lower string) and `0.0.10` SECOND (newer, but string-LOWER).
+        /// The correct answer reclaims `0.0.9`; a version-ordered rule would not.
+        #[tokio::test]
+        async fn a_version_straddling_a_digit_boundary_is_still_superseded() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let node_id = node(&pool).await;
+            let plugin = format!("test.hashversion.{}", Uuid::new_v4());
+
+            // `0.0.9` first, then `0.0.10`. As STRINGS, "0.0.9" > "0.0.10".
+            let older = candidate_on(&pool, node_id, &plugin, "0.0.9").await;
+            // A distinct created_at so "which is newer" is unambiguous.
+            sqlx::query("UPDATE kernel.plugin_deployments SET created_at=now()-interval '10 minutes' WHERE id=$1")
+                .bind(older)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let newer = candidate_on(&pool, node_id, &plugin, "0.0.10").await;
+            sqlx::query(
+                "UPDATE kernel.plugin_deployments
+                 SET status='PENDING', status_reason='Waiting for placement' WHERE id=$1",
+            )
+            .bind(newer)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+            // Sanity: the string comparison really does invert these, so the test
+            // is measuring what it claims to.
+            assert!(
+                "0.0.9" > "0.0.10",
+                "the fixture is pointless unless the string order is inverted"
+            );
+
+            super::super::reconcile_once_scoped(&state_for(pool.clone()), Some(newer))
+                .await
+                .expect("reconcile runs");
+
+            let status: String =
+                sqlx::query_scalar("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
+                    .bind(older)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_ne!(
+                status, "READY",
+                "0.0.9 was superseded by 0.0.10 (it is older by created_at); a version-ordered \
+                 rule leaves it READY because \"0.0.9\" > \"0.0.10\" as a string"
             );
         }
 

@@ -293,3 +293,61 @@ clippy --all-targets`: 0 warnings.
 - **`RECLAIM_REQUIRED` reaches the caller only once `opsctl` reads it.** The kernel
   now returns it; the CLI that currently times out has not been changed. That is a
   real gap and is named rather than implied.
+
+---
+
+# Correction after merge: a version is not a counter
+
+The reclamation shipped in #220 (`a7d6cd65`) decided supersession with
+`newer.version > d.version`. **That assumption does not hold in this repository**,
+and it was found by asking whether the rule would actually work on staging's four
+rows rather than by reading the code again.
+
+Versions are produced by `scripts/publish-data-plugins.sh:175`:
+
+```bash
+version="0.0.$(( 0x$src_hash % 100000 ))"
+```
+
+and ADR-025 says of that number, in as many words:
+
+> the number is a **content fingerprint, not a counter: there is no ordering**
+
+So `0.0.9` is not older than `0.0.10` — they are two unrelated hash values. Worse,
+compared as strings, `"0.0.9" > "0.0.10"` is `true`, so the rule could have
+preferred the older row across a digit boundary rather than merely failing to
+reclaim.
+
+The kernel already keeps the right signal: a redeploy always inserts a **new** row,
+and every place that asks for "the latest" sorts by `created_at`
+(`deployments.rs:228`, `:956`). Both copies of the predicate — the sweep and the
+preflight — now use `created_at`. Fixed in #222.
+
+## What this changes about the staging answer
+
+Against the four rows from run 45570951551:
+
+| row | released by the rule? | why |
+|---|---|---|
+| `opsweave.data-catalog@0.0.2` | **yes** | superseded by a newer row of the same plugin |
+| `opsweave.data-catalog@0.0.3590` | **yes** | same |
+| `dev.opsweave.hello@0.0.1` | no | its plugin's only version |
+| `opsweave.data-integration@0.0.2` | no | its plugin's only version |
+
+**Two of four.** The other two need a decision that requires the staging database,
+which this session does not have. That is a smaller effect than "the capacity
+problem is fixed", and the smaller number is the true one.
+
+## The counterexample, and why the first version passed its own tests
+
+The fixture is built so the two rules **disagree**: `0.0.9` inserted first with an
+older `created_at`, `0.0.10` second. Restoring `version >` fails that one test and
+nothing else — the other four in the module pass either way:
+
+```
+counterfactual (version >):  a_version_straddling_a_digit_boundary_is_still_superseded  FAILED
+                             4 others                                                   ok
+```
+
+That is exactly why it would have shipped: every test passed, because no fixture
+straddled a digit boundary. A rule can be wrong in the one case nobody built.
