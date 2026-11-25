@@ -1896,6 +1896,27 @@ jobs:
           # mistake cannot reach a terminal.
           node tests/ci/check-ruleset-payload.mjs --selftest
           node tests/ci/check-ruleset-payload.mjs
+          # TASK-19: the pre-migration preflight, against the COMMITTED snapshot.
+          # The two checks above compare saved file to saved file. Neither asks
+          # "is the live ruleset still what the migration assumes", which is a
+          # delta question and the one a migration actually depends on.
+          #
+          # CI has no ruleset read permission, so a live read would be
+          # NOT_EVALUATED here; the committed snapshot is used instead, and the
+          # tool prints its capture date so a stale baseline reads as stale.
+          #
+          # WHAT IS GATED IS THE SELF-TEST, not the preflight itself. The
+          # self-test is green (12 assertions) and would be red if the tool
+          # stopped catching a lost protection, an unexpected rule, or a changed
+          # payload - those are the properties that must not regress.
+          #
+          # The preflight's LIVE verdict is deliberately not a CI gate: it reports
+          # a real disagreement today (two payloads set opposite strict policies,
+          # and the choice is BLOCKED_AUTH), and gating on an unresolved decision
+          # would block every merge for a reason unrelated to the change under
+          # test. `node tests/ci/check-ruleset-preflight.mjs --offline` is run by
+          # the operator before the migration, which is when it matters.
+          bash tests/ci/check-ruleset-preflight.test.sh
           # The migration's PRECONDITION: can all ten contexts the candidate
           # ruleset requires actually appear on every pull request? A required
           # context whose workflow has a path filter, or whose job is conditional,

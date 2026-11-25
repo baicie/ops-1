@@ -132,6 +132,16 @@ else
       bad "the heartbeat suite runs before/without the build ($build_line vs $hb_line)"
     fi
   fi
+
+  # And the same for TASK-25's capacity suite.
+  cap_line="$(grep -n 'tests/ci/phase8_capacity_preflight.sh' "$WF" | head -1 | cut -d: -f1)"
+  [ -n "$cap_line" ] && ok "the job runs the capacity-preflight suite (line $cap_line)" \
+    || bad "phase8_capacity_preflight.sh is written but nothing runs it"
+  if [ -n "$cap_line" ]; then
+    grep -q 'phase8-capacity-preflight.log' "$WF" \
+      && ok "the capacity suite's output is uploaded as evidence" \
+      || bad "the capacity suite's log is not in the evidence artifact"
+  fi
 fi
 
 echo

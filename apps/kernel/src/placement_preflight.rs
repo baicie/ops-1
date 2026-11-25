@@ -67,7 +67,18 @@ pub struct Preflight {
     /// Present whenever `verdict` is not `FITS`, named after the rejection code of
     /// the node that got furthest - so "the node is full" and "the selector matches
     /// nothing" are not the same message.
+    ///
+    /// `NOT_ENOUGH_NODES` is this object's own code, used when every node FIT but
+    /// their slots did not add up to the requested count. It is not a node
+    /// rejection, so it has no per-node row to point at.
     pub reason: Option<&'static str>,
+    /// The numbers behind `reason`, at the top level.
+    ///
+    /// A refusal whose only text is a code is a boolean in disguise, and the
+    /// caller should not have to reconstruct the arithmetic from `nodes[]` to
+    /// know whether to add a node or shrink the request. Empty when the verdict
+    /// is `FITS`.
+    pub detail: Option<String>,
     /// Said plainly in the payload because a consumer that drops it will read the
     /// verdict as a guarantee.
     pub caveat: &'static str,
@@ -167,21 +178,58 @@ pub fn preflight(input: &PreflightInput) -> Preflight {
     }
 
     let fits = replicas_placeable >= input.replicas;
+    // WHEN NO NODE REFUSED, THE REASON IS THAT THERE ARE NOT ENOUGH NODES - not
+    // that none is eligible.
+    //
+    // `NO_ELIGIBLE_NODE` was the fallback whenever `furthest` was `None`, and
+    // `furthest` is `None` when every node individually FIT but their slots did
+    // not add up to the requested replica count. That is the ordinary
+    // "ask for 5, have 2 nodes" case, and calling it "no eligible node" tells an
+    // operator the opposite of the truth: the nodes are eligible, there are too
+    // few of them.
+    //
+    // Measured 2026-11-25 with TASK-25's isolated harness: `replicas=5` on two
+    // healthy nodes reported `NO_ELIGIBLE_NODE` with no detail. The numbers were
+    // already in the payload (`replicasPlaceable`), so the answer was correct and
+    // the WORDING was wrong.
+    let reason = if fits {
+        None
+    } else {
+        Some(match furthest.as_ref() {
+            Some((_, rejection)) => rejection.code(),
+            None if replicas_placeable > 0 => "NOT_ENOUGH_NODES",
+            None => "NO_ELIGIBLE_NODE",
+        })
+    };
+    // The numbers, at the top level, so a caller can act without walking `nodes`.
+    // For a node rejection the per-node detail already names them; this repeats the
+    // aggregate that made the plan impossible.
+    let detail = if fits {
+        None
+    } else {
+        Some(match (reason, furthest.as_ref()) {
+            (Some("NOT_ENOUGH_NODES"), _) => format!(
+                "{} replica(s) requested, {} placeable: the nodes are eligible, there are \
+                 not enough free slots across them",
+                input.replicas, replicas_placeable
+            ),
+            (Some(code), Some((node, rejection))) => {
+                format!("{} on node {}: {}", code, node, rejection.detail())
+            }
+            (Some(code), None) => format!(
+                "{}: {} replica(s) requested, {} placeable, and no node reported a reason",
+                code, input.replicas, replicas_placeable
+            ),
+            _ => format!("{} replica(s) requested, {} placeable", input.replicas, replicas_placeable),
+        })
+    };
     Preflight {
         verdict: if fits { "FITS" } else { "CAPACITY_BLOCKED" },
         nodes,
         replicas_requested: input.replicas,
         replicas_placeable,
-        reason: if fits {
-            None
-        } else {
-            Some(
-                furthest
-                    .as_ref()
-                    .map(|(_, r)| r.code())
-                    .unwrap_or("NO_ELIGIBLE_NODE"),
-            )
-        },
+        reason,
+        detail,
         caveat: CAVEAT,
     }
 }
@@ -221,8 +269,27 @@ pub async fn gather(
     max_instances_per_deployment: usize,
     max_instances_per_node: usize,
 ) -> anyhow::Result<Preflight> {
+    // EVERY UNREVOKED NODE, NOT ONLY THE READY ONES.
+    //
+    // This query used to filter `status='READY'`, so a node that was UNREACHABLE
+    // or DEGRADED disappeared from the answer entirely. The caller then saw an
+    // empty `nodes` list and a `CAPACITY_BLOCKED` verdict with no node to blame -
+    // and "there are no nodes" is a very different message from "the node exists
+    // and is not ready", which is what `NODE_NOT_READY` exists to say.
+    //
+    // Measured on 2026-11-25 with TASK-25's isolated harness: mark node-a
+    // UNREACHABLE, ask for a plan, and the per-node answers contained no
+    // NODE_NOT_READY at all because node-a had been filtered out upstream.
+    //
+    // `evaluate_node` already rejects a non-READY node with `NodeNotReady`, so
+    // including them here is not a second implementation of the rule - it is
+    // letting the existing one answer.
+    //
+    // The `last_seen_at` bound stays: a node that has not reported in 24h is
+    // genuinely absent, and the staleness sweep will have marked it UNREACHABLE
+    // anyway.
     let nodes = sqlx::query_as::<_, NodeRow>(
-        "SELECT * FROM kernel.nodes WHERE revoked_at IS NULL AND status='READY' \
+        "SELECT * FROM kernel.nodes WHERE revoked_at IS NULL \
          AND last_seen_at > now() - ($1 || ' seconds')::interval ORDER BY name",
     )
     .bind(86400_i64)
@@ -406,6 +473,90 @@ mod tests {
         let r = preflight(&i);
         assert_eq!(r.verdict, "FITS", "b has room, so two replicas place");
         assert_eq!(r.replicas_placeable, 4);
+    }
+
+    /// Every node FIT, but there are not enough of them.
+    ///
+    /// `NO_ELIGIBLE_NODE` was the fallback here, and it says the opposite of the
+    /// truth: the nodes are eligible. Measured 2026-11-25 - five replicas on two
+    /// healthy nodes reported "no eligible node" with no detail.
+    #[test]
+    fn more_replicas_than_slots_is_not_enough_nodes_not_no_eligible_node() {
+        let a = node("node-a", "READY");
+        let b = node("node-b", "READY");
+        let mut i = input(vec![a.clone(), b.clone()], 5);
+        // default max_instances_per_node is 1 in `input`, so 2 nodes hold 2.
+        i.max_instances_per_node = 1;
+        let r = preflight(&i);
+        assert_eq!(r.verdict, "CAPACITY_BLOCKED");
+        assert_eq!(
+            r.reason,
+            Some("NOT_ENOUGH_NODES"),
+            "both nodes fit individually; the shortfall is the node count, not eligibility"
+        );
+        let detail = r.detail.expect("a refusal must carry its numbers");
+        assert!(detail.contains("5 replica(s) requested"), "{detail}");
+        assert!(detail.contains("placeable"), "{detail}");
+    }
+
+    /// A node that is not READY is REPORTED, not filtered out.
+    ///
+    /// `gather` used to select only `status='READY'`, so an unreachable node
+    /// vanished from the answer and the caller saw an empty list instead of the
+    /// node that was the problem.
+    #[test]
+    fn a_not_ready_node_is_reported_with_its_own_code() {
+        let a = node("node-a", "UNREACHABLE");
+        let b = node("node-b", "READY");
+        let i = input(vec![a, b], 1);
+        let r = preflight(&i);
+        let codes: Vec<_> = r.nodes.iter().filter_map(|n| n.code).collect();
+        assert!(
+            codes.contains(&"NODE_NOT_READY"),
+            "the unready node must appear in the per-node answers: {codes:?}"
+        );
+        // And the ready node still fits - the refusal is per node.
+        assert!(
+            r.nodes.iter().any(|n| n.verdict == "FITS"),
+            "one unready node must not make every node report a refusal"
+        );
+    }
+
+    /// Every refusal carries a top-level detail, so a caller does not have to
+    /// reconstruct the arithmetic from `nodes[]`.
+    #[test]
+    fn every_refusal_carries_a_top_level_detail() {
+        for (label, build) in [
+            ("selector", (|| {
+                let mut n = node("node-a", "READY");
+                n.labels = json!({ "pool": "other" });
+                let mut i = input(vec![n], 1);
+                i.selector.insert("pool".to_string(), "data".to_string());
+                i
+            }) as fn() -> PreflightInput),
+            ("not enough nodes", || {
+                let a = node("node-a", "READY");
+                let b = node("node-b", "READY");
+                let mut i = input(vec![a, b], 5);
+                i.max_instances_per_node = 1;
+                i
+            }),
+            ("full node", || {
+                let a = node("node-a", "READY");
+                let mut i = input(vec![a.clone()], 1);
+                i.global_counts.insert(a.id, 1);
+                i
+            }),
+        ] {
+            let r = preflight(&build());
+            if r.verdict == "FITS" {
+                continue;
+            }
+            assert!(
+                r.detail.as_deref().is_some_and(|d| !d.is_empty()),
+                "{label}: a refusal with no detail is a boolean in disguise"
+            );
+        }
     }
 
     #[test]
