@@ -82,12 +82,50 @@ pub struct Preflight {
     /// Said plainly in the payload because a consumer that drops it will read the
     /// verdict as a guarantee.
     pub caveat: &'static str,
+    /// How many node slots a SAFE reclamation would free, and what would be freed.
+    ///
+    /// This is the difference between `CAPACITY_BLOCKED` and `RECLAIM_REQUIRED`:
+    /// the first says "there is no room", the second says "there is no room until
+    /// the candidates below are released". A caller that only reads `verdict`
+    /// cannot tell a full node from a node full of its own abandoned attempts, and
+    /// those have opposite remedies.
+    ///
+    /// Always present, zero when nothing is reclaimable, so a consumer does not
+    /// have to distinguish "none" from "not computed".
+    pub reclaim: ReclaimPlan,
+}
+
+/// What a reclamation of superseded candidates would free.
+///
+/// This does not compute capacity - `Preflight` already did, with the planner's own
+/// `evaluate_node`. It reports what would become available if the candidates named
+/// here were released, and names them so the recommendation is checkable.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReclaimPlan {
+    /// Slots that would be freed by releasing the candidates below.
+    pub slots_freed: usize,
+    /// The deployments that would be released, newest first per plugin.
+    pub candidates: Vec<ReclaimCandidate>,
+    /// Why nothing (or something) is reclaimable, in words.
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct ReclaimCandidate {
+    pub plugin_id: String,
+    pub version: String,
+    pub deployment_id: Uuid,
+    pub status: String,
+    /// Which newer version supersedes it. Never empty: a candidate is only
+    /// reclaimable because something is newer.
+    pub superseded_by: String,
 }
 
 const CAVEAT: &str = "read-only estimate at the moment this ran; the scheduler still \
      re-evaluates every slot, and another deployment may place in between";
 
 /// Everything the preflight needs, gathered read-only by the caller.
+#[derive(Clone)]
 pub struct PreflightInput {
     pub nodes: Vec<NodeRow>,
     pub selector: BTreeMap<String, String>,
@@ -103,6 +141,9 @@ pub struct PreflightInput {
     pub global_counts: HashMap<Uuid, usize>,
     /// Per-node count of instances of this deployment, for the per-deployment limit.
     pub deployment_counts: HashMap<Uuid, usize>,
+    /// Candidates a safe reclamation would release, gathered read-only. Empty when
+    /// the caller did not ask for a reclaim plan.
+    pub reclaimable: Vec<ReclaimCandidate>,
 }
 
 /// Evaluate every node against the REAL placement gate.
@@ -226,14 +267,57 @@ pub fn preflight(input: &PreflightInput) -> Preflight {
             ),
         })
     };
+    // THE PLAN VERDICT, WHICH IS NOT A NEW CAPACITY CALCULATION.
+    //
+    // `fits` and `replicas_placeable` come from `evaluate_node` above - the real
+    // gate. All this adds is the answer to "and if it does not fit, is that because
+    // the cluster is too small, or because it is full of rows we own and abandoned?"
+    //
+    // Nothing here may turn a CAPACITY_BLOCKED into a FITS. `RECLAIM_REQUIRED` is a
+    // refusal that names a next step; a caller that ignores it is exactly where it
+    // was before. That distinction is why the verdict word changes and the reason
+    // stays the same code.
+    let slots_freed = input.reclaimable.len();
+    let reclaim = ReclaimPlan {
+        slots_freed,
+        candidates: input.reclaimable.clone(),
+        detail: if slots_freed == 0 {
+            "nothing is safely reclaimable: no superseded candidate that was never activated is holding a slot"
+                .to_string()
+        } else {
+            format!(
+                "{} slot(s) held by superseded candidates that were never activated; releasing them \
+                 would leave {} placeable",
+                slots_freed,
+                replicas_placeable + slots_freed as i32
+            )
+        },
+    };
+    let reclaim_would_help = !fits && (replicas_placeable + slots_freed as i32) >= input.replicas;
+
     Preflight {
-        verdict: if fits { "FITS" } else { "CAPACITY_BLOCKED" },
+        verdict: if fits {
+            "FITS"
+        } else if reclaim_would_help {
+            "RECLAIM_REQUIRED"
+        } else {
+            "CAPACITY_BLOCKED"
+        },
         nodes,
         replicas_requested: input.replicas,
         replicas_placeable,
         reason,
-        detail,
+        detail: if reclaim_would_help {
+            Some(format!(
+                "{}; reclaiming the {} listed slot(s) would make it fit",
+                detail.unwrap_or_default().trim_end_matches(';'),
+                slots_freed
+            ))
+        } else {
+            detail
+        },
         caveat: CAVEAT,
+        reclaim,
     }
 }
 
@@ -373,6 +457,55 @@ pub async fn gather(
         None => (HashMap::new(), HashMap::new()),
     };
 
+    // WHAT A SAFE RECLAMATION WOULD FREE, using the SAME predicate the sweep uses.
+    //
+    // This is a copy of the SELECT in `reconcile_once_scoped` on purpose, and the
+    // two are kept honest by a test that asserts the preflight's count equals the
+    // number of rows the sweep actually releases (`preflight_reclaims_what_the_sweep_releases`).
+    // A preflight that promised a reclaim the sweep would not perform would be
+    // worse than no preflight: the operator's next step would be to wait.
+    //
+    // Read-only, like everything else in this function.
+    let reclaimable: Vec<ReclaimCandidate> = sqlx::query_as(
+        r#"
+        SELECT d.plugin_id, d.version, d.id AS deployment_id, d.status,
+               (SELECT newer.version FROM kernel.plugin_deployments newer
+                WHERE newer.plugin_id = d.plugin_id
+                  AND newer.id <> d.id
+                  AND newer.version > d.version
+                  AND newer.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+                ORDER BY newer.version DESC LIMIT 1) AS superseded_by
+        FROM kernel.plugin_deployments d
+        WHERE d.status = 'READY'
+          AND EXISTS (
+            SELECT 1 FROM kernel.plugin_deployments newer
+            WHERE newer.plugin_id = d.plugin_id
+              AND newer.id <> d.id
+              AND newer.version > d.version
+              AND newer.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM kernel.activation_revisions r
+            WHERE r.deployment_id = d.id AND r.status = 'ACTIVE'
+          )
+          -- ONLY WHEN SOMETHING IS WAITING. This clause exists in the sweep's copy
+          -- of this predicate too, and the two must stay identical: a preflight
+          -- that promised a reclaim the sweep would not perform would tell an
+          -- operator to wait for something that never happens. Without it, the
+          -- preflight also names a rollback target, which the sweep deliberately
+          -- leaves alone.
+          AND EXISTS (
+            SELECT 1 FROM kernel.plugin_deployments waiting
+            WHERE waiting.plugin_id = d.plugin_id
+              AND waiting.id <> d.id
+              AND waiting.status IN ('PENDING','PREPARING')
+          )
+        ORDER BY d.plugin_id, d.version DESC
+        "#,
+    )
+    .fetch_all(db)
+    .await?;
+
     Ok(preflight(&PreflightInput {
         nodes,
         selector,
@@ -384,6 +517,7 @@ pub async fn gather(
         used_nodes,
         global_counts,
         deployment_counts,
+        reclaimable,
     }))
 }
 
@@ -432,6 +566,7 @@ mod tests {
             used_nodes: HashMap::new(),
             global_counts: HashMap::new(),
             deployment_counts: HashMap::new(),
+            reclaimable: Vec::new(),
         }
     }
 
@@ -599,5 +734,88 @@ mod tests {
         let r = preflight(&input(vec![node("node-a", "READY")], 1));
         assert!(!r.caveat.is_empty());
         assert!(r.caveat.contains("re-evaluates"));
+    }
+
+    /// `RECLAIM_REQUIRED` says "blocked, but the blockage is our own abandoned
+    /// rows". It must never say that when the cluster is simply too small - that
+    /// would send an operator to wait for a reclaim that frees nothing.
+    #[test]
+    fn reclaim_required_only_when_a_reclaim_would_actually_make_it_fit() {
+        // A node at its per-node limit, and one candidate that could be released.
+        let node = node("staging-node", "READY");
+        let mut base = input(vec![node.clone()], 1);
+        base.max_instances_per_node = 1;
+        base.global_counts.insert(node.id, 1);
+        base.reclaimable = vec![ReclaimCandidate {
+            plugin_id: "test.old".into(),
+            version: "0.0.1".into(),
+            deployment_id: Uuid::new_v4(),
+            status: "READY".into(),
+            superseded_by: "0.0.2".into(),
+        }];
+        let plan = preflight(&base);
+        assert_eq!(plan.verdict, "RECLAIM_REQUIRED", "{plan:?}");
+        assert_eq!(plan.reclaim.slots_freed, 1);
+        assert_eq!(plan.reclaim.candidates.len(), 1);
+        // The refusal is unchanged: this is still a refusal.
+        assert!(plan.reason.is_some(), "a blocked verdict always names why");
+
+        // Same node, nothing reclaimable: the cluster is full for real.
+        let mut no_reclaim = base.clone();
+        no_reclaim.reclaimable.clear();
+        let plan = preflight(&no_reclaim);
+        assert_eq!(plan.verdict, "CAPACITY_BLOCKED", "{plan:?}");
+        assert_eq!(plan.reclaim.slots_freed, 0);
+        assert!(
+            plan.reclaim
+                .detail
+                .contains("nothing is safely reclaimable"),
+            "{}",
+            plan.reclaim.detail
+        );
+
+        // One reclaimable slot but two requested: reclaiming is not enough, so the
+        // answer is still CAPACITY_BLOCKED. Promising RECLAIM_REQUIRED here would
+        // be a lie by one replica.
+        let mut too_big = base.clone();
+        too_big.replicas = 2;
+        let plan = preflight(&too_big);
+        assert_eq!(plan.verdict, "CAPACITY_BLOCKED", "{plan:?}");
+        assert_eq!(
+            plan.reclaim.slots_freed, 1,
+            "the reclaim is still reported, it just does not help"
+        );
+
+        // And a node that fits is never RECLAIM_REQUIRED, whatever is reclaimable.
+        let free = input(vec![node], 1);
+        let mut with_reclaim = free;
+        with_reclaim.reclaimable = base.reclaimable.clone();
+        let plan = preflight(&with_reclaim);
+        assert_eq!(plan.verdict, "FITS", "{plan:?}");
+    }
+
+    /// A reclaim plan is a READ of the deployment rows, so it must not change
+    /// them. The brief's rule for this endpoint is that FITS is an estimate; the
+    /// stronger rule is that asking is never a mutation.
+    #[test]
+    fn building_a_reclaim_plan_writes_nothing() {
+        let node = node("staging-node", "READY");
+        let mut base = input(vec![node.clone()], 1);
+        base.max_instances_per_node = 1;
+        base.global_counts.insert(node.id, 1);
+        base.reclaimable = vec![ReclaimCandidate {
+            plugin_id: "test.old".into(),
+            version: "0.0.1".into(),
+            deployment_id: Uuid::new_v4(),
+            status: "READY".into(),
+            superseded_by: "0.0.2".into(),
+        }];
+        let before = format!("{:?}", base.reclaimable);
+        let _ = preflight(&base);
+        assert_eq!(
+            format!("{:?}", base.reclaimable),
+            before,
+            "preflight takes &PreflightInput and may not mutate it"
+        );
     }
 }
