@@ -1,0 +1,181 @@
+# Phase 8D TASK-39: staging, in its current state
+
+**No staging operation was performed to produce this document.** Every value below
+was read from a `staging-preview` run's own uploaded artifact — the host status
+JSON that the failed run collects with `if: always()`. No SSH, no query, no deploy,
+no row deleted, and nothing was re-triggered.
+
+## What staging is serving right now
+
+From run **45593146217** (the `main` push run for `aedc7680`, 2026-11-25T10:15Z):
+
+```json
+"current": {
+  "sha": "aedc7680f878c529262aed0497814fae9591ffee",
+  "image": "ghcr.io/baicie/opsweave:aedc7680f878c529262aed0497814fae9591ffee",
+  "digest": "sha256:a1d3fa7b25ca04d042432ab60377d10e92572d5baa7cb524272b99442d05c3c7",
+  "deployed_at": "2026-11-25T10:17:36Z",
+  "healthy": true,
+  "rolled_back": false
+}
+"health": { "livez": "pass", "readyz": "pass", "root": "pass" }
+"served_commit": { "sha": "aedc7680…", "state": "observed" }
+"services": postgres running, registry running, kernel running, node running
+```
+
+So the **Kernel and Node are current and healthy** — the deploy half of that job
+succeeded. The job is red for the plugin half only.
+
+## The exact failure in that run
+
+Same run, same job, later step:
+
+```
+PENDING 0/0 ready (… [INSTANCE_CAPACITY_EXCEEDED] node staging-node:
+4 instances already scheduled on this node against a per-node limit of 4 …)
+Error: timed out waiting for deployment readiness
+```
+
+This is the defect TASK-30 audited and TASK-32/#222 fixed. **The fix is merged and
+not deployed**, so the condition is unchanged on the host.
+
+## The four rows, and what the merged rule would do
+
+| occupant | same plugin's other versions | released by #222's rule? |
+|---|---|---|
+| `dev.opsweave.hello@0.0.1` | none | **no** — its plugin's only version |
+| `opsweave.data-catalog@0.0.2` | `0.0.3590`, `0.0.65450` | **yes** — superseded, not ACTIVE |
+| `opsweave.data-catalog@0.0.3590` | `0.0.65450` | **yes** |
+| `opsweave.data-integration@0.0.2` | none | **no** — its plugin's only version |
+
+**Two of four.** The two it cannot release are not "stuck"; they are each the only
+version of their plugin, and whether they are `ACTIVE` and serving traffic needs the
+staging database. This session has no access to it and does not guess.
+
+## What TASK-39 requires, and what is blocked
+
+The brief's acceptance list needs, in order:
+
+1. active revision before the deploy — **needs the staging DB** (`BLOCKED_ENV`)
+2. actual resource occupancy before — **partly available**: the error names the four
+   occupants and the limit; the per-row status is in the DB
+3. the target plugin's artifact identity — **available** (`publish-data-plugins.sh`
+   prints the digest, and the 8A tools now check it)
+4. the scheduling of the new version — **available from a deploy run**
+5. the READY target instance identity — needs the deploy to get past capacity
+6. activation — needs 5
+7. Gateway read-back — needs 6
+8. whether the old instance was released per contract — **this is what #222 changes,
+   and it is unverified until deployed**
+9. whether the old artifact is still retained — `plugin_packages` history, needs DB
+10. a real business request — needs 4
+11. rollback availability — needs the full path
+12. an evidence artifact — the index (#221) now produces one per `ci.yml` run
+
+So the acceptance is **gated on one thing**: releasing the two reclaimable rows,
+which requires a deploy running #222's code. That deploy is a real staging
+mutation and is **not authorised in this session**.
+
+## The read-only path that exists
+
+`staging-preview.yml` has a `verify_only=true` dispatch that:
+
+- certifies **whatever staging already serves**, by the sha the host reports;
+- **mutates nothing** — the deploy step, the image build and the plugin publish are
+  all guarded by `if: ${{ inputs.verify_only != true }}` (`staging-preview.yml:261`,
+  `:427`, `:633-640`, `:660`);
+- needs the served sha, which is `aedc7680f878c529262aed0497814fae9591ffee`.
+
+That dispatch would produce a real acceptance record of the currently-deployed
+build — the checks in items 3, 7 (read-back of what is live), 10 and 12 — without
+touching the host. **It was not run, because even a read-only certification against
+a real staging host is an outward-facing action on an environment the brief says to
+leave alone without explicit approval.** It is recorded here as the next step that
+is ready and cheap, not as something done.
+
+## Honest summary
+
+| claim | status |
+|---|---|
+| staging Kernel/Node at `aedc7680`, healthy | **verified**, from the host's own status JSON |
+| plugin publish fails on capacity | **verified**, same artifact |
+| the four occupants are the ones the brief names | **verified**, named in the error |
+| #222 releases two of them | **reasoned from the rule + the occupant list**, not observed |
+| the fix resolves staging | **not verified and not claimed** — it is not deployed |
+| a real acceptance run | **not performed**; `BLOCKED_ENV` / no approval |
+
+---
+
+# TASK-40: the rule had no tool, so it was a sentence
+
+The brief's five TASK-40 requirements, and where each is enforced:
+
+| requirement | enforced by |
+|---|---|
+| check the PR's exact head SHA | `ci-gate` queries check runs by commit |
+| checks from the right producer and a valid attempt | `check-run-ledger.mjs` |
+| never call it green while a required check is pending | `await-delegated.mjs` |
+| PR green ≠ main green | **nothing, until now** |
+| check what main actually ran after merging | **nothing, until now** |
+
+The last two are the same gap. "PR 通过不等于 main 通过" was a sentence in a document
+that someone had to remember, and this session did remember it and did it by hand
+for `a1634d62`, `a7d6cd65` and `aedc7680`. Doing it by hand three times is how the
+gap became visible.
+
+## The tool
+
+`tests/ci/verify-main.mjs` answers one question: did every workflow that runs on a
+**push to main** complete successfully for this commit?
+
+Five states, and the boundaries between them are the whole value:
+
+| state | meaning |
+|---|---|
+| `VERIFIED` | every workflow that must run on a push completed success |
+| `FAILED` | a workflow concluded failure — this wins over everything |
+| `CANCELLED` | superseded by a newer push; **not a failure, and not a pass** |
+| `INCOMPLETE` | still running, or a required workflow has no run |
+| `UNAVAILABLE` | no push run exists for this commit |
+
+Implemented as a job in `ci.yml`, on `push` to `main` only, **outside
+`JOB_TO_SUITE`** so it is never a merge criterion — it reports on a commit that is
+already merged, and making it fail would not un-merge anything.
+
+## Four bugs in the tool, all mine, all found by using it
+
+1. **Over-matching push triggers.** Read `push:` and assumed every push. Six
+   workflows were reported missing on a commit that had not touched their paths.
+2. **`release-certification.yml` pushes on tags**, not branches. A shallow parse
+   invented an obligation the workflow never agreed to.
+3. **Comments are not configuration.** `platform-linux-acceptance.yml` opens with
+   "NO `paths:` filter, deliberately" — and a `.includes('paths:')` read that
+   sentence as a filter. The character-class mistake again, one level up: a
+   substring match on prose.
+4. **`pipefail` inverts the exit code.** The tool exits 2 for UNAVAILABLE and 3 for
+   CANCELLED by design, so `tool | python3` returns non-zero while the JSON is
+   perfect. The test failed against a correct tool. Documented in the tool, and the
+   test now captures to a file first.
+
+## What it says about the commits this phase produced
+
+```
+$ node tests/ci/verify-main.mjs --sha aedc7680
+FAILED  aedc7680
+  1 workflow(s) failed on this commit: staging-preview.yml: failure
+  verified: ci.yml
+
+$ node tests/ci/verify-main.mjs --sha a7d6cd65
+FAILED  a7d6cd65
+  FAILED:   staging-preview.yml: failure
+  CANCELLED:ci.yml
+```
+
+Both are true, and neither is a defect in the change that landed: `staging-preview`
+fails on the capacity condition TASK-32 fixes, which **is merged and not deployed**.
+`ci.yml` on `a7d6cd65` was cancelled because `aedc7680` landed on top of it — the
+documented `cancel-in-progress` policy.
+
+That is exactly the distinction the tool exists to preserve: a commit whose suites
+were superseded is not a verified commit, and a commit with a red suite is not a
+superseded one.

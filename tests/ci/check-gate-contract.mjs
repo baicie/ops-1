@@ -174,6 +174,11 @@ export function inspectContract(ctx) {
     // The reverse direction is already load-bearing at run time (an unmapped job
     // is a note when green and a FAIL when red), so it is not repeated as an error
     // here - naming `scope` as a failure would be wrong, it is a control job.
+    //
+    // `verify-main` is the same shape and deliberately outside JOB_TO_SUITE: it
+    // runs only on a push to main, answers "what did main ACTUALLY run", and is a
+    // report rather than a merge criterion. Putting it in `needs:` would make the
+    // gate wait on a job that itself reports on the gate's outcome.
   }
 
   // (3) workflows named vs workflows present

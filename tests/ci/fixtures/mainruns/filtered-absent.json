@@ -1,0 +1,1 @@
+{"sha": "fff", "runs": [{"workflow": "ci.yml", "name": "ci", "status": "completed", "conclusion": "success", "createdAt": "2026-11-25T00:00:00Z", "attempt": 1, "runId": 3553}, {"workflow": "staging-preview.yml", "name": "staging-preview", "status": "completed", "conclusion": "success", "createdAt": "2026-11-25T00:00:00Z", "attempt": 1, "runId": 8682}]}
