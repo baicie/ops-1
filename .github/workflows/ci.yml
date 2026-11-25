@@ -2014,7 +2014,10 @@ jobs:
             echo "\`$GITHUB_SHA\` actually concluded."
             echo
             echo '```'
-            cat /tmp/main-runs.err 2>/dev/null | head -5
+            # `head` reads the file directly; `cat f | head` is SC2002 and the
+            # lint is a gate. The file may not exist, so it is guarded rather
+            # than piped through a redirect that shellcheck rewrites away.
+            if [ -s /tmp/main-runs.err ]; then head -5 /tmp/main-runs.err; fi
             node -e '
               try {
                 const d = require("/tmp/main-runs.json");
