@@ -429,6 +429,27 @@ async fn main() -> Result<()> {
                         "replicas": d["desiredReplicas"],
                         "active": d["status"].as_str() == Some("ACTIVE"),
                         "reason": d["statusReason"],
+                        // WHEN THIS ROW BECAME WHAT IT IS, WHICH IS THE QUESTION
+                        // A CAPACITY INVESTIGATION ACTUALLY ASKS.
+                        //
+                        // Staging sat at 4/4 for days and every audit could say
+                        // *which* rows occupied the node but not *why they were
+                        // still there*. "Which of these is READY, and since when"
+                        // decides between three different fixes:
+                        //
+                        //   READY and older than the newest   -> a reclamation
+                        //                                        should have matched
+                        //   ACTIVE                            -> it is serving; the
+                        //                                        rule was right to skip
+                        //   PENDING                           -> the rule never had
+                        //                                        a candidate at all
+                        //
+                        // Both fields are already on the deployment view
+                        // (`DeploymentView.createdAt`, `.activatedAt`); this tool
+                        // simply was not reading them, which made the one question
+                        // it exists to answer unanswerable from its own output.
+                        "createdAt": d["createdAt"],
+                        "activatedAt": d["activatedAt"],
                     })
                 })
                 .collect();
@@ -469,13 +490,19 @@ async fn main() -> Result<()> {
                 }
                 println!("occupants (NOT a removal list):");
                 for o in &occupants {
+                    // `since` carries the timestamp that decides between the three
+                    // cases the JSON comment describes. A human reading a CI log is
+                    // the most common consumer of this command, so leaving the
+                    // timestamps out of the text form would hide the answer from
+                    // exactly the reader who needs it.
                     println!(
-                        "  {} {}@{} status={} replicas={}{}",
+                        "  {} {}@{} status={} replicas={} since={}{}",
                         o["deploymentId"].as_str().unwrap_or(""),
                         o["plugin"].as_str().unwrap_or(""),
                         o["version"].as_str().unwrap_or(""),
                         o["status"].as_str().unwrap_or(""),
                         o["replicas"],
+                        o["createdAt"].as_str().unwrap_or("unknown"),
                         o["reason"]
                             .as_str()
                             .map(|r| format!("  reason: {r}"))

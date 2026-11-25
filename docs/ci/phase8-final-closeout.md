@@ -234,12 +234,18 @@ here.
   named occupants is a condition, not a cause.
 - **No row was deleted, no limit changed.** The run's only writes were a deploy's.
 
-### The instrument that is missing
+### The instrument, now built
 
-No artifact carries deployment state. The next cheap step is to have the deploy job
-run `opsctl capacity --json` into the `staging-deploy` artifact, so the question
-this task turned on — which row is `READY`, and since when — is answerable from the
-run instead of by inference. **That is a follow-up; it is not in this phase.**
+No artifact carried deployment state, so the question this task turned on — which
+row is `READY`, and since when — was answerable only by inference. That is now
+collected: `scripts/ci/collect-capacity.sh` runs `opsctl capacity --json` inside the
+kernel container and writes `capacity.json` into `staging-deploy`, and `opsctl
+capacity` now reports each occupant's `createdAt` and `activatedAt`.
+
+**Building the instrument is not using it.** No run has produced a `capacity.json`
+yet, so the failing clause of the rule remains **unknown**, and nothing in this
+document narrows it. The next staging deploy will, and that is stated as a fact
+about the future rather than a result.
 
 ## 7. Required Check status
 
@@ -304,7 +310,7 @@ identity problem ADR-025 describes remains `NEEDS_DECISION`.
 | Ruleset migration (required checks) | `BLOCKED_AUTH` — payload and rollback ready, write not authorised |
 | The staging capacity fix | **deployed 2026-11-25 and ineffective** — four rows unreleased, failing clause unknown (§6) |
 | Real staging acceptance (TASK-39) | **attempted, negative** — the deploy succeeded and the plugin path still fails |
-| Deployment state in an artifact | missing — no artifact carries per-deployment status; `opsctl capacity --json` would |
+| Deployment state in an artifact | **built** — `scripts/ci/collect-capacity.sh` writes `capacity.json` into `staging-deploy`, and `opsctl capacity` now reports each occupant's `createdAt`. **Not yet exercised by a run**, so the failing clause stays unknown |
 | `RECLAIM_REQUIRED` reaching a caller | kernel returns it; `opsctl` still times out unchanged |
 | TASK-33/34 release identity | not started |
 | TASK-35 CI cost | not measured |
@@ -318,14 +324,20 @@ identity problem ADR-025 describes remains `NEEDS_DECISION`.
 2. a classifier and a collector no workflow invoked (#219 → measured in #221);
 3. a capacity preflight the deploy path never called (#220);
 4. `ci.yml` uploading nothing at all (#221);
-5. **the deploy job never runs `opsctl capacity`** — the one read-only command that
+5. **the deploy job never ran `opsctl capacity`** — the one read-only command that
    prints per-deployment status, in a phase whose central question was "which row
    is READY". Found while trying to answer that question and discovering no
-   artifact could (§6).
+   artifact could (§6). Fixed in #224's follow-up; this one is the only entry in
+   the list that was closed rather than merely named.
 
 Each was found by asking **"who calls this"**, never by reading the code. The
 cheapest gate this repository could add is one that asks that question about every
 tool it builds.
+
+The fifth also shows the shape of the fix: it was not a new tool. `opsctl capacity`
+already existed and already answered correctly; nothing called it, and it was not
+printing the two fields that made its answer usable. **The cheapest repair in this
+list was one call site and two JSON keys.**
 
 ### 12.1 The second pattern, and this phase produced its strongest instance
 

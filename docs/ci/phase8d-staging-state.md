@@ -209,31 +209,44 @@ the host, and the host's port is not reachable from here.
 - **No row was deleted, no limit changed, no cleanup was attempted.** The run's
   only writes were the ones a deploy makes.
 
-## The next instrument, and it is a small one
+## The instrument, now built
 
-The gap is that **no artifact carries deployment state**. `host-status.json` has
-services and health; the occupants appear only inside an error string. A run
-therefore cannot answer "which of these is READY, and since when" — which is the
-single question this task turned on.
+The gap was that **no artifact carried deployment state**. `host-status.json` has
+services and health; the occupants appeared only inside an error string. A run
+therefore could not answer "which of these is READY, and since when" — the single
+question this task turned on.
 
-`opsctl capacity --json` already prints `status`, `replicas`, `active` and
-`statusReason` per deployment, read-only. The deploy job does not call it. Wiring
-that output into `staging-deploy` would make the next deploy self-explaining
-instead of requiring another round of inference.
+That is now collected. `scripts/ci/collect-capacity.sh` runs
+`opsctl capacity --json` inside the kernel container, over the same SSH path the
+deploy already uses, and writes `capacity.json` into the `staging-deploy` artifact.
 
-**What it would change, concretely** — otherwise it is a nice sentence:
+It is read-only, it is `if: always()` — a failed publish is the run that needs it,
+not the edge case — and **it cannot fail the job**: a deploy that worked must not
+turn red because a diagnostic could not run. What it guarantees instead is that
+`capacity.json` always parses and always names its state (`capacity-unavailable`,
+`capacity-empty`, `capacity-unparseable`), because an empty file would read as
+"there were no occupants", which is the opposite of a full node.
 
-| with the artifact | which clause of the rule is failing |
-|---|---|
-| a row is `READY` and older than `0.0.65450` | the rule should have matched; look at `waiting` and `activation_revisions` |
-| a row is `ACTIVE` | the rule was right to skip it, and the defect is elsewhere entirely |
-| a row is `PENDING` | the rule never had a candidate; the defect is in what leaves rows `PENDING` |
+`opsctl capacity` also gained two fields it was not reading: `createdAt` and
+`activatedAt` per occupant. Both were already on the API's deployment view; the
+tool simply omitted them, which made the one question it exists to answer
+unanswerable from its own output.
 
-Those three lead to three different fixes. Without the artifact they are
-indistinguishable, and picking one would be guessing — which is exactly what the
-earlier version of this document did.
+**What it will decide, concretely** — otherwise it is a nice sentence:
 
-That is a follow-up, not a claim. **It is not in this phase's changes.**
+| next run shows an occupant as | which clause failed | where the fix goes |
+|---|---|---|
+| `READY`, older than `0.0.65450` | the rule should have matched | the `waiting` subquery or `activation_revisions` |
+| `ACTIVE` | the rule was right to skip it | the defect is elsewhere entirely |
+| `PENDING` | the rule never had a candidate | what leaves a row `PENDING` — `deployments.rs:352` |
+
+Those three lead to three different fixes. Until now they were indistinguishable,
+and picking one would have been guessing — which is what the earlier version of
+this document did.
+
+**What this is not.** Building the instrument is not using it. No run has produced
+a `capacity.json` yet, so the failing clause is still **unknown**, and this section
+does not narrow it. The next staging deploy will.
 
 
 ---
