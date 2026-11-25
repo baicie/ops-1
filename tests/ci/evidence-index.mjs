@@ -236,6 +236,7 @@ if (WORKFLOW_OF) {
 
 const artifactRows = (artifacts ?? []).map((a) => ({
   name: a.name,
+  id: a.id ?? null,
   producer: artifactProducerOf(a),
   sizeBytes: a.size_in_bytes ?? null,
   createdAt: a.created_at ?? null,
@@ -244,6 +245,32 @@ const artifactRows = (artifacts ?? []).map((a) => ({
   // expiry it computed from it. Both are kept: expiry is what a reader can act on.
   digest: a.digest ?? null,
 }));
+
+// A RETRIED RUN CAN HOLD TWO ARTIFACTS WITH THE SAME NAME, AND THE API CANNOT TELL
+// THEM APART.
+//
+// Measured: run 45542879392 (run_attempt=2) has two `plugin-lifecycle-evidence`
+// artifacts, created 04:11 and 05:05. The artifact object's keys are
+// `{name, id, created_at, expires_at, digest, size_in_bytes, workflow_run, …}` -
+// no `run_attempt`, no job. So "the artifact for this check" is ambiguous after a
+// retry, and an index that silently picked one could hand a reader the PREVIOUS
+// attempt's evidence while reporting the current attempt's verdict.
+//
+// Both are kept and the collision is named: `artifactNameCollisions` lists every
+// name with more than one artifact, so a reader can see the ambiguity instead of
+// inheriting a guess. The `__artifacts` map in `--workflow-of` is therefore keyed
+// by artifact NAME and `id` where available; two same-named artifacts from one
+// producer are the same producer, and that is all this can honestly say.
+const artifactNameCollisions = (() => {
+  const seen = new Map();
+  for (const a of artifactRows) seen.set(a.name, (seen.get(a.name) ?? 0) + 1);
+  return [...seen.entries()].filter(([, n]) => n > 1).map(([name, count]) => ({
+    name,
+    count,
+    why: 'a re-run creates a second artifact with the same name; the artifact object carries no run_attempt, so '
+      + 'this index cannot say which attempt each belongs to. Compare created_at against the run attempt window.',
+  }));
+})();
 
 const unlinkedArtifacts = artifacts === null
   ? null
@@ -355,6 +382,7 @@ const index = {
     artifacts: artifactRows.length,
   },
   passedNoEvidence,
+  artifactNameCollisions,
   omissions,
   unlinkedArtifacts,
   // The sentence this tool exists to make true.

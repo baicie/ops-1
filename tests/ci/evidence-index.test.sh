@@ -217,7 +217,32 @@ assert "continue-on-error" not in step, "continue-on-error would hide a real fai
 PYEOF
 [ $? -eq 0 ] && ok "the index step cannot alter the gate verdict" || bad "the index can influence the gate"
 
-echo "== 13. no network is needed for any case above"
+echo "== 13. A RETRIED RUN'S TWO SAME-NAMED ARTIFACTS ARE REPORTED AS AMBIGUOUS"
+# Measured on real run 45542879392 (attempt 2): two artifacts both named
+# plugin-lifecycle-evidence, created 04:11 and 05:05. The artifact object has no
+# run_attempt, so the index must NOT silently pick one - it must name the collision.
+python3 - "$WORK/dup.json" <<'PYDUP'
+import json, sys
+json.dump({"total_count": 2, "artifacts": [
+  {"name": "plugin-lifecycle-evidence", "id": 2, "created_at": "2026-11-25T05:05:37Z",
+   "expires_at": "2026-12-09T00:00:00Z", "digest": "sha256:bb"},
+  {"name": "plugin-lifecycle-evidence", "id": 1, "created_at": "2026-11-25T04:11:17Z",
+   "expires_at": "2026-12-09T00:00:00Z", "digest": "sha256:aa"},
+]}, open(sys.argv[1], "w"))
+PYDUP
+node "$TOOL" --gate-json "$FIX/gate.json" --artifacts "$WORK/dup.json" --out "$WORK/dup-out.json" >/dev/null 2>&1
+python3 - "$WORK/dup-out.json" <<'PYCHK' && ok "the collision is named, and BOTH rows are kept" || bad "a duplicate artifact name was silently resolved"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert len(d["evidenceArtifacts"]) == 2, len(d["evidenceArtifacts"])
+c = d["artifactNameCollisions"]
+assert len(c) == 1, c
+assert c[0]["name"] == "plugin-lifecycle-evidence", c
+assert c[0]["count"] == 2, c
+assert "run_attempt" in c[0]["why"], c
+PYCHK
+
+echo "== 14. no network is needed for any case above"
 grep -qE -- '--run [0-9]{6,}' "$0" && bad "this self-test calls the live API" || ok "no live run id appears in this file"
 
 echo
