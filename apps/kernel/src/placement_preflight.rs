@@ -220,7 +220,10 @@ pub fn preflight(input: &PreflightInput) -> Preflight {
                 "{}: {} replica(s) requested, {} placeable, and no node reported a reason",
                 code, input.replicas, replicas_placeable
             ),
-            _ => format!("{} replica(s) requested, {} placeable", input.replicas, replicas_placeable),
+            _ => format!(
+                "{} replica(s) requested, {} placeable",
+                input.replicas, replicas_placeable
+            ),
         })
     };
     Preflight {
@@ -527,13 +530,16 @@ mod tests {
     #[test]
     fn every_refusal_carries_a_top_level_detail() {
         for (label, build) in [
-            ("selector", (|| {
-                let mut n = node("node-a", "READY");
-                n.labels = json!({ "pool": "other" });
-                let mut i = input(vec![n], 1);
-                i.selector.insert("pool".to_string(), "data".to_string());
-                i
-            }) as fn() -> PreflightInput),
+            (
+                "selector",
+                (|| {
+                    let mut n = node("node-a", "READY");
+                    n.labels = json!({ "pool": "other" });
+                    let mut i = input(vec![n], 1);
+                    i.selector.insert("pool".to_string(), "data".to_string());
+                    i
+                }) as fn() -> PreflightInput,
+            ),
             ("not enough nodes", || {
                 let a = node("node-a", "READY");
                 let b = node("node-b", "READY");

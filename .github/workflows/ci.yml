@@ -1917,6 +1917,12 @@ jobs:
           # test. `node tests/ci/check-ruleset-preflight.mjs --offline` is run by
           # the operator before the migration, which is when it matters.
           bash tests/ci/check-ruleset-preflight.test.sh
+          # TASK-23: the golden-path baseline's AGGREGATION rules, driven from
+          # saved STEP lines. The live half needs `gh`; what has to be right is
+          # that a spread is max-minus-min, that a step is classified by name
+          # rather than by duration, and that a 151-second swing is attributed to
+          # the step it came from rather than to "noise".
+          bash tests/ci/golden-path-baseline.test.sh
           # The migration's PRECONDITION: can all ten contexts the candidate
           # ruleset requires actually appear on every pull request? A required
           # context whose workflow has a path filter, or whose job is conditional,
