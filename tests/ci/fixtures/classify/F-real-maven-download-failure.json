@@ -1,0 +1,41 @@
+{
+  "run": {
+    "id": 90000000006,
+    "run_attempt": 1,
+    "name": "CI",
+    "event": "pull_request",
+    "head_sha": "b217284a3e585cf9af376c6d24aeb40ba661558c",
+    "head_branch": "x",
+    "status": "completed",
+    "conclusion": "failure",
+    "created_at": "2026-11-25T00:00:00Z",
+    "run_started_at": "2026-11-25T00:00:00Z",
+    "updated_at": "2026-11-25T00:20:00Z",
+    "html_url": "https://example.invalid/run",
+    "previous_attempt_url": null
+  },
+  "jobs": {
+    "jobs": [
+      {
+        "id": 50,
+        "name": "java plugin",
+        "conclusion": "failure",
+        "started_at": "2026-11-25T00:00:00Z",
+        "completed_at": "2026-11-25T00:20:00Z",
+        "runner_name": "GitHub Actions 4",
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Build",
+            "number": 1,
+            "conclusion": "failure",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "log": "java plugin\tBuild\t2026-11-25T00:00:00Z [ERROR] Failed to execute goal: Could not resolve dependencies: Could not find artifact dev.opsweave:missing:pom:0.0.5\njava plugin\tBuild\t2026-11-25T00:00:01Z [FATAL] Non-resolvable parent POM for dev.opsweave:hello-java:0.0.1: status: 404",
+  "_note": "F: a genuine registry failure that exits the step non-zero. This one IS external, and must stay external - the point of B is that this signature is scoped, not that it is ignored."
+}

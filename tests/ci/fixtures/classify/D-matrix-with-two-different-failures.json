@@ -1,0 +1,59 @@
+{
+  "run": {
+    "id": 90000000004,
+    "run_attempt": 1,
+    "name": "CI",
+    "event": "pull_request",
+    "head_sha": "b217284a3e585cf9af376c6d24aeb40ba661558c",
+    "head_branch": "x",
+    "status": "completed",
+    "conclusion": "failure",
+    "created_at": "2026-11-25T00:00:00Z",
+    "run_started_at": "2026-11-25T00:00:00Z",
+    "updated_at": "2026-11-25T00:20:00Z",
+    "html_url": "https://example.invalid/run",
+    "previous_attempt_url": null
+  },
+  "jobs": {
+    "jobs": [
+      {
+        "id": 30,
+        "name": "lifecycle (go)",
+        "conclusion": "failure",
+        "started_at": "2026-11-25T00:00:00Z",
+        "completed_at": "2026-11-25T00:20:00Z",
+        "runner_name": "GitHub Actions 4",
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Go plugin",
+            "number": 1,
+            "conclusion": "failure",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          }
+        ]
+      },
+      {
+        "id": 31,
+        "name": "lifecycle (java)",
+        "conclusion": "failure",
+        "started_at": "2026-11-25T00:00:00Z",
+        "completed_at": "2026-11-25T00:20:00Z",
+        "runner_name": "GitHub Actions 4",
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Java plugin",
+            "number": 1,
+            "conclusion": "failure",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "log": "lifecycle (go)\tGo plugin\t2026-11-25T00:00:00Z [FATAL] transfer failed for https://repo.maven.apache.org/x, status: 503\nlifecycle (go)\tGo plugin\t2026-11-25T00:00:01Z   FAIL go plugin did not activate\nlifecycle (java)\tJava plugin\t2026-11-25T00:00:02Z   FAIL java plugin did not activate: instance never became READY",
+  "_note": "D: two matrix rows failing for two unrelated reasons. V1 emitted ONE category and the other failure vanished. D must keep them apart."
+}

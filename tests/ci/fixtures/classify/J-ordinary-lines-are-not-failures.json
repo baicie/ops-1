@@ -1,0 +1,48 @@
+{
+  "run": {
+    "id": 90000000010,
+    "run_attempt": 1,
+    "name": "CI",
+    "event": "pull_request",
+    "head_sha": "b217284a3e585cf9af376c6d24aeb40ba661558c",
+    "head_branch": "x",
+    "status": "completed",
+    "conclusion": "success",
+    "created_at": "2026-11-25T00:00:00Z",
+    "run_started_at": "2026-11-25T00:00:00Z",
+    "updated_at": "2026-11-25T00:20:00Z",
+    "html_url": "https://example.invalid/run",
+    "previous_attempt_url": null
+  },
+  "jobs": {
+    "jobs": [
+      {
+        "id": 90,
+        "name": "full",
+        "conclusion": "success",
+        "started_at": "2026-11-25T00:00:00Z",
+        "completed_at": "2026-11-25T00:20:00Z",
+        "runner_name": "GitHub Actions 4",
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Build",
+            "number": 1,
+            "conclusion": "success",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          },
+          {
+            "name": "Test",
+            "number": 2,
+            "conclusion": "success",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "log": "full\tBuild\t2026-11-25T00:00:00Z Compiling kernel v0.0.1\nfull\tBuild\t2026-11-25T00:00:01Z Finished release [optimized] target(s) in 42s\nfull\tTest\t2026-11-25T00:00:02Z everything is fine, nothing to report\nfull\tTest\t2026-11-25T00:00:03Z PASS=41 FAIL=0 BLOCKED=0 NOT_RUN=0\nfull\tTest\t2026-11-25T00:00:04Z   ok   the deployment activated",
+  "_note": "J: ordinary log lines. V1's isFailureLine was a character class that matched every string; these are the lines it called failures."
+}

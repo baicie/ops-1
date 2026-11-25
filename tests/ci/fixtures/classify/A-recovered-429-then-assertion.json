@@ -1,0 +1,48 @@
+{
+  "run": {
+    "id": 90000000001,
+    "run_attempt": 1,
+    "name": "CI",
+    "event": "pull_request",
+    "head_sha": "b217284a3e585cf9af376c6d24aeb40ba661558c",
+    "head_branch": "x",
+    "status": "completed",
+    "conclusion": "failure",
+    "created_at": "2026-11-25T00:00:00Z",
+    "run_started_at": "2026-11-25T00:00:00Z",
+    "updated_at": "2026-11-25T00:20:00Z",
+    "html_url": "https://example.invalid/run",
+    "previous_attempt_url": null
+  },
+  "jobs": {
+    "jobs": [
+      {
+        "id": 1,
+        "name": "full TypeScript lifecycle",
+        "conclusion": "failure",
+        "started_at": "2026-11-25T00:00:00Z",
+        "completed_at": "2026-11-25T00:20:00Z",
+        "runner_name": "GitHub Actions 4",
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Build",
+            "number": 1,
+            "conclusion": "success",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          },
+          {
+            "name": "Workspace isolation",
+            "number": 2,
+            "conclusion": "failure",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "log": "full TypeScript lifecycle\tBuild\t2026-11-25T00:00:00Z [FATAL] Non-resolvable parent POM: status: 429\nfull TypeScript lifecycle\tBuild\t2026-11-25T00:00:30Z maven: retry recovered, artifact resolved\nfull TypeScript lifecycle\tBuild\t2026-11-25T00:00:31Z PASS=4 FAIL=0 BLOCKED=0 NOT_RUN=0\nfull TypeScript lifecycle\tWorkspace isolation\t2026-11-25T00:00:40Z   ok   plugin A cannot read plugin B volume\nfull TypeScript lifecycle\tWorkspace isolation\t2026-11-25T00:00:41Z   FAIL workspace isolation: plugin A can read plugin B volume",
+  "_note": "A: a 429 that RECOVERED, followed by a real assertion failure. The 429 is context, not the cause. V1 returned EXTERNAL_DEPENDENCY here and named the recovered 429 as the root cause."
+}

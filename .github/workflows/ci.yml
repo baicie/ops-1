@@ -1937,14 +1937,22 @@ jobs:
           # rather than by duration, and that a 151-second swing is attributed to
           # the step it came from rather than to "noise".
           bash tests/ci/golden-path-baseline.test.sh
-          # TASK-21: the failure classifier. The asymmetry it implements is the
-          # point - PRODUCT_REGRESSION needs no evidence, every other category
-          # needs positive evidence, and an unproven cause is UNKNOWN rather than
-          # "probably external". Driven from synthetic logs so a signature change
-          # is caught without waiting for a real 429.
+          # TASK-26: ONE sanitization boundary, and the proof that no output
+          # surface escapes it. Found by construction: the collector redacted
+          # `log.excerpt` and copied `classification.evidence[].line` verbatim from
+          # a classifier that had read the RAW log, so the same physical line
+          # appeared twice - redacted in one field, live in the other.
+          bash tests/ci/evidence-sanitize.test.sh
+          # TASK-27: the failure classifier's ATTRIBUTION, one finding per failed
+          # step. Ten committed counterexamples, each one a case V1 got confidently
+          # wrong (a recovered 429 as the root cause, a 429 from a succeeded job,
+          # a PASSING assertion quoted as the cause, two matrix rows collapsed into
+          # one). Driven from fixtures so a signature change is caught without
+          # waiting for a real 429.
           bash tests/ci/classify-failure.test.sh
-          # TASK-22: the evidence collector's two constraints. Redaction is a pure
-          # function of the input, so it is driven here; the live half needs `gh`.
+          # TASK-22/28/29: evidence scoped to a job and a pinned attempt, and a
+          # budget measured in UTF-8 BYTES rather than JavaScript characters.
+          # Every case reads a fixture; none touches the network.
           bash tests/ci/collect-failure-evidence.test.sh
           # The migration's PRECONDITION: can all ten contexts the candidate
           # ruleset requires actually appear on every pull request? A required
