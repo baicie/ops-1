@@ -2176,6 +2176,14 @@ jobs:
           # the loop at the first failure and the output otherwise says nothing about
           # the rest. Measured with three plugins and a failure on the second.
           bash tests/scripts/publish-untried-report.test.sh
+          # TASK-39's missing instrument: no artifact carried deployment status, so
+          # a deployed fix that did nothing could not explain itself. This collects
+          # `opsctl capacity --json` into the staging-deploy artifact, and the cases
+          # below are mostly FAILURES - the branch that runs on a full node is the
+          # only one that ever needed the step. The rule under test is that
+          # capacity.json is never empty, because an empty file reads as "no
+          # occupants", the opposite of a capacity failure.
+          bash tests/scripts/collect-capacity.test.sh
           # Is the gate actually enforceable? Reads the LIVE ruleset, because a
           # flawless workflow that nothing requires gates nothing. ADVISORY and
           # PARTIAL exit 0 - they are facts for a migration to decide about, not

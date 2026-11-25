@@ -695,6 +695,50 @@ jobs:
           fi
           head -c 4000 artifacts/staging-preview/host-status.json || true
 
+      # WHY THIS STEP EXISTS, AND WHY IT IS `always()`.
+      #
+      # `host-status.json` describes the HOST - compose services, health probes,
+      # served commit. It says nothing about plugin DEPLOYMENTS, and the only place
+      # the four staging occupants ever appeared was inside an error string:
+      #
+      #     [INSTANCE_CAPACITY_EXCEEDED] ... occupied by dev.opsweave.hello@0.0.1,
+      #     opsweave.data-catalog@0.0.2, opsweave.data-catalog@0.0.3590, ...
+      #
+      # On 2026-11-25 a fix for that condition was deployed and did not work, and
+      # the run could not say why, because no artifact carried a deployment's
+      # status or its age. Answering it needed the staging database, which the
+      # person reading the run did not have. This step is that database question,
+      # asked from the runner, so the next failure explains itself.
+      #
+      # `always()` is the whole point: the publish step is what fails on a full
+      # node, so a step that only ran on success would be missing from exactly the
+      # run that needs it. A failed publish is the useful case, not the edge one.
+      #
+      # IT MUST NOT FAIL THE JOB. `opsctl capacity` needs a session, and on a first
+      # deploy or a rotated credential there may not be one yet. Writing "why" into
+      # an artifact is diagnostic; turning a green deploy red because the
+      # diagnostic could not run would be the tail wagging the dog. So every
+      # failure here is recorded in the file it writes and the step exits 0.
+      #
+      # The command is read-only by construction (`opsctl capacity` documents
+      # itself as writes nothing); nothing here mutates staging.
+      - name: Collect deployment capacity
+        if: always()
+        run: |
+          # The logic lives in `scripts/ci/collect-capacity.sh` so that its FAILURE
+          # branch can be tested against a stub `ssh`. That branch is the one that
+          # runs on a full node, i.e. the only run that needed this step at all, and
+          # a `run:` block cannot be exercised without a runner and a live host.
+          #
+          # The script exits 0 on every path, deliberately: a working deploy must not
+          # turn red because the diagnostic could not run. What it guarantees instead
+          # is that `capacity.json` always parses and always names its state -
+          # `capacity-unavailable`, `capacity-empty` or `capacity-unparseable` rather
+          # than an empty file, which downstream would read as "no occupants".
+          bash scripts/ci/collect-capacity.sh \
+            artifacts/staging-preview/capacity.json \
+            artifacts/staging-preview/capacity.stderr
+
       - name: Upload deploy evidence
         if: always()
         uses: actions/upload-artifact@v4
