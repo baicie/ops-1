@@ -1644,9 +1644,23 @@ jobs:
     # gate was right and its input was stale: the previous figure described the
     # old behaviour, not this one.
     #
-    # 3600 s covers 2963 s with 21% headroom for a slower runner. It is not a
-    # licence to let a hang pass: a hang still exhausts the budget and fails.
-    timeout-minutes: 70
+    # MEASURED AGAIN ON 2026-11-25, AND THE NUMBER WAS STILL SHORT.
+    #
+    # Run 45542879466 waited 4076 s (67.9 min) for one suite and timed out at
+    # 3600 s. The suite itself took 3013 s - the gap is the QUEUE: `ci-gate`
+    # starts waiting at 03:57, the job it waits for is not scheduled until 04:15.
+    # A budget that measures how long the work takes is not the same as one that
+    # measures how long a gate must WAIT, and only the second is what this value
+    # has to cover.
+    #
+    # 4076 s observed. The TASK-25 capacity suite added ~10 minutes to the job
+    # that contains it, which is why the previous 3600 (sized from 2963) stopped
+    # fitting: the baseline moved because I made the suite do more, not because
+    # the runner got slower.
+    #
+    # 5400 s = 90 min, 32% headroom over the observed 4076 s. It is not a licence
+    # to let a hang pass: a hang still exhausts the budget and fails.
+    timeout-minutes: 110
     if: always()
     # `checks: read` is what lets this job stop taking the other workflows on
     # faith. It queries the check runs on THIS commit - by name, AND by the
@@ -1705,7 +1719,7 @@ jobs:
           # the wiring that was missing: `--budget-ms "${GATE_BUDGET_MS:-...}"`
           # appeared in the run block but nothing ever set the variable, so the
           # default was the only value it could take.
-          GATE_BUDGET_MS: ${{ vars.OPSWEAVE_GATE_BUDGET_MS || '3600000' }}
+          GATE_BUDGET_MS: ${{ vars.OPSWEAVE_GATE_BUDGET_MS || '5400000' }}
         run: |
           set -euo pipefail
           # The files this commit changed.
@@ -1896,6 +1910,33 @@ jobs:
           # mistake cannot reach a terminal.
           node tests/ci/check-ruleset-payload.mjs --selftest
           node tests/ci/check-ruleset-payload.mjs
+          # TASK-19: the pre-migration preflight, against the COMMITTED snapshot.
+          # The two checks above compare saved file to saved file. Neither asks
+          # "is the live ruleset still what the migration assumes", which is a
+          # delta question and the one a migration actually depends on.
+          #
+          # CI has no ruleset read permission, so a live read would be
+          # NOT_EVALUATED here; the committed snapshot is used instead, and the
+          # tool prints its capture date so a stale baseline reads as stale.
+          #
+          # WHAT IS GATED IS THE SELF-TEST, not the preflight itself. The
+          # self-test is green (12 assertions) and would be red if the tool
+          # stopped catching a lost protection, an unexpected rule, or a changed
+          # payload - those are the properties that must not regress.
+          #
+          # The preflight's LIVE verdict is deliberately not a CI gate: it reports
+          # a real disagreement today (two payloads set opposite strict policies,
+          # and the choice is BLOCKED_AUTH), and gating on an unresolved decision
+          # would block every merge for a reason unrelated to the change under
+          # test. `node tests/ci/check-ruleset-preflight.mjs --offline` is run by
+          # the operator before the migration, which is when it matters.
+          bash tests/ci/check-ruleset-preflight.test.sh
+          # TASK-23: the golden-path baseline's AGGREGATION rules, driven from
+          # saved STEP lines. The live half needs `gh`; what has to be right is
+          # that a spread is max-minus-min, that a step is classified by name
+          # rather than by duration, and that a 151-second swing is attributed to
+          # the step it came from rather than to "noise".
+          bash tests/ci/golden-path-baseline.test.sh
           # The migration's PRECONDITION: can all ten contexts the candidate
           # ruleset requires actually appear on every pull request? A required
           # context whose workflow has a path filter, or whose job is conditional,

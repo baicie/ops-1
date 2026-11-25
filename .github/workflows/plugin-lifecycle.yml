@@ -508,6 +508,32 @@ jobs:
           set -o pipefail
           tests/ci/phase7_heartbeat_bounds.sh 2>&1 | tee phase7-heartbeat-bounds.log
 
+      - name: The capacity preflight's refusals, in isolation (Phase 8 TASK-25)
+        # THE ANSWER HAS TO BE THE RIGHT ONE, NOT MERELY "NO".
+        #
+        # The preflight exists so a capacity refusal arrives before a full image
+        # build. Its whole value is the REASON, so this constructs each of the six
+        # rejection codes the scheduler can produce and asserts the code and the
+        # numbers behind it - not that "it failed".
+        #
+        # This step found two real defects on its first honest run:
+        #   `gather` selected only READY nodes, so an unreachable one vanished from
+        #     the answer instead of reporting NODE_NOT_READY
+        #   five replicas on two healthy nodes reported "NO_ELIGIBLE_NODE", which is
+        #     the opposite of the truth - the nodes are eligible, there are too few
+        #
+        # It also asserts the one thing a preflight must not claim: a FITS answer is
+        # a statement about the moment it ran, and the test checks that the
+        # preflight wrote nothing, separately from any deploy outcome.
+        if: success()
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          set -o pipefail
+          tests/ci/phase8_capacity_preflight.sh 2>&1 | tee phase8-capacity-preflight.log
+
       - name: The release verdict is a function of the stages
         # Runs anywhere, no platform: it drives `verdict_of` with synthetic stage
         # rows. The VALUES come from the live run below; this pins the DECISION,
@@ -563,6 +589,7 @@ jobs:
             artifacts/phase7-publish-failures/
             phase7-two-node.log
             phase7-heartbeat-bounds.log
+            phase8-capacity-preflight.log
             artifacts/p001c-multilang-lifecycle/
           if-no-files-found: warn
           retention-days: 14
