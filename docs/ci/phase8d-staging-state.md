@@ -41,11 +41,18 @@ not deployed**, so the condition is unchanged on the host.
 
 ## The four rows, and what the merged rule would do
 
+> **THIS TABLE IS WRONG, and it is kept to show how.** Measured later from
+> `capacity.json` (see "The instrument ran", below): `data-catalog@0.0.2` is
+> **`ACTIVE` and serving**, so the rule correctly excludes it. Its row below says
+> "superseded, not ACTIVE" — that was an inference from a version list, and the
+> status column was never read. Acting on this table would have taken a live route
+> down.
+
 | occupant | same plugin's other versions | released by #222's rule? |
 |---|---|---|
 | `dev.opsweave.hello@0.0.1` | none | **no** — its plugin's only version |
-| `opsweave.data-catalog@0.0.2` | `0.0.3590`, `0.0.65450` | **yes** — superseded, not ACTIVE |
-| `opsweave.data-catalog@0.0.3590` | `0.0.65450` | **yes** |
+| `opsweave.data-catalog@0.0.2` | `0.0.3590`, `0.0.65450` | ~~yes — superseded, not ACTIVE~~ **no — it IS `ACTIVE`** |
+| `opsweave.data-catalog@0.0.3590` | `0.0.65450` | ~~yes~~ **no — it is `DEGRADED`, which the rule does not match** |
 | `opsweave.data-integration@0.0.2` | none | **no** — its plugin's only version |
 
 **Two of four.** The two it cannot release are not "stuck"; they are each the only
@@ -100,8 +107,8 @@ is ready and cheap, not as something done.
 | staging Kernel/Node at `aedc7680`, healthy | **verified**, from the host's own status JSON |
 | plugin publish fails on capacity | **verified**, same artifact |
 | the four occupants are the ones the brief names | **verified**, named in the error |
-| #222 releases two of them | **reasoned from the rule + the occupant list**, not observed |
-| the fix resolves staging | **not verified and not claimed** — it is not deployed |
+| #222 releases two of them | ~~reasoned from the rule + the occupant list~~ **FALSE — measured later; it releases none, because none is `READY`** |
+| the fix resolves staging | **not verified and not claimed** — it is not deployed (later: deployed, and it addressed a condition the host did not have — see below) |
 | a real acceptance run | **not performed**; `BLOCKED_ENV` / no approval |
 
 ---
@@ -199,9 +206,10 @@ the host, and the host's port is not reachable from here.
 
 ## What this does not license
 
-- **It is not "the fix is wrong."** The rule did not match; which clause failed is
-  unknown. The honest statements are "deployed, no effect" and "the reason is not
-  observable from here".
+- **It is not "the fix is wrong."** The rule did not match; which clause failed was
+  unknown at the time of this deploy. **It was answered by the next one** (see "The
+  instrument ran", below): the rule had no eligible candidate, so not matching was
+  correct.
 - **It is not "capacity should be raised."** The brief forbids it
   (「禁止仅通过提高 Staging 实例容量来掩盖插件生命周期问题」) and the deploy gives
   no evidence for it — 4/4 with four named occupants is the condition, not the
@@ -244,9 +252,79 @@ Those three lead to three different fixes. Until now they were indistinguishable
 and picking one would have been guessing — which is what the earlier version of
 this document did.
 
-**What this is not.** Building the instrument is not using it. No run has produced
-a `capacity.json` yet, so the failing clause is still **unknown**, and this section
-does not narrow it. The next staging deploy will.
+## The instrument ran, and it reversed the conclusion
+
+The first `capacity.json` was produced by run **45634540776** (main at `530c81b8`,
+2026-11-25T14:43Z). It answers the question and **disproves the audit above**.
+
+### What it shows
+
+| occupant | status | created | activated |
+|---|---|---|---|
+| `dev.opsweave.hello@0.0.1` | **ACTIVE** | 2026-10-29 | 2026-10-30 |
+| `opsweave.data-catalog@0.0.2` | **ACTIVE** | 2026-10-28 | 2026-10-28 |
+| `opsweave.data-integration@0.0.2` | **ACTIVE** | 2026-10-28 | 2026-10-28 |
+| `opsweave.data-catalog@0.0.3590` | **DEGRADED** | 2026-11-16 | never |
+
+**Three are `ACTIVE` — currently serving. One is `DEGRADED`. Not one is `READY`.**
+
+### What that means for the reclamation rule
+
+The rule matches `d.status = 'READY'`. **It never had a candidate.** Every one of
+the four is correctly excluded:
+
+- the three `ACTIVE` rows are their plugin's current serving version; the rule's
+  `NOT EXISTS (... activation_revisions ... status='ACTIVE')` clause exists
+  precisely to protect them, and it worked;
+- `0.0.3590` is `DEGRADED`, which the rule does not match either.
+
+So the earlier table in this document — "`data-catalog@0.0.2` and `0.0.3590` are
+superseded, so the rule releases them; two of four" — **is wrong**. `0.0.2` is the
+serving version of its plugin and must not be released; releasing it would have
+taken a live route down. The rule's refusal was the correct behaviour, and the
+"fix did not work" framing in the previous section needs this correction: the fix
+did not work because **the condition it addressed was never the condition on the
+host**.
+
+### What the actual condition is
+
+Also visible in the same document, and not previously seen because no artifact
+carried it: there are **nine** non-ACTIVE `data-catalog` and `data-integration`
+deployments, all `PENDING`, all with the same `INSTANCE_CAPACITY_EXCEEDED` reason
+(`0.0.65450`, `0.0.48829`, `0.0.19142`, `0.0.24497`, `0.0.15749`, `0.0.17455`,
+`0.0.3`, plus two on data-integration). Each is a historical attempt that never
+placed a single replica.
+
+They do **not** hold slots: the node reports `instancesReady: 3`,
+`instancesTotal: 4`. The four counted instances are the three ACTIVE rows plus the
+DEGRADED one.
+
+`PENDING` rows are re-planned every two seconds and cannot succeed, because the
+release publishes with `REPLICAS=1` and the scheduler counts the limit against
+**four** occupants already at `desired_action='START'`. Nothing removes a
+`PENDING` row that will never place — `reconcile_once` skips `DISABLED` and
+`FAILED`, and a `PENDING` deployment whose superseding version never activates is
+never drained.
+
+### A defect in the instrument itself, found by using it
+
+`capacity.json` reports `verdict: CAPACITY_AVAILABLE`, `freeSlotsTotal: 1` — on a
+node the publisher was told four seconds earlier was at 4/4 with
+`INSTANCE_CAPACITY_EXCEEDED`.
+
+Both numbers are real and they measure different things. `freeSlots` in
+`apps/opsctl/src/main.rs` is computed as `instancesTotal - instancesReady`, and
+`instancesTotal` counts instances with `desired_action='START'` — **not** the
+per-node limit the scheduler enforces. So `verdict` compares a count of READY
+replicas against the requested replica count, which is not the capacity question at
+all.
+
+**`CAPACITY_AVAILABLE` on a full node is a wrong answer from the tool this task
+built**, and it was found by reading its first real output against the publish log
+from the same run, not by reading its code. It is recorded here rather than fixed
+in this change, because the fix needs the per-node limit, which the node view does
+not carry (the code comment says so: "The per-node limit is not on the node
+object"). That is the next change, not this one.
 
 
 ---
