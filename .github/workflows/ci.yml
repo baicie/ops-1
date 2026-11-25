@@ -1961,6 +1961,85 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  # TASK-40: PR 通过不等于 main 通过 — verify what main ACTUALLY ran.
+  #
+  # A separate job, not a step inside `ci-gate`, and the reason is structural:
+  # `ci-gate` decides one commit's merge requirement from the checks it can see
+  # when it runs. Asking it to also verify that commit's PUSH runs would make it
+  # wait on `staging-preview`, which starts in another workflow and takes 20+
+  # minutes — a deadlock dressed as thoroughness.
+  #
+  # So this runs only on a push to main, after this workflow's own jobs, and it
+  # answers a DIFFERENT question: did every workflow that runs on push actually
+  # complete successfully for this commit? It reports; it does not gate. A red
+  # answer here is a fact about main that a human has to act on, and making it
+  # fail this run would not un-merge the commit.
+  #
+  # It cannot see the other workflows' runs as they complete — GitHub has no
+  # "wait for another workflow" primitive — so it reports INCOMPLETE and says so,
+  # which is the honest answer rather than a green tick on a partial picture.
+  verify-main:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: What main actually ran
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          # Read the JSON and ignore the status: this tool's exit code is part of
+          # its contract (2 = nothing to read, 3 = superseded), and under
+          # `set -o pipefail` a correct UNAVAILABLE would otherwise abort the step.
+          rc=0
+          node tests/ci/verify-main.mjs --sha "$GITHUB_SHA" --json > /tmp/main-runs.json 2>/tmp/main-runs.err || rc=$?
+          STATE="$(node -e '
+            try { console.log(require("/tmp/main-runs.json").state); } catch { console.log("UNREADABLE"); }
+          ')"
+
+          {
+            echo "## Main verification (TASK-40)"
+            echo
+            echo "A green pull request is not a verified \`main\`: they are separate"
+            echo "executions of separate commits. This is what the PUSH runs for"
+            echo "\`$GITHUB_SHA\` actually concluded."
+            echo
+            echo '```'
+            cat /tmp/main-runs.err 2>/dev/null | head -5
+            node -e '
+              try {
+                const d = require("/tmp/main-runs.json");
+                console.log(d.state + "  " + d.sha);
+                console.log("  " + d.reason);
+                if (d.succeeded.length) console.log("  verified: " + d.succeeded.join(", "));
+                if (d.failed.length) console.log("  FAILED:   " + d.failed.join(", "));
+                if (d.cancelled.length) console.log("  CANCELLED: " + d.cancelled.join(", "));
+                if (d.pending.length) console.log("  pending:  " + d.pending.join(", "));
+                if (d.notTriggeredNote) console.log("  " + d.notTriggeredNote);
+              } catch (e) { console.log("could not read the result: " + e.message); }
+            '
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # A DIFFERENT WORKFLOW'S RUN CANNOT BE WAITED ON, so INCOMPLETE is
+          # expected on a fresh push and is NOT a failure of this job. The states
+          # that are wrong on their own terms are a FAILED suite, which is
+          # reported; CANCELLED, which means a newer push superseded this commit
+          # and is the documented policy; and VERIFIED, which needs nothing.
+          echo "verify-main: $STATE (rc=$rc)"
+          if [ "$STATE" = "FAILED" ]; then
+            echo "::error::main ran a workflow that FAILED for $GITHUB_SHA — see the summary. This does not un-merge the commit; it is the fact a human needs."
+          fi
+
       - name: The gate's own selftest
         run: |
           set -eu
@@ -2057,6 +2136,13 @@ jobs:
           # The cases here include the one that caught the index itself crediting a
           # single artifact to 27 checks.
           bash tests/ci/evidence-index.test.sh
+          # TASK-40: "PR 通过不等于 main 通过". Four of its five requirements were
+          # already enforced by tools that exist; the fifth - check what main
+          # actually ran after merging - had no tool at all. The cases here are the
+          # three that taught it: CANCELLED is not a failure and not a pass; a
+          # path-filtered workflow that did not run is not missing; a tag-triggered
+          # workflow owes nothing on a branch push.
+          bash tests/ci/verify-main.test.sh
           # The migration's PRECONDITION: can all ten contexts the candidate
           # ruleset requires actually appear on every pull request? A required
           # context whose workflow has a path filter, or whose job is conditional,

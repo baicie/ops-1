@@ -103,3 +103,79 @@ is ready and cheap, not as something done.
 | #222 releases two of them | **reasoned from the rule + the occupant list**, not observed |
 | the fix resolves staging | **not verified and not claimed** — it is not deployed |
 | a real acceptance run | **not performed**; `BLOCKED_ENV` / no approval |
+
+---
+
+# TASK-40: the rule had no tool, so it was a sentence
+
+The brief's five TASK-40 requirements, and where each is enforced:
+
+| requirement | enforced by |
+|---|---|
+| check the PR's exact head SHA | `ci-gate` queries check runs by commit |
+| checks from the right producer and a valid attempt | `check-run-ledger.mjs` |
+| never call it green while a required check is pending | `await-delegated.mjs` |
+| PR green ≠ main green | **nothing, until now** |
+| check what main actually ran after merging | **nothing, until now** |
+
+The last two are the same gap. "PR 通过不等于 main 通过" was a sentence in a document
+that someone had to remember, and this session did remember it and did it by hand
+for `a1634d62`, `a7d6cd65` and `aedc7680`. Doing it by hand three times is how the
+gap became visible.
+
+## The tool
+
+`tests/ci/verify-main.mjs` answers one question: did every workflow that runs on a
+**push to main** complete successfully for this commit?
+
+Five states, and the boundaries between them are the whole value:
+
+| state | meaning |
+|---|---|
+| `VERIFIED` | every workflow that must run on a push completed success |
+| `FAILED` | a workflow concluded failure — this wins over everything |
+| `CANCELLED` | superseded by a newer push; **not a failure, and not a pass** |
+| `INCOMPLETE` | still running, or a required workflow has no run |
+| `UNAVAILABLE` | no push run exists for this commit |
+
+Implemented as a job in `ci.yml`, on `push` to `main` only, **outside
+`JOB_TO_SUITE`** so it is never a merge criterion — it reports on a commit that is
+already merged, and making it fail would not un-merge anything.
+
+## Four bugs in the tool, all mine, all found by using it
+
+1. **Over-matching push triggers.** Read `push:` and assumed every push. Six
+   workflows were reported missing on a commit that had not touched their paths.
+2. **`release-certification.yml` pushes on tags**, not branches. A shallow parse
+   invented an obligation the workflow never agreed to.
+3. **Comments are not configuration.** `platform-linux-acceptance.yml` opens with
+   "NO `paths:` filter, deliberately" — and a `.includes('paths:')` read that
+   sentence as a filter. The character-class mistake again, one level up: a
+   substring match on prose.
+4. **`pipefail` inverts the exit code.** The tool exits 2 for UNAVAILABLE and 3 for
+   CANCELLED by design, so `tool | python3` returns non-zero while the JSON is
+   perfect. The test failed against a correct tool. Documented in the tool, and the
+   test now captures to a file first.
+
+## What it says about the commits this phase produced
+
+```
+$ node tests/ci/verify-main.mjs --sha aedc7680
+FAILED  aedc7680
+  1 workflow(s) failed on this commit: staging-preview.yml: failure
+  verified: ci.yml
+
+$ node tests/ci/verify-main.mjs --sha a7d6cd65
+FAILED  a7d6cd65
+  FAILED:   staging-preview.yml: failure
+  CANCELLED:ci.yml
+```
+
+Both are true, and neither is a defect in the change that landed: `staging-preview`
+fails on the capacity condition TASK-32 fixes, which **is merged and not deployed**.
+`ci.yml` on `a7d6cd65` was cancelled because `aedc7680` landed on top of it — the
+documented `cancel-in-progress` policy.
+
+That is exactly the distinction the tool exists to preserve: a commit whose suites
+were superseded is not a verified commit, and a commit with a red suite is not a
+superseded one.
