@@ -1,20 +1,27 @@
 # Phase 8 — closeout
 
-Written 2026-11-25. Baseline `a039cf6c` (#212). Head at time of writing `a1f468ff`
-(#223).
+Written 2026-11-25. Baseline `a039cf6c` (#212). Head at time of writing
+`530c81b8` (#225).
 
 **Conclusion: `COMPLETE_WITH_DOCUMENTED_NON_BLOCKING_LIMITATIONS`.**
 
 Not `COMPLETE`. Three things are load-bearing and are not done: the live branch
 ruleset enforces **no required status check at all**, no real staging acceptance
-passed, and **the fix for the staging capacity defect was deployed on 2026-11-25
-and did not take effect**. The first is `BLOCKED_AUTH`; the second and third were
-attempted and measured, and the measurement is negative.
+passed, and **the capacity defect that fails every staging deploy is a different
+defect from the one this phase fixed** — measured, not inferred (§6.1). The first
+is `BLOCKED_AUTH`; the other two were attempted and measured, and the measurements
+are negative.
 
 A negative measurement is not a reason to withhold the whole phase — the phase's
 defects were real, their fixes are verified against PostgreSQL and committed, and
 every claim below is one of `fixture` / `component` / `real`. It is a reason not to
 write `COMPLETE`.
+
+Two of those defects were found **by the instruments this phase built**, against
+the claims this phase had written: the `READY` premise that gave #222 its shape was
+false, and `opsctl capacity`'s own verdict is wrong on a full node. Both are in §6.
+That is the phase working as intended, and it is also why its conclusion cannot be
+`COMPLETE`.
 
 ---
 
@@ -23,8 +30,8 @@ write `COMPLETE`.
 | | |
 |---|---|
 | main at start | `a039cf6c79856985985f8a22fc28eaf6704af64c` (#212) |
-| main at close | `a1f468ff57a12cdbdf396373f7f9b6ff74826f4e` (#223) |
-| PRs merged this phase | 11 — #213, #214, #215, #216, #217, #218, #219, #220, #221, #222, #223 |
+| main at close | `530c81b87d61b8fdfebd74c7df5eec12522a3a9a` (#225) |
+| PRs merged this phase | 13 — #213, #214, #215, #216, #217, #218, #219, #220, #221, #222, #223, #224, #225 |
 | open PRs at start | 0 |
 
 ## 2. Task status
@@ -88,6 +95,13 @@ commits. Measured:
 | `aedc7680` (#221) | **success** (`ci-gate` included) | **success** | **success** | failure (capacity) |
 | `079f8fce` (#222) | success | success | success | failure (capacity) |
 | `a1f468ff` (#223) | **success** (`ci-gate` included) | **success** | **success** | **failure (capacity, with the fix deployed and installed)** |
+| `ab541299` (#224) | success | success | success | failure (capacity) |
+| `530c81b8` (#225) | success | success | success | **failure (capacity, and the artifact explains why for the first time)** |
+
+At `530c81b8` the `staging-preview` failure finally carried its own explanation:
+the four occupants are three `ACTIVE` and one `DEGRADED`, so the reclamation rule
+never had a candidate (§6.1). `plugin-lifecycle` also succeeded on that commit,
+which is the workflow that verifies the plugin path the publish exercises.
 
 Verified at `aedc7680` on 2026-11-25: `ci` (run 45593146700) completed **success**
 with `ci-gate` success among its jobs, `data-foundation` (45593146075) success, and
@@ -136,16 +150,18 @@ Every claim in this phase is one of three kinds, and they are not mixed:
 |---|---|---|
 | **fixture** | committed JSON, no network | classifier's 10 counterexamples; index's 16 assertions; sanitizer's 17; verify-main's 19 |
 | **component** | real PostgreSQL, real kernel process, real Docker | the kernel suite; the Phase 7 suites; capacity preflight |
-| **real staging** | **one deploy, 2026-11-25, result negative** | §6 — run 45608152539 |
+| **real staging** | **two deploys, 2026-11-25** — one that measured a negative, and one whose artifact reversed the diagnosis | §6 — runs 45608152539 and 45634540776 |
 
 The staging capacity audit (#220) reads a **failed run's own uploaded artifacts**
 plus the kernel source. No query was executed against staging, no row was deleted,
 and no capacity limit was raised.
 
-The one real staging action taken this phase is the deploy in §6, authorised
-explicitly for this task. Its evidence is the run's own artifacts and log; it
-established that the fix is running and did not work, and it established nothing
-beyond that.
+The real staging actions taken this phase are the two deploys in §6, authorised
+explicitly for this task. Their evidence is each run's own artifacts and log. The
+first established that the fix was running and had no effect; the second produced
+`capacity.json` and established **why** — the four occupants were never eligible.
+No SSH session, no direct database query, and no mutation beyond what a deploy
+performs.
 
 ## 6. Staging: what is actually true
 
@@ -196,14 +212,72 @@ Error: timed out waiting for deployment readiness
 | claim | status |
 |---|---|
 | the fix is running on staging | **verified** — `served_commit` is `a1f468ff`, digest measured |
-| it releases the two `data-catalog` rows | **DISPROVEN on this deploy** |
-| the four are "superseded and never activated" | **no longer supported** — that was an inference, never an observation |
+| it releases the two `data-catalog` rows | **DISPROVEN — and the premise was wrong, not just the prediction (see below)** |
+| the four are "superseded and never activated" | **FALSE, measured in §6.1** |
 | staging's plugin path works | **no** |
 
-### Why the prediction failed, and what is still unknown
+### 6.1 The instrument answered it, and the audit was wrong
+
+The next run (`530c81b8`, run 45634540776) produced the first `capacity.json`. It
+shows the four occupants as **three `ACTIVE` and one `DEGRADED` — not one `READY`**:
+
+| occupant | status | created | activated |
+|---|---|---|---|
+| `dev.opsweave.hello@0.0.1` | **ACTIVE** | 2026-10-29 | 2026-10-30 |
+| `opsweave.data-catalog@0.0.2` | **ACTIVE** | 2026-10-28 | 2026-10-28 |
+| `opsweave.data-integration@0.0.2` | **ACTIVE** | 2026-10-28 | 2026-10-28 |
+| `opsweave.data-catalog@0.0.3590` | **DEGRADED** | 2026-11-16 | never |
+
+The reclamation rule matches `d.status = 'READY'`, so **it never had a candidate**.
+Its refusal was correct, and its `ACTIVE` exclusion clause did exactly the job it
+was written for: `data-catalog@0.0.2` is the **serving** version of its plugin, and
+the audit that called it "superseded, therefore reclaimable" would have taken a
+live route down had the rule agreed.
+
+So the honest correction is stronger than "the fix did not work": **the fix
+addressed a condition the host did not have.** Three of the four rows were never
+eligible, and the fourth is `DEGRADED`, which the rule also does not match.
+
+What the node *does* have is **nine `PENDING` deployments** across the two data
+plugins (`0.0.65450`, `0.0.48829`, `0.0.19142`, `0.0.24497`, `0.0.15749`,
+`0.0.17455`, `0.0.3`, and two on data-integration) — thirteen rows in total, each
+a historical attempt that never placed. They hold no slots (`instancesReady: 3`),
+and nothing removes them: `reconcile_once` plans `PENDING` forever, the version
+cannot be re-created because `create_deployment_inner` returns an existing
+`PENDING` unchanged, and the 4/4 the scheduler counts comes from the four
+non-`PENDING` rows. **That is the defect to fix next**, and it is a different one
+from the one #220/#222 addressed.
+
+### 6.2 A wrong answer from the tool built to give the right one
+
+In the same artifact, `verdict` is `CAPACITY_AVAILABLE` and `freeSlotsTotal` is
+`1`, while the publish four seconds earlier was refused for
+`INSTANCE_CAPACITY_EXCEEDED` at 4/4.
+
+`freeSlots` is `instancesTotal - instancesReady` computed in
+`apps/opsctl/src/main.rs`, and `instancesTotal` counts `desired_action='START'`
+instances — **not** the per-node limit. So the verdict compares READY replicas
+against the requested replica count, which is not the capacity question.
+
+**This is a wrong answer from the instrument this phase built**, found by putting
+its first real output next to the publish log from the same run — not by reading
+its code. It is not fixed here: the fix needs the per-node limit, which the node
+view does not carry (its own comment says so). Recorded as the next change.
+
+### 6.3 What is now unknown versus known
+
+- **Known**: which row is in which state, and since when. That was the whole gap.
+- **Known**: the reclamation rule had no eligible candidate, so its silence is
+  correct behaviour rather than a bug.
+- **Unknown**: whether the nine `PENDING` rows are what eventually fills the node,
+  or are merely noise beside the four `START` rows. They hold no slots today, and
+  the number that matters — the per-node limit the scheduler enforces — is still
+  absent from every artifact.
+
+### 6.4 Why the earlier prediction failed
 
 The rule matches on `d.status = 'READY'`. **That premise was inferred, never
-verified** — nothing in any artifact carries a deployment's status. Two facts from
+verified** — nothing in any artifact carried a deployment's status. Two facts from
 the source narrow it without closing it:
 
 1. `capacity_occupants` lists only instances with `desired_action='START'`
@@ -228,13 +302,14 @@ here.
 
 ### What this does not license
 
-- **Not "the fix is wrong."** It is "deployed, no effect, clause unknown".
+- **Not "the fix is wrong."** As of §6.1 the clause is no longer unknown, and the
+  answer is that the rule had no eligible candidate — its silence was correct.
 - **Not "raise the limit."** The brief forbids it
   (「禁止仅通过提高 Staging 实例容量来掩盖插件生命周期问题」), and 4/4 with four
   named occupants is a condition, not a cause.
 - **No row was deleted, no limit changed.** The run's only writes were a deploy's.
 
-### The instrument, now built
+### The instrument, now built — and it ran
 
 No artifact carried deployment state, so the question this task turned on — which
 row is `READY`, and since when — was answerable only by inference. That is now
@@ -242,10 +317,14 @@ collected: `scripts/ci/collect-capacity.sh` runs `opsctl capacity --json` inside
 kernel container and writes `capacity.json` into `staging-deploy`, and `opsctl
 capacity` now reports each occupant's `createdAt` and `activatedAt`.
 
-**Building the instrument is not using it.** No run has produced a `capacity.json`
-yet, so the failing clause of the rule remains **unknown**, and nothing in this
-document narrows it. The next staging deploy will, and that is stated as a fact
-about the future rather than a result.
+**Its first real output reversed the conclusion** (§6.1): the four occupants are
+three `ACTIVE` and one `DEGRADED`, so the reclamation rule never had a candidate.
+The instrument did not confirm the audit — it refuted it, which is the only reason
+it was worth building.
+
+It also reported a wrong verdict of its own (§6.2), found by comparing it against
+the publish log from the same run. Both outcomes are the argument for instruments
+over reasoning, and both are recorded rather than smoothed over.
 
 ## 7. Required Check status
 
@@ -308,9 +387,11 @@ identity problem ADR-025 describes remains `NEEDS_DECISION`.
 | item | status |
 |---|---|
 | Ruleset migration (required checks) | `BLOCKED_AUTH` — payload and rollback ready, write not authorised |
-| The staging capacity fix | **deployed 2026-11-25 and ineffective** — four rows unreleased, failing clause unknown (§6) |
+| The staging capacity fix | **deployed 2026-11-25, and it addressed a condition the host did not have** — three occupants are `ACTIVE`, one `DEGRADED`, none `READY`; the rule had no candidate (§6.1) |
 | Real staging acceptance (TASK-39) | **attempted, negative** — the deploy succeeded and the plugin path still fails |
-| Deployment state in an artifact | **built** — `scripts/ci/collect-capacity.sh` writes `capacity.json` into `staging-deploy`, and `opsctl capacity` now reports each occupant's `createdAt`. **Not yet exercised by a run**, so the failing clause stays unknown |
+| The real capacity defect | **nine `PENDING` deployments** that never place and are never removed (§6.1); not fixed |
+| `opsctl capacity`'s own verdict | **wrong on a full node** — reports `CAPACITY_AVAILABLE` at 4/4 because it compares READY replicas, not the per-node limit (§6.2) |
+| Deployment state in an artifact | **built and exercised** — `capacity.json` appeared in `staging-deploy` on the first run after the change, and it reversed the diagnosis (§6.1) |
 | `RECLAIM_REQUIRED` reaching a caller | kernel returns it; `opsctl` still times out unchanged |
 | TASK-33/34 release identity | not started |
 | TASK-35 CI cost | not measured |
@@ -341,11 +422,20 @@ list was one call site and two JSON keys.**
 
 ### 12.1 The second pattern, and this phase produced its strongest instance
 
-**A conclusion that was reasoning all the way down, and never touched.** §6 is one
+**A conclusion that was reasoning all the way down, and never touched.** §6 was one
 inference stacked on another: the four rows are `READY` → therefore superseded →
-therefore released. Every step is defensible and none was measured. The deploy
-turned the last step false without contradicting either of the first two — the
-actual clause that failed is still unknown.
+therefore released. Every step is defensible and none was measured.
+
+The deploy made the last step false. Then the instrument made the **first** step
+false too, and that mattered more: none of the four was `READY` at all. Three were
+`ACTIVE` — serving — and one was `DEGRADED`. The rule had no candidate, so its
+silence was correct, and the two `data-catalog` rows the audit called "reclaimable"
+included the plugin's **live** version. Had the rule agreed with the audit, it would
+have taken a working route down.
+
+That is worse than a prediction failing. A wrong prediction wastes a deploy; a wrong
+premise, acted on, breaks production. The audit was one step away from recommending
+it: 「两个可以回收」 was written as a fact about safety.
 
 The tell is in what the earlier version of this document said: *"reasoned from the
 rule + the occupant list, not observed"* — and then, four lines later, a table row
@@ -353,10 +443,9 @@ reading *"the fix resolves staging: not verified and not claimed"*. The distinct
 was already written down correctly. It just was not load-bearing, because nothing
 downstream depended on it. **A caveat that changes no decision is decoration.**
 
-What fixed it was cheap: one authorised deploy. What it cost was being wrong in
-public. What it bought is the only sentence in this phase that is worth anything
-about staging — *the fix is on the host and did not work* — plus the knowledge that
-the instrument to explain it does not exist yet.
+What fixed it was two cheap things: one authorised deploy, and one read-only command
+whose output nobody had ever collected. The second cost one call site and two JSON
+keys. **Instruments refute. Reasoning, however careful, only elaborates.**
 
 ### 12.2 A number must come from the sample it describes
 
