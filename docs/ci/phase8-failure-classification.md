@@ -1,5 +1,13 @@
 # Phase 8 TASK-21: classifying a CI failure, with the evidence that put it there
 
+> **Superseded by V2 (Phase 8A TASK-27).** This document describes the first
+> classifier. It was replaced because it attributed a CAUSE by first-matching rule
+> over the whole log, and because `isFailureLine` was a character class that matched
+> every string. See `docs/ci/phase8a-diagnosis-trust.md` for the four counterexamples
+> and the three-layer model that replaced it. The categories and the
+> verdict/confidence/reason/evidence shape below are unchanged; the way a verdict is
+> reached is not.
+
 The brief names the failure mode it is guarding against:
 
 > 禁止使用"已知外部失败"作为跳过真正回归的通用理由。

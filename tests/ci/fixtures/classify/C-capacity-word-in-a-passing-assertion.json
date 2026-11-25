@@ -1,0 +1,41 @@
+{
+  "run": {
+    "id": 90000000003,
+    "run_attempt": 1,
+    "name": "CI",
+    "event": "pull_request",
+    "head_sha": "b217284a3e585cf9af376c6d24aeb40ba661558c",
+    "head_branch": "x",
+    "status": "completed",
+    "conclusion": "failure",
+    "created_at": "2026-11-25T00:00:00Z",
+    "run_started_at": "2026-11-25T00:00:00Z",
+    "updated_at": "2026-11-25T00:20:00Z",
+    "html_url": "https://example.invalid/run",
+    "previous_attempt_url": null
+  },
+  "jobs": {
+    "jobs": [
+      {
+        "id": 20,
+        "name": "capacity suite",
+        "conclusion": "failure",
+        "started_at": "2026-11-25T00:00:00Z",
+        "completed_at": "2026-11-25T00:20:00Z",
+        "runner_name": "GitHub Actions 4",
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Refusal surfaces to the caller",
+            "number": 1,
+            "conclusion": "failure",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "log": "capacity suite\tRefusal surfaces to the caller\t2026-11-25T00:00:00Z   ok   the suite asserts INSTANCE_CAPACITY_EXCEEDED is surfaced\ncapacity suite\tRefusal surfaces to the caller\t2026-11-25T00:00:01Z   FAIL the refusal message did not reach the caller",
+  "_note": "C: INSTANCE_CAPACITY_EXCEEDED appears only inside a PASSING assertion's description. V1 returned STAGING_ENVIRONMENT and quoted that passing assertion as the cause."
+}

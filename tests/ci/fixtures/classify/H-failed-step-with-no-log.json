@@ -1,0 +1,48 @@
+{
+  "run": {
+    "id": 90000000008,
+    "run_attempt": 1,
+    "name": "CI",
+    "event": "pull_request",
+    "head_sha": "b217284a3e585cf9af376c6d24aeb40ba661558c",
+    "head_branch": "x",
+    "status": "completed",
+    "conclusion": "failure",
+    "created_at": "2026-11-25T00:00:00Z",
+    "run_started_at": "2026-11-25T00:00:00Z",
+    "updated_at": "2026-11-25T00:20:00Z",
+    "html_url": "https://example.invalid/run",
+    "previous_attempt_url": null
+  },
+  "jobs": {
+    "jobs": [
+      {
+        "id": 70,
+        "name": "full",
+        "conclusion": "failure",
+        "started_at": "2026-11-25T00:00:00Z",
+        "completed_at": "2026-11-25T00:20:00Z",
+        "runner_name": "GitHub Actions 4",
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Build",
+            "number": 1,
+            "conclusion": "success",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          },
+          {
+            "name": "Runtime",
+            "number": 2,
+            "conclusion": "failure",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "log": "full\tBuild\t2026-11-25T00:00:00Z PASS=9 FAIL=0 BLOCKED=0 NOT_RUN=0\nfull\tRuntime\t2026-11-25T00:00:05Z ",
+  "_note": "H: the API says Runtime failed and the log says nothing. The honest answer is UNKNOWN, and the tool must say so rather than reaching for the nearest signature."
+}

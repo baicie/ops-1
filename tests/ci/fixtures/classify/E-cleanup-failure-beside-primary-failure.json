@@ -1,0 +1,48 @@
+{
+  "run": {
+    "id": 90000000005,
+    "run_attempt": 1,
+    "name": "CI",
+    "event": "pull_request",
+    "head_sha": "b217284a3e585cf9af376c6d24aeb40ba661558c",
+    "head_branch": "x",
+    "status": "completed",
+    "conclusion": "failure",
+    "created_at": "2026-11-25T00:00:00Z",
+    "run_started_at": "2026-11-25T00:00:00Z",
+    "updated_at": "2026-11-25T00:20:00Z",
+    "html_url": "https://example.invalid/run",
+    "previous_attempt_url": null
+  },
+  "jobs": {
+    "jobs": [
+      {
+        "id": 40,
+        "name": "heartbeat",
+        "conclusion": "failure",
+        "started_at": "2026-11-25T00:00:00Z",
+        "completed_at": "2026-11-25T00:20:00Z",
+        "runner_name": "GitHub Actions 4",
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Heartbeat bounds",
+            "number": 1,
+            "conclusion": "failure",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          },
+          {
+            "name": "Cleanup",
+            "number": 2,
+            "conclusion": "failure",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "log": "heartbeat\tHeartbeat bounds\t2026-11-25T00:00:00Z   FAIL node-a's instance desired_action=START, expected convergence\nheartbeat\tCleanup\t2026-11-25T00:00:10Z Error: docker daemon is not running",
+  "_note": "E: the primary failure and a cleanup failure coexist. Both are reported; the cleanup fault must not become the explanation for the assertion."
+}

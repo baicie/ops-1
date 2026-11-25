@@ -1,0 +1,66 @@
+{
+  "run": {
+    "id": 90000000002,
+    "run_attempt": 1,
+    "name": "CI",
+    "event": "pull_request",
+    "head_sha": "b217284a3e585cf9af376c6d24aeb40ba661558c",
+    "head_branch": "x",
+    "status": "completed",
+    "conclusion": "failure",
+    "created_at": "2026-11-25T00:00:00Z",
+    "run_started_at": "2026-11-25T00:00:00Z",
+    "updated_at": "2026-11-25T00:20:00Z",
+    "html_url": "https://example.invalid/run",
+    "previous_attempt_url": null
+  },
+  "jobs": {
+    "jobs": [
+      {
+        "id": 10,
+        "name": "java plugin",
+        "conclusion": "success",
+        "started_at": "2026-11-25T00:00:00Z",
+        "completed_at": "2026-11-25T00:20:00Z",
+        "runner_name": "GitHub Actions 4",
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Build",
+            "number": 1,
+            "conclusion": "success",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "name": "rust runtime",
+        "conclusion": "failure",
+        "started_at": "2026-11-25T00:00:00Z",
+        "completed_at": "2026-11-25T00:20:00Z",
+        "runner_name": "GitHub Actions 4",
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Build",
+            "number": 1,
+            "conclusion": "success",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          },
+          {
+            "name": "Runtime tests",
+            "number": 2,
+            "conclusion": "failure",
+            "started_at": "2026-11-25T00:00:00Z",
+            "completed_at": "2026-11-25T00:20:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "log": "java plugin\tBuild\t2026-11-25T00:00:00Z [FATAL] Non-resolvable parent POM: status: 429\njava plugin\tBuild\t2026-11-25T00:00:05Z maven: retry recovered\njava plugin\tBuild\t2026-11-25T00:00:09Z PASS=12 FAIL=0 BLOCKED=0 NOT_RUN=0\nrust runtime\tBuild\t2026-11-25T00:00:10Z Finished release [optimized] target(s)\nrust runtime\tRuntime tests\t2026-11-25T00:00:20Z thread panicked at apps/node/src/runtime.rs:145: enroll failed",
+  "_note": "B: the only 429 is in a job the API reports as SUCCEEDED. A remote job's recovered noise must not explain another job's crash. V1 returned EXTERNAL_DEPENDENCY."
+}
