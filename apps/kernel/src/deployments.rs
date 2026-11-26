@@ -6549,4 +6549,610 @@ mod tests {
             );
         }
     }
+
+    /// TASK-06: THE STAGING SHAPE, REPRODUCED IN REAL POSTGRESQL.
+    ///
+    /// This module exists to make the staging condition a thing the repository can
+    /// observe rather than a paragraph in a document. It asserts what IS, not what
+    /// should be: the last test states plainly that the current reclamation rule
+    /// does not release the candidate, which is the defect Phase 9 exists to fix.
+    ///
+    /// The shape, measured from `capacity.json` on staging (run 45634540776):
+    ///
+    ///   per-node limit        4
+    ///   START instances       4   (three ACTIVE deployments + one DEGRADED candidate)
+    ///   free                  0
+    ///   verdict               CAPACITY_BLOCKED / INSTANCE_CAPACITY_EXCEEDED
+    ///
+    /// Everything is isolated behind a unique `nodeSelector`, because this suite
+    /// shares one database and Phase 8 measured what happens without that: a
+    /// fixture placed itself on a parallel test's node and the failure read as the
+    /// rule being broken.
+    #[cfg(test)]
+    mod staging_capacity_shape {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+        const PER_NODE_LIMIT: i32 = 4;
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options)
+                .await
+                .expect("cannot connect to the test database");
+            crate::db::migrate(&pool)
+                .await
+                .expect("the test database rejected the migrations");
+            Some(pool)
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        async fn insert_package(pool: &PgPool, plugin: &str, version: &str, publisher: &str) {
+            let tag = Uuid::new_v4().simple().to_string();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,$3,'1.1',$4,'{}'::jsonb,$5,$6,$7,'INSTALLED','VERIFIED')",
+            )
+            .bind(Uuid::new_v4())
+            .bind(plugin)
+            .bind(version)
+            .bind(publisher)
+            .bind(format!("{tag}-a"))
+            .bind(format!("{tag}-b"))
+            .bind(format!("{tag}-p"))
+            .execute(pool)
+            .await
+            .expect("package");
+        }
+
+        /// A deployment with `desired` replicas, of which `instances` are placed.
+        ///
+        /// `desired` and `instances` are separate because they are separate in the
+        /// world: staging's PENDING candidate WANTS one replica and has none, and the
+        /// first version of this helper conflated them - `instances: 0` also set
+        /// `desired_replicas = 0`, which the Kernel correctly reads as "stop it" and
+        /// answers DISABLED. The test then measured a deployment nobody had asked to
+        /// run, not the capacity condition.
+        ///
+        /// Returns the deployment id.
+        #[allow(clippy::too_many_arguments)]
+        async fn deployed(
+            pool: &PgPool,
+            node: Uuid,
+            plugin: &str,
+            version: &str,
+            publisher: &str,
+            status: &str,
+            desired: i32,
+            instances: i32,
+            activated: bool,
+            tag: &str,
+        ) -> Uuid {
+            insert_package(pool, plugin, version, publisher).await;
+            let package_id: Uuid = sqlx::query_scalar(
+                "SELECT package_id FROM kernel.plugin_packages WHERE plugin_id=$1 AND version=$2",
+            )
+            .bind(plugin)
+            .bind(version)
+            .fetch_one(pool)
+            .await
+            .expect("package id");
+            let id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, activated_at)
+                 VALUES ($1,$2,$3,$4,$5,1,$8::jsonb,
+                         '{\"cpuMillis\":100,\"memoryMib\":128}'::jsonb,$6,$7)",
+            )
+            .bind(id)
+            .bind(plugin)
+            .bind(package_id)
+            .bind(version)
+            .bind(desired)
+            .bind(status)
+            .bind(if activated {
+                Some(chrono::Utc::now())
+            } else {
+                None
+            })
+            .bind(serde_json::json!({"nodeSelector": {"staging-shape": tag}}))
+            .execute(pool)
+            .await
+            .expect("deployment");
+            for slot in 0..instances {
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_instances
+                       (id, deployment_id, node_id, slot, state, desired_action,
+                        deployment_generation, container_id)
+                     VALUES ($1,$2,$3,$4,'READY','START',1,$5)",
+                )
+                .bind(Uuid::new_v4())
+                .bind(id)
+                .bind(node)
+                .bind(slot)
+                .bind(format!("ctr-{slot}"))
+                .execute(pool)
+                .await
+                .expect("instance");
+            }
+            if activated {
+                sqlx::query(
+                    "INSERT INTO kernel.activation_revisions
+                       (id, plugin_id, package_id, version, deployment_id, generation,
+                        status, policy_digest, activated_at)
+                     VALUES ($1,$2,$3,$4,$5,1,'ACTIVE','digest',now())",
+                )
+                .bind(Uuid::new_v4())
+                .bind(plugin)
+                .bind(package_id)
+                .bind(version)
+                .bind(id)
+                .execute(pool)
+                .await
+                .expect("activation revision");
+            }
+            id
+        }
+
+        struct Shape {
+            node: Uuid,
+            /// Three ACTIVE deployments on distinct plugins - the serving set.
+            active: Vec<Uuid>,
+            /// `data-catalog@0.0.3590`: DEGRADED, never activated, holds one slot.
+            degraded: Uuid,
+            /// A newer PENDING data-catalog that cannot place.
+            pending: Uuid,
+        }
+
+        /// THE STAGING TOPOLOGY: four START instances, three of them serving.
+        async fn staging_shape(pool: &PgPool) -> Shape {
+            let tag = Uuid::new_v4().simple().to_string();
+            let node = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64',$5::jsonb,'{}'::jsonb,
+                         'READY',now(),now(),'http://node:7000',$4)",
+            )
+            .bind(node)
+            .bind(format!("staging-node-{tag}"))
+            .bind(format!("token-{tag}"))
+            .bind(serde_json::json!({
+                "cpuCores": 64, "memoryTotalBytes": 256i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0, "diskTotalBytes": 1024i64 * 1024 * 1024 * 1024,
+                "diskUsedBytes": 0,
+            }))
+            // A UNIQUE LABEL, AND EVERY DEPLOYMENT SELECTS IT.
+            //
+            // Without this the fixture is not isolated and the suite proved it: the
+            // PENDING deployment placed itself on a PARALLEL TEST's node, which had a
+            // free slot, so `the_new_candidate_cannot_be_placed` passed alone and
+            // failed in the full run. Same defect Phase 8 hit and fixed the same way.
+            .bind(serde_json::json!({"staging-shape": tag.clone()}))
+            .execute(pool)
+            .await
+            .expect("node");
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(format!("pub-{tag}"))
+            .execute(pool)
+            .await
+            .expect("publisher");
+            let publisher = format!("pub-{tag}");
+
+            // Three ACTIVE deployments, one instance each: the serving set.
+            let mut active = Vec::new();
+            for (i, plugin) in [
+                format!("dev.opsweave.hello.{tag}"),
+                format!("opsweave.data-catalog.{tag}"),
+                format!("opsweave.data-integration.{tag}"),
+            ]
+            .iter()
+            .enumerate()
+            {
+                active.push(
+                    deployed(
+                        pool, node, plugin, "0.0.1", &publisher, "ACTIVE", 1, 1, true, &tag,
+                    )
+                    .await,
+                );
+                let _ = i;
+            }
+
+            // The candidate: DEGRADED, one START instance, never activated.
+            let catalog = format!("opsweave.data-catalog.{tag}");
+            let degraded = deployed(
+                pool, node, &catalog, "0.0.3590", &publisher, "DEGRADED", 1, 1, false, &tag,
+            )
+            .await;
+
+            // A newer candidate of the SAME plugin, which cannot place.
+            let pending = deployed(
+                pool,
+                node,
+                &catalog,
+                "0.0.65450",
+                &publisher,
+                "PENDING",
+                1,
+                0,
+                false,
+                &tag,
+            )
+            .await;
+
+            Shape {
+                node,
+                active,
+                degraded,
+                pending,
+            }
+        }
+
+        async fn start_instances_on(pool: &PgPool, node: Uuid) -> i64 {
+            sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances i
+                 JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+                 WHERE i.node_id=$1 AND i.desired_action='START'
+                   AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+                   AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)",
+            )
+            .bind(node)
+            .fetch_one(pool)
+            .await
+            .expect("count")
+        }
+
+        /// 1. THE FOUR INSTANCES ARE COUNTED BY THE SCHEDULER.
+        ///
+        /// The capacity aggregates count `desired_action='START'` joined to
+        /// deployments in the planned set. All four must be in that count, or the
+        /// fixture is not the staging shape and nothing below means anything.
+        #[tokio::test]
+        async fn four_start_instances_are_what_the_scheduler_counts() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let shape = staging_shape(&pool).await;
+            let counted = start_instances_on(&pool, shape.node).await;
+            assert_eq!(
+                counted, 4,
+                "the fixture must place exactly four START instances; the per-node limit \
+                 is {PER_NODE_LIMIT} and staging is full because of these four"
+            );
+        }
+
+        /// 2. THE THREE ACTIVE DEPLOYMENTS ARE BACKED BY ACTIVE REVISIONS.
+        ///
+        /// This is what makes them un-reclaimable, and it is a different fact from
+        /// their deployment status. Asserted so the protection below cannot be read
+        /// as an argument about a column.
+        #[tokio::test]
+        async fn the_serving_deployments_have_active_revisions() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let shape = staging_shape(&pool).await;
+            for id in &shape.active {
+                let revisions: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM kernel.activation_revisions
+                     WHERE deployment_id=$1 AND status='ACTIVE'",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .expect("count");
+                assert_eq!(
+                    revisions, 1,
+                    "an ACTIVE deployment must have one ACTIVE revision"
+                );
+            }
+        }
+
+        /// 3. THE CANDIDATE IS NOT ACTIVATED - WHICH IS NOT THE SAME AS DEAD.
+        ///
+        /// The brief forbids treating "never activated" as sufficient for
+        /// reclamation, so this test records ONLY the fact, and says in its message
+        /// that the fact alone decides nothing.
+        #[tokio::test]
+        async fn the_degraded_candidate_was_never_activated() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let shape = staging_shape(&pool).await;
+            let revisions: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.activation_revisions WHERE deployment_id=$1",
+            )
+            .bind(shape.degraded)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+            assert_eq!(
+                revisions, 0,
+                "the candidate has no revision at all. This is a fact about it, not yet a \
+                 reason to stop it: serving, rollback material and recovery are decided \
+                 elsewhere"
+            );
+        }
+
+        /// 4. THE PREFLIGHT AGREES THE NODE IS FULL.
+        ///
+        /// Not "the node looks full" - the same `evaluate_node` the planner runs,
+        /// through the same `gather` the HTTP endpoint calls.
+        #[tokio::test]
+        async fn the_preflight_reports_capacity_blocked() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let shape = staging_shape(&pool).await;
+            let state = state_for(pool.clone());
+            let report = crate::placement_preflight::gather(
+                &state.db,
+                None,
+                std::collections::BTreeMap::from([(
+                    "staging-node".to_string(),
+                    "never-matches".to_string(),
+                )]),
+                opsweave_contracts::ResourceRequirements {
+                    cpu_millis: 100,
+                    memory_mib: 128,
+                },
+                1,
+                1,
+                PER_NODE_LIMIT as usize,
+            )
+            .await
+            .expect("gather");
+
+            // Selector above matches nothing on purpose: this call asserts the
+            // preflight RUNS, and the assertion on the node's own numbers comes from
+            // a second call with the node's real labels. Keeping the selector out of
+            // it avoids depending on every node in the shared database.
+            assert!(
+                !report.nodes.is_empty() || report.verdict == "CAPACITY_BLOCKED",
+                "the preflight must answer for every unrevolked node (verdict={})",
+                report.verdict
+            );
+
+            // And with no selector the fixture node itself must be full.
+            let full = crate::placement_preflight::gather(
+                &state.db,
+                None,
+                std::collections::BTreeMap::new(),
+                opsweave_contracts::ResourceRequirements {
+                    cpu_millis: 100,
+                    memory_mib: 128,
+                },
+                1,
+                1,
+                PER_NODE_LIMIT as usize,
+            )
+            .await
+            .expect("gather");
+            let mine = full
+                .nodes
+                .iter()
+                .find(|n| n.node_id == shape.node)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the preflight omitted the fixture node; a node it cannot see is a \
+                         node whose refusal nobody can read. nodes={:?}",
+                        full.nodes
+                            .iter()
+                            .map(|n| n.node.clone())
+                            .collect::<Vec<_>>()
+                    )
+                });
+            assert_ne!(
+                mine.verdict, "FITS",
+                "the fixture node holds four of four slots and the preflight must say so \
+                 (verdict={}, detail={:?})",
+                mine.verdict, mine.detail
+            );
+        }
+
+        /// 5. THE CURRENT RECLAMATION RULE DOES NOT MATCH THE CANDIDATE.
+        ///
+        /// This is the defect, stated as an assertion rather than a paragraph. It
+        /// matches `d.status = 'READY'`, and staging's candidate is `DEGRADED`, so no
+        /// amount of reconciling releases it.
+        ///
+        /// When Phase 9 changes the rule, THIS TEST IS EXPECTED TO FAIL, and that
+        /// failure is the signal to rewrite it - which is why it is written to assert
+        /// the current behaviour explicitly instead of leaving the gap unrecorded.
+        #[tokio::test]
+        async fn the_ready_only_rule_does_not_release_a_degraded_candidate() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let shape = staging_shape(&pool).await;
+            let state = state_for(pool.clone());
+
+            // Reconcile, which runs the reclamation statement globally.
+            crate::deployments::reconcile_once_scoped(&state, Some(shape.pending))
+                .await
+                .expect("reconcile");
+
+            let status: String =
+                sqlx::query_scalar("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
+                    .bind(shape.degraded)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("status");
+            assert_eq!(
+                status, "DEGRADED",
+                "the current rule matches only READY, so a DEGRADED candidate that was \
+                 never activated keeps its slot. This is the staging condition, reproduced"
+            );
+
+            let still = start_instances_on(&pool, shape.node).await;
+            assert_eq!(
+                still, 4,
+                "and the node stays at four of four, so the next publish cannot place"
+            );
+        }
+
+        /// 6. THE SERVING DEPLOYMENTS SURVIVE THE SWEEP.
+        ///
+        /// Asserted on the facts that actually protect a route, not on the
+        /// deployment's status label:
+        ///
+        ///   - its ACTIVE activation revision is still ACTIVE (the Gateway routes on
+        ///     `r.status='ACTIVE'`, gateway.rs:349);
+        ///   - its instance is still `desired_action='START'`.
+        ///
+        /// STATUS WAS THE WRONG SUBJECT, and measuring showed it. A first version
+        /// asserted `status == "ACTIVE" || status == "DEGRADED"` and passed even
+        /// against a rule with the `activation_revisions` protection removed, because
+        /// `reconcile_once_scoped(Some(pending))` does not re-plan this deployment at
+        /// all - its status label simply was not touched, whether or not the sweep
+        /// had just drained it for the next pass.
+        ///
+        /// The revision and the desired_action are what a route depends on at this
+        /// instant; those are what this test holds.
+        ///
+        /// KNOWN GAP, recorded rather than papered over: removing the
+        /// `activation_revisions` clause does NOT fail this test. Measured - the sweep
+        /// matches `status IN ('READY','DEGRADED')`, and in this fixture the serving
+        /// rows' status stays ACTIVE, so they are never candidates in the first place.
+        /// The case that WOULD bite is a row whose status is DERIVED as DEGRADED while
+        /// an ACTIVE revision still points at it (TASK-04 case A), and making that
+        /// hold requires the reconcile pass to re-plan that deployment - which
+        /// `Some(pending)` does not do. Constructing it properly belongs to TASK-10's
+        /// correctness matrix, where each protection gets its own counterexample.
+        #[tokio::test]
+        async fn the_active_deployments_are_never_released() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let shape = staging_shape(&pool).await;
+            // Make one serving deployment look exactly like TASK-04's case A: backed
+            // by an ACTIVE revision, replicas unhealthy. Writing `status='DEGRADED'`
+            // directly does not hold - reconcile derives the status - so the instance
+            // is made unhealthy and the deployment's label is whatever the Kernel
+            // computes from it.
+            sqlx::query(
+                "UPDATE kernel.plugin_instances SET state='UNHEALTHY', observed_at=now()
+                  WHERE deployment_id=$1",
+            )
+            .bind(shape.active[0])
+            .execute(&pool)
+            .await
+            .expect("make a serving deployment unhealthy");
+
+            let state = state_for(pool.clone());
+            crate::deployments::reconcile_once_scoped(&state, Some(shape.pending))
+                .await
+                .expect("reconcile");
+
+            // A SECOND PASS, because a reclaim lands in two steps and only the second
+            // one is visible in the instances: the sweep writes `DRAINING`, and the
+            // pass after it writes `DISABLED` and the STOP. Asserting only after one
+            // pass measured nothing - a rule with the ACTIVE protection removed passed
+            // this test, because the damage it does had not happened yet.
+            crate::deployments::reconcile_once_scoped(&state, Some(shape.pending))
+                .await
+                .expect("second reconcile");
+
+            for (index, id) in shape.active.iter().enumerate() {
+                let live_revisions: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM kernel.activation_revisions
+                     WHERE deployment_id=$1 AND status='ACTIVE'",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .expect("count");
+                assert_eq!(
+                    live_revisions, 1,
+                    "serving deployment {index} lost its ACTIVE revision: the Gateway routes                      on that row (gateway.rs:349), so this deployment's traffic is gone                      whether or not its status label still looks healthy"
+                );
+
+                let still_start: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM kernel.plugin_instances
+                     WHERE deployment_id=$1 AND desired_action='START'",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .expect("count");
+                assert_eq!(
+                    still_start, 1,
+                    "serving deployment {index} stopped asking for its instance; releasing a                      deployment that is currently answering is what the ACTIVE-revision                      protection exists to prevent"
+                );
+            }
+        }
+
+        /// 6. AND THE NEW CANDIDATE THEREFORE CANNOT BE PLACED.
+        ///
+        /// The consequence, asserted separately: the PENDING deployment gets no
+        /// instance, which is what `PENDING 0/0 ready` means in the staging log.
+        #[tokio::test]
+        async fn the_new_candidate_cannot_be_placed() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let shape = staging_shape(&pool).await;
+            let state = state_for(pool.clone());
+            crate::deployments::reconcile_once_scoped(&state, Some(shape.pending))
+                .await
+                .expect("reconcile");
+
+            let placed: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances WHERE deployment_id=$1",
+            )
+            .bind(shape.pending)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+            assert_eq!(
+                placed, 0,
+                "a fifth deployment cannot place while four occupy the node; this is the \
+                 publish failure, not a scheduling delay"
+            );
+            let (status, reason): (String, Option<String>) = sqlx::query_as(
+                "SELECT status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(shape.pending)
+            .fetch_one(&pool)
+            .await
+            .expect("status");
+            assert!(
+                reason.as_deref().unwrap_or("").contains("INSTANCE_CAPACITY_EXCEEDED")
+                    || status == "FAILED",
+                "and the refusal must name the capacity condition (status={status}, reason={reason:?})"
+            );
+        }
+    }
 }
