@@ -10099,4 +10099,293 @@ mod tests {
             );
         }
     }
+
+    /// TASK-22 GAP: SCALING DOWN RELEASES THE SLOTS IT NO LONGER NEEDS.
+    ///
+    /// `reconcile_deployment` stops every instance whose `slot >= desired_replicas`.
+    /// Nothing tested it. The failure it prevents is the obvious one - a deployment
+    /// reduced from 3 to 1 keeps two instances running and holding slots, and the
+    /// operator who scaled down to free capacity gets none back, with the deployment
+    /// still reporting READY.
+    ///
+    /// The second assertion is the one that matters: **the freed slots are usable by
+    /// someone else.** A scale-down that stops the rows but leaves the capacity
+    /// aggregates counting them is a release that releases nothing.
+    mod scale_down_releases_slots {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        async fn node(pool: &PgPool, run: &str) -> Uuid {
+            let id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64',$4::jsonb,'[]'::jsonb,
+                         'READY',now(),now(),'http://scale:7000',$5)",
+            )
+            .bind(id)
+            .bind(format!("scale-{run}-{}", Uuid::new_v4().simple()))
+            .bind(format!("tok-{}", Uuid::new_v4().simple()))
+            .bind(serde_json::json!({ "test-run": run }))
+            .bind(serde_json::json!({
+                "cpuCores": 8,
+                "memoryTotalBytes": 16i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0,
+            }))
+            .execute(pool)
+            .await
+            .expect("node");
+            id
+        }
+
+        /// How many instances this deployment asks the scheduler for.
+        async fn started(pool: &PgPool, deployment: Uuid) -> i64 {
+            sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.plugin_instances
+                  WHERE deployment_id=$1 AND desired_action='START'",
+            )
+            .bind(deployment)
+            .fetch_one(pool)
+            .await
+            .expect("started")
+        }
+
+        /// What the planner counts for the NODE. Copied from `evaluate_node`'s own
+        /// aggregate, because the question is whether a freed slot is visible to the
+        /// next placement - not whether some other query agrees.
+        async fn node_occupancy(pool: &PgPool, node: Uuid) -> i64 {
+            sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.plugin_instances i
+                   JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+                  WHERE i.node_id=$1 AND i.desired_action='START'
+                    AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+                    AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)",
+            )
+            .bind(node)
+            .fetch_one(pool)
+            .await
+            .expect("occupancy")
+        }
+
+        /// A deployment with `replicas` READY instances, all on the node, written
+        /// directly: the shape a healthy deployment has, without the convergence.
+        async fn deployment_with(pool: &PgPool, node: Uuid, run: &str, replicas: i32) -> Uuid {
+            let tag = Uuid::new_v4().simple().to_string();
+            let plugin = format!("test.scale.{tag}");
+            let publisher = format!("pub-{tag}");
+            let package = Uuid::new_v4();
+            let deployment = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            .bind(package)
+            .bind(&plugin)
+            .bind(&publisher)
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .execute(pool)
+            .await
+            .expect("package");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 VALUES ($1,$2,$3,'1.0.0',$4,1,$5,
+                         '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'READY',now(),now())",
+            )
+            .bind(deployment)
+            .bind(&plugin)
+            .bind(package)
+            .bind(replicas)
+            .bind(serde_json::json!({
+                "nodeSelector": { "test-run": run },
+                "maxInstancesPerNode": 20,
+            }))
+            .execute(pool)
+            .await
+            .expect("deployment");
+            for slot in 0..replicas {
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_instances
+                       (id, deployment_id, node_id, slot, deployment_generation,
+                        desired_action, state, container_id)
+                     VALUES ($1,$2,$3,$4,1,'START','READY',$5)",
+                )
+                .bind(Uuid::new_v4())
+                .bind(deployment)
+                .bind(node)
+                .bind(slot)
+                .bind(format!("ctr-{tag}-{slot}"))
+                .execute(pool)
+                .await
+                .expect("instance");
+            }
+            deployment
+        }
+
+        /// THREE REPLICAS REDUCED TO ONE: TWO STOP, AND THE NODE HAS ROOM AGAIN.
+        #[tokio::test]
+        async fn scaling_down_stops_the_extra_instances_and_frees_their_slots() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let run = Uuid::new_v4().simple().to_string();
+            let node_id = node(&pool, &run).await;
+            let deployment = deployment_with(&pool, node_id, &run, 3).await;
+
+            assert_eq!(started(&pool, deployment).await, 3);
+            let before = node_occupancy(&pool, node_id).await;
+            assert_eq!(before, 3, "three replicas hold three slots");
+
+            // THE OPERATOR'S ACTION: desired_replicas 3 -> 1.
+            sqlx::query("UPDATE kernel.plugin_deployments SET desired_replicas=1 WHERE id=$1")
+                .bind(deployment)
+                .execute(&pool)
+                .await
+                .expect("scale down");
+            sqlx::query("UPDATE kernel.nodes SET last_seen_at=now() WHERE id=$1")
+                .bind(node_id)
+                .execute(&pool)
+                .await
+                .expect("heartbeat");
+
+            let row = sqlx::query_as::<_, crate::deployments::DeploymentRow>(
+                "SELECT * FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("deployment row");
+            super::super::reconcile_deployment(&state, row)
+                .await
+                .expect("reconcile");
+
+            assert_eq!(
+                started(&pool, deployment).await,
+                1,
+                "only the replica at slot 0 may still be asked for; slots 1 and 2 are \
+                 past desired_replicas=1 and must be stopped"
+            );
+
+            // AND THE SLOT IS VISIBLE TO THE NEXT PLACEMENT, which is the half that
+            // makes "released" mean anything.
+            let after = node_occupancy(&pool, node_id).await;
+            assert_eq!(
+                after, 1,
+                "the node must count ONE occupant after the scale-down; a release the \
+                 capacity aggregates do not see frees nothing"
+            );
+        }
+
+        /// THE BOUNDARY: EXACTLY AT `desired_replicas` MUST SURVIVE.
+        ///
+        /// The predicate is `slot >= desired_replicas`, so the replica AT the index
+        /// is kept and the one above it is stopped. An off-by-one - `>` instead of
+        /// `>=` - keeps one replica too many and the scale-down never completes.
+        #[tokio::test]
+        async fn the_replica_at_the_index_survives_and_the_one_above_is_stopped() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let run = Uuid::new_v4().simple().to_string();
+            let node_id = node(&pool, &run).await;
+            let deployment = deployment_with(&pool, node_id, &run, 2).await;
+
+            sqlx::query("UPDATE kernel.plugin_deployments SET desired_replicas=1 WHERE id=$1")
+                .bind(deployment)
+                .execute(&pool)
+                .await
+                .expect("scale down");
+            sqlx::query("UPDATE kernel.nodes SET last_seen_at=now() WHERE id=$1")
+                .bind(node_id)
+                .execute(&pool)
+                .await
+                .expect("heartbeat");
+
+            let row = sqlx::query_as::<_, crate::deployments::DeploymentRow>(
+                "SELECT * FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("deployment row");
+            super::super::reconcile_deployment(&state, row)
+                .await
+                .expect("reconcile");
+
+            let kept: i64 = sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.plugin_instances
+                  WHERE deployment_id=$1 AND slot=0 AND desired_action='START'",
+            )
+            .bind(deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("slot 0");
+            let dropped: i64 = sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.plugin_instances
+                  WHERE deployment_id=$1 AND slot=1 AND desired_action='START'",
+            )
+            .bind(deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("slot 1");
+            assert_eq!(
+                kept, 1,
+                "slot 0 is the replica desired_replicas=1 asks for and must keep serving"
+            );
+            assert_eq!(
+                dropped, 0,
+                "slot 1 is past the new count and must be stopped"
+            );
+        }
+    }
 }
