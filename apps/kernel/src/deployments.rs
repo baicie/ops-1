@@ -375,7 +375,12 @@ async fn create_deployment_inner(
             .execute(&state.db)
             .await?;
             sqlx::query(
-                "UPDATE kernel.plugin_instances SET deployment_generation=$2, desired_action='START', state='STARTING', observed_at=NULL, updated_at=now() WHERE deployment_id=$1",
+                // PROBE: TASK-12's one-word change, isolated from its tests and docs,
+                // to find out on CI whether it is what breaks the lifecycle acceptance.
+                "UPDATE kernel.plugin_instances
+                    SET deployment_generation=$2, desired_action='STOP',
+                        observed_at=NULL, updated_at=now()
+                  WHERE deployment_id=$1",
             )
             .bind(existing.id)
             .bind(existing.generation + 1)
