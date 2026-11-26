@@ -1971,6 +1971,27 @@ async fn reconcile_once_locked(
     Ok(())
 }
 
+/// The one statement that writes a deployment's computed status.
+///
+/// A constant rather than an inline string so `generation_fencing` runs THE
+/// PRODUCTION STATEMENT. A test that repeats the SQL proves the copy is right;
+/// `nodes.rs` learned that when a counterfactual removing a guard left the
+/// copy-based test green.
+///
+/// `generation=$4` is TASK-13's fence: everything that produced `$2` was read at the
+/// start of the pass, and a redeploy can bump the row in between.
+pub(crate) const STATUS_WRITE_BACK_SQL: &str = r#"
+    UPDATE kernel.plugin_deployments
+       SET status=$2,
+           status_reason=$3,
+           updated_at=now(),
+           attempt_started_at = CASE
+               WHEN $2 = 'PENDING' THEN COALESCE(attempt_started_at, now())
+               ELSE NULL
+           END
+     WHERE id=$1 AND status<>'DRAINING' AND generation=$4
+    "#;
+
 async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> anyhow::Result<()> {
     let nodes = sqlx::query_as::<_, NodeRow>(
         "SELECT * FROM kernel.nodes WHERE revoked_at IS NULL AND status='READY' AND last_seen_at > now() - ($1 || ' seconds')::interval ORDER BY name",
@@ -2457,6 +2478,9 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         )
     };
     if deployment.status != status || deployment.status_reason != reason {
+        // A constant so the test can run THE PRODUCTION STATEMENT. A test that
+        // repeats the SQL proves the copy is right - `nodes.rs` learned this when a
+        // counterfactual removing a guard left the copy-based test green.
         // `attempt_started_at` FOLLOWS THE STATUS, IN BOTH DIRECTIONS.
         //
         // Entering PENDING with no attempt on record (a fresh row whose caller set
@@ -2468,24 +2492,25 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         //
         // `COALESCE` on the way in, so re-planning an already-PENDING row does not
         // keep resetting the clock it is measured against.
-        sqlx::query(
-            r#"
-            UPDATE kernel.plugin_deployments
-               SET status=$2,
-                   status_reason=$3,
-                   updated_at=now(),
-                   attempt_started_at = CASE
-                       WHEN $2 = 'PENDING' THEN COALESCE(attempt_started_at, now())
-                       ELSE NULL
-                   END
-             WHERE id=$1 AND status<>'DRAINING'
-            "#,
-        )
-        .bind(deployment.id)
-        .bind(status)
-        .bind(&reason)
-        .execute(&state.db)
-        .await?;
+        sqlx::query(STATUS_WRITE_BACK_SQL)
+            .bind(deployment.id)
+            .bind(status)
+            .bind(&reason)
+            // THE GENERATION THIS STATUS WAS COMPUTED FROM (TASK-13).
+            //
+            // Everything above is derived from facts read at the start of this pass:
+            // instance states, `ready`/`starting`/`failed` counts, and `is_effective`.
+            // Between that read and this write, `create_deployment_inner` can reset the
+            // row to PENDING with `generation+1` - a new attempt whose intent is the
+            // opposite of a status computed from the old one's instances. Measured in
+            // `generation_fencing`: without this predicate the stale status lands.
+            //
+            // With it, the write simply does not match a row that has moved on. The next
+            // pass reads the new generation's facts and writes a status derived from
+            // those, which is the only writer whose answer is about the current attempt.
+            .bind(deployment.generation)
+            .execute(&state.db)
+            .await?;
     }
     Ok(())
 }
@@ -8275,6 +8300,205 @@ mod tests {
                 rows, 1,
                 "the redeploy reused the existing row rather than creating one"
             );
+        }
+    }
+
+    /// TASK-13: GENERATION FENCING ACROSS THE LIFECYCLE.
+    ///
+    /// The brief lists five interleavings and one invariant each. Two of them are
+    /// already fenced and tested elsewhere; this module covers the ones that were
+    /// not, and records which is which rather than asserting the same thing twice.
+    ///
+    ///   already fenced   an older Node observation must not overwrite a newer one
+    ///                    (`nodes.rs`, `INSTANCE_OBSERVATION_SQL`, guarded on
+    ///                    `deployment_generation` AND `observed_at`; module
+    ///                    `observation_order`)
+    ///   already fenced   a comment in `nodes.rs` records that three identity
+    ///                    predicates without an ORDERING predicate let "STARTING at
+    ///                    T1" land after "READY at T2" - that was the bug, and the
+    ///                    `observed_at < $4` clause is its fix
+    ///
+    ///   NOT fenced       the deployment's own status write-back. It is
+    ///                    `WHERE id=$1 AND status<>'DRAINING'` - no generation. A
+    ///                    reconcile that read generation N, then lost the row to a
+    ///                    redeploy (N+1), then wrote, would install a status computed
+    ///                    from facts that no longer describe the deployment.
+    ///
+    /// This module measures the last one.
+    #[cfg(test)]
+    mod generation_fencing {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        /// A deployment with one START instance on a healthy node, in `status`.
+        async fn fixture(pool: &PgPool, status: &str) -> (Uuid, Uuid) {
+            let tag = Uuid::new_v4().simple().to_string();
+            let node = Uuid::new_v4();
+            let deployment = Uuid::new_v4();
+            let package = Uuid::new_v4();
+            let plugin = format!("test.gen.{tag}");
+            let publisher = format!("pub-{tag}");
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64','{}'::jsonb,'{}'::jsonb,
+                         'READY',now(),now(),'http://n:7000',$4)",
+            )
+            .bind(node)
+            .bind(format!("gen-{tag}"))
+            .bind(format!("tok-{tag}"))
+            .bind(serde_json::json!({
+                "cpuCores": 64, "memoryTotalBytes": 256i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0, "diskTotalBytes": 1024i64 * 1024 * 1024 * 1024,
+                "diskUsedBytes": 0,
+            }))
+            .execute(pool)
+            .await
+            .expect("node");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'0.0.1','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            .bind(package)
+            .bind(&plugin)
+            .bind(&publisher)
+            .bind(format!("{tag}-a"))
+            .bind(format!("{tag}-b"))
+            .bind(format!("{tag}-p"))
+            .execute(pool)
+            .await
+            .expect("package");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status)
+                 VALUES ($1,$2,$3,'0.0.1',1,1,'{\"nodeSelector\":{}}'::jsonb,
+                         '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,$4)",
+            )
+            .bind(deployment)
+            .bind(&plugin)
+            .bind(package)
+            .bind(status)
+            .execute(pool)
+            .await
+            .expect("deployment");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_instances
+                   (id, deployment_id, node_id, slot, state, desired_action,
+                    deployment_generation, container_id)
+                 VALUES ($1,$2,$3,0,'READY','START',1,'c0')",
+            )
+            .bind(Uuid::new_v4())
+            .bind(deployment)
+            .bind(node)
+            .execute(pool)
+            .await
+            .expect("instance");
+            (node, deployment)
+        }
+
+        /// INVARIANT: a status computed from generation N must not land on N+1.
+        ///
+        /// The write-back is `WHERE id=$1 AND status<>'DRAINING'`. It has no
+        /// generation predicate, so once a redeploy has bumped the row this statement
+        /// still matches it.
+        ///
+        /// The test performs the interleaving directly: read generation 1, bump the
+        /// row to generation 2 the way `create_deployment_inner` does, then run the
+        /// write-back with the status the OLD generation's facts produced. If the
+        /// write lands, the newer generation's intent was overwritten by a stale
+        /// computation.
+        #[tokio::test]
+        async fn a_status_from_an_older_generation_does_not_overwrite_a_redeploy() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let (_node, deployment) = fixture(&pool, "READY").await;
+
+            // What a reconcile of generation 1 would have computed.
+            let stale_status = "READY";
+
+            // The redeploy lands first: generation 2, PENDING, redeploy reason - the
+            // same write `create_deployment_inner` makes.
+            sqlx::query(
+                "UPDATE kernel.plugin_deployments
+                    SET status='PENDING', status_reason='Redeploy requested',
+                        generation=generation+1, updated_at=now(), attempt_started_at=now()
+                  WHERE id=$1",
+            )
+            .bind(deployment)
+            .execute(&pool)
+            .await
+            .expect("redeploy");
+
+            // Now the stale writer runs - THE PRODUCTION STATEMENT, bound to the
+            // generation it read. Not a copy: a copy would let a counterfactual that
+            // removes the fence from the real statement leave this test green, which
+            // is the defect `nodes.rs` already documents for observation writes.
+            let affected = sqlx::query(crate::deployments::STATUS_WRITE_BACK_SQL)
+                .bind(deployment)
+                .bind(stale_status)
+                .bind(Option::<String>::None)
+                .bind(1_i64) // the generation the stale computation was made from
+                .execute(&pool)
+                .await
+                .expect("stale write")
+                .rows_affected();
+
+            let (status, generation): (String, i64) = sqlx::query_as(
+                "SELECT status, generation FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("status");
+
+            assert_eq!(
+                affected, 0,
+                "a status computed from generation 1 must not land on a row that is now \
+                 at generation {generation}: the redeploy's intent is newer than the facts \
+                 this write was derived from"
+            );
+            assert_eq!(
+                status, "PENDING",
+                "the redeploy's PENDING must survive the stale writer"
+            );
+            assert_eq!(generation, 2, "and the generation is the redeploy's");
         }
     }
 }
