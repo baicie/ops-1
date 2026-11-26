@@ -374,28 +374,43 @@ async fn create_deployment_inner(
             .bind(&placement)
             .execute(&state.db)
             .await?;
-            // PLACEMENT IS THE PLANNER'S DECISION, NOT THIS STATEMENT'S (TASK-12).
+            // A REDEPLOY MAKES ITS OLD ROWS GHOSTS, NOT START CLAIMS AND NOT STOPS
+            // (TASK-12).
             //
-            // This used to set `desired_action='START'` on every instance row
-            // unconditionally, before anything evaluated capacity. Measured
-            // (`redeploy_capacity::a_redeploy_counts_its_old_instances_before_placement_runs`):
-            // on a node already at its limit, redeploying a FAILED deployment took the
-            // planner's occupancy from `limit` to `limit + 1`, because the old
-            // instance rows joined the planned set again while nothing had checked
-            // whether they would fit. The preflight then reported the node as
-            // over-committed, which is the number an operator reads.
+            // This statement has now been wrong in two different ways, and both were
+            // measured against a running platform rather than reasoned about.
             //
-            // Clearing `desired_action` to STOP instead leaves the rows in place - the
-            // history, the container id and the slot are kept - but removes them from
-            // every occupancy aggregate. `reconcile_deployment` then places what fits:
-            // its `existing_node_ok` requires `desired_action == 'START'`, so a row
-            // this statement released goes through `evaluate_node` like any other new
-            // placement. That is exactly the brief's requirement to hand placement
-            // back to the planner rather than reproduce it here.
+            // IT USED TO SET `desired_action='START', state='STARTING'`. The capacity
+            // aggregates count START instances on deployments in the planned set, and
+            // PENDING is in that set, so on a node already at its limit a redeploy
+            // took the planner's occupancy from `limit` to `limit + 1` before anything
+            // evaluated whether the rows would fit.
+            //
+            // SO IT WAS CHANGED TO `desired_action='STOP'`, WHICH BROKE REDEPLOY
+            // ENTIRELY. `reconcile_deployment`'s loop has two branches for a row that
+            // already exists: `existing_node_ok` (requires `desired_action ==
+            // 'START'`) re-asserts it, and `must_rebuild` re-creates it **only for a
+            // ghost** (`UNHEALTHY`/`UNREACHABLE` with no container). A STOP row on the
+            // same node that is not a ghost matches NEITHER, so the slot is skipped and
+            // the instance never comes back. Caught by the platform lifecycle
+            // acceptance (`an instance was still not terminal 60s after uninstall`) on
+            // CI, twice, while a local run passed - the local topology let the row move
+            // nodes, which hid it.
+            //
+            // A GHOST IS THE ONE SHAPE THAT IS BOTH INVISIBLE AND RECOVERABLE.
+            // `is_ghost_instance` excludes it from every capacity aggregate and from
+            // `used_nodes`, so it claims no slot; `must_rebuild` returns true for it,
+            // so the planner re-creates it through `evaluate_node` like a new
+            // placement. That is what a redeploy means: the old containers are being
+            // replaced, and whether the replacements fit is the planner's question.
+            //
+            // `container_id` is cleared deliberately: the row is being re-created, and
+            // keeping the id would describe a container this row no longer owns.
             sqlx::query(
                 "UPDATE kernel.plugin_instances
-                    SET deployment_generation=$2, desired_action='STOP',
-                        observed_at=NULL, updated_at=now()
+                    SET deployment_generation=$2, desired_action='START',
+                        state='UNREACHABLE', container_id=NULL, observed_at=NULL,
+                        updated_at=now()
                   WHERE deployment_id=$1",
             )
             .bind(existing.id)
@@ -2098,6 +2113,30 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
                 .execute(&state.db)
                 .await?;
             continue;
+        }
+        // A GHOST ON AN ELIGIBLE NODE IS REBUILT IN PLACE, BEFORE CAPACITY IS ASKED.
+        //
+        // Rebuilding a ghost replaces a row that already occupies this slot with a
+        // live one; it does not add an instance, so it must not be refused for want of
+        // a free slot. The branch that did this sat *after* candidate selection, so on
+        // a full node `candidate` was None, the slot was skipped, and the ghost stayed
+        // a ghost forever.
+        //
+        // Measured on the platform lifecycle acceptance: a redeploy released its rows
+        // and the node had no spare slot, so nothing ever placed them again and the
+        // deployment never converged. The state machine was asking for a slot it had
+        // just released.
+        if let Some(row) = current.as_ref() {
+            if must_rebuild(row) && eligible_ids.contains(&row.node_id) {
+                sqlx::query(
+                    "UPDATE kernel.plugin_instances SET desired_action='START', state='STARTING', observed_at=NULL, container_id=NULL, image_digest=NULL, host_port=NULL, restart_count=0, last_error=NULL, deployment_generation=$2, updated_at=now() WHERE id=$1",
+                )
+                .bind(row.id)
+                .bind(deployment.generation)
+                .execute(&state.db)
+                .await?;
+                continue;
+            }
         }
         let candidate = eligible
             .iter()
@@ -7914,6 +7953,107 @@ mod tests {
                 plugin,
                 version,
             }
+        }
+
+        /// THE CASE THE FIRST FIX MISSED: SAME NODE, SAME SLOT, NO ROOM TO MOVE.
+        ///
+        /// `a_redeploy_places_again_when_there_is_room` frees a slot, which lets the
+        /// row change nodes - and that path goes through the placement branch. It
+        /// therefore passed against a fix that made the instance STOP, because a STOP
+        /// row on the SAME node matches neither `existing_node_ok` (needs START) nor
+        /// `must_rebuild` (needs a ghost): the slot is skipped and the instance never
+        /// returns.
+        ///
+        /// The platform lifecycle acceptance caught this on CI, twice, while a local
+        /// run passed. Its deploy pins the node with `--selector role=node`, so the row
+        /// cannot move and exactly that branch is taken.
+        ///
+        /// This test pins the node the same way and asks the one question that
+        /// separates the two fixes: after a redeploy with no room to move, does the
+        /// instance come back?
+        #[tokio::test]
+        async fn a_redeploy_on_a_pinned_node_still_places_again() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let limit = crate::config::Config::from_env().max_instances_per_node as i32;
+            let f = full_node_with_failed_deployment(&pool, limit).await;
+            let state = state_for(pool.clone());
+
+            // NO SLOT IS FREED HERE, AND THAT IS THE POINT.
+            //
+            // The first version of this test released a filler slot "to make room".
+            // That made the STOP fix look correct: with room, `evaluate_node` accepts
+            // the slot and the placement branch rewrites the STOP row to START.
+            //
+            // On CI the node stays full. Then a STOP row matches neither
+            // `existing_node_ok` (it is not START) nor `must_rebuild` (it is not a
+            // ghost), and the node has no room to place a replacement - so the slot is
+            // simply skipped, every pass, forever. That is what
+            // `an instance was still not terminal 60s after uninstall` was reporting:
+            // the instance never came back, so it was never in a terminal state.
+
+            let auth = crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "test@example.invalid".to_string(),
+                display_name: "Test Operator".to_string(),
+                role: opsweave_contracts::Role::Operator,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            };
+            let request = crate::deployments::CreateDeploymentRequest {
+                version: f.version.clone(),
+                desired_replicas: 1,
+                node_selector: std::collections::BTreeMap::new(),
+                max_instances_per_node: Some(1),
+                cpu_millis: None,
+                memory_mib: None,
+            };
+            super::super::create_deployment_inner(&state, &auth, &f.plugin, &request)
+                .await
+                .expect("redeploy accepted");
+
+            // What the redeploy left behind: a row that claims no slot.
+            // The node was at `limit` before and must be at `limit` after: the freed
+            // slot in the first version of this test came from releasing a FILLER, not
+            // from the redeploy. With nothing freed, the redeploy must simply not add
+            // the old row back into the count.
+            let after_redeploy = planner_occupancy(&pool, f.node).await;
+            assert_eq!(
+                after_redeploy,
+                i64::from(limit),
+                "the redeploy must not re-claim the old row's slot; the node held \
+                 {limit} before it and must hold {limit} after it"
+            );
+
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+
+            // THE ASSERTION THAT SEPARATES THE TWO FIXES, and the first version of it
+            // did not: it excluded ghosts by `state IN (...) AND container_id IS NULL`,
+            // which left `UNHEALTHY + desired_action='STOP' + container_id NOT NULL`
+            // counting as live. That is exactly the row the STOP fix produced - it
+            // keeps its old container - so the test passed against the broken fix.
+            //
+            // `desired_action` is the fact that matters: only a START row is one the
+            // scheduler will bring up. Measured in the database after a STOP redeploy:
+            // `UNHEALTHY | STOP | old-container`.
+            let started: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances
+                 WHERE deployment_id=$1 AND desired_action='START'",
+            )
+            .bind(f.deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+            assert_eq!(
+                started, 1,
+                "the redeployed instance must be one the scheduler will place again; a \
+                 STOP row on the same node matches neither `existing_node_ok` nor \
+                 `must_rebuild`, so it would never come back"
+            );
         }
 
         /// THE FIX MUST NOT BE "NEVER PLACE AGAIN".
