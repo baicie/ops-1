@@ -9764,4 +9764,339 @@ mod tests {
             );
         }
     }
+
+    /// TASK-22 GAP: A NODE FILLED TO ITS RESOURCE BUDGET, NOT ITS SLOT LIMIT.
+    ///
+    /// `evaluate_node` refuses on two independent budgets: instance count and
+    /// CPU/memory. The instance-count side has many tests. The resource side has
+    /// only a pure-function test (`placement_rejects_insufficient_cpu_with_the_numbers`)
+    /// and a whole-node test that asks for more than the host has.
+    ///
+    /// Neither covers the shape staging actually had: **one plugin's instance is
+    /// already holding the budget, and a second plugin is refused because of what
+    /// the first one reserved** - on a node that still has free instance slots. That
+    /// is the "CPU/memory is the binding constraint" case, and if the aggregate is
+    /// wrong the refusal is either spurious (nothing fits on a half-empty node) or
+    /// absent (an over-committed node accepts another container).
+    ///
+    /// The assertion is deliberately about the SECOND deployment. A test that only
+    /// checks that an oversized request is refused would pass against a `reserved`
+    /// map that was always empty.
+    mod resource_budget_exhaustion {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        fn auth() -> crate::auth::AuthUser {
+            crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "budget@example.invalid".to_string(),
+                display_name: "Budget Operator".to_string(),
+                role: opsweave_contracts::Role::Operator,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            }
+        }
+
+        /// The resource a node reports: 2 cores, so `node_has_capacity` budgets
+        /// `2000 * 9 / 10 = 1800` millicores. Two 1000m plugins cannot both fit,
+        /// and one can - so the SAME second request succeeds or fails depending on
+        /// what the first one reserved. That is what makes this test able to fail.
+        async fn node(pool: &PgPool, run: &str) -> Uuid {
+            let id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64',$4::jsonb,'[]'::jsonb,
+                         'READY',now(),now(),'http://budget:7000',$5)",
+            )
+            .bind(id)
+            .bind(format!("budget-{run}"))
+            .bind(format!("tok-{}", Uuid::new_v4().simple()))
+            .bind(serde_json::json!({ "test-run": run }))
+            .bind(serde_json::json!({
+                "cpuCores": 2,
+                "memoryTotalBytes": 4i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0,
+                "diskTotalBytes": 100i64 * 1024 * 1024 * 1024,
+                "diskUsedBytes": 0,
+            }))
+            .execute(pool)
+            .await
+            .expect("node");
+            id
+        }
+
+        async fn publisher(pool: &PgPool, publisher: &str) {
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')
+                 ON CONFLICT (publisher_id) DO NOTHING",
+            )
+            .bind(publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+        }
+
+        async fn package(pool: &PgPool, plugin: &str, publisher: &str) -> Uuid {
+            let id = Uuid::new_v4();
+            let tag = Uuid::new_v4().simple().to_string();
+            let manifest = serde_json::json!({
+                "schemaVersion": "1.1",
+                "id": plugin,
+                "version": "1.0.0",
+                "publisher": publisher,
+                "compatibility": {"kernelApiMajor": 1, "webSdkMajor": 1},
+                "artifactDigest": format!("{tag}-a"),
+                "frontend": null,
+                "backend": {
+                    "runtime": "node",
+                    "imageRef": format!("registry.local/{tag}:1.0.0"),
+                    "protocol": {"name": "http", "version": "1", "containerPort": 7000},
+                    "health": {"readinessPath": "/readyz", "livenessPath": "/livez"},
+                    "apiPrefix": "/api",
+                },
+                "provides": [], "requires": [], "permissions": [],
+                "resources": {"cpuMillis": 1000, "memoryMiB": 128},
+            });
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'1.0.0','1.1',$3,$4::jsonb,$5,$6,$7,'INSTALLED','VERIFIED')",
+            )
+            .bind(id)
+            .bind(plugin)
+            .bind(publisher)
+            .bind(&manifest)
+            .bind(format!("{tag}-a"))
+            .bind(format!("{tag}-b"))
+            .bind(format!("{tag}-p"))
+            .execute(pool)
+            .await
+            .expect("package");
+            id
+        }
+
+        /// A deployment that has already taken its slot and its reservation:
+        /// status READY, one START instance with a container.
+        ///
+        /// Written directly rather than deployed, because what is under test is the
+        /// SECOND placement's arithmetic, not the first one's convergence.
+        async fn incumbent(
+            pool: &PgPool,
+            node: Uuid,
+            plugin: &str,
+            publisher: &str,
+            run: &str,
+            cpu_millis: i64,
+        ) -> Uuid {
+            let package_id = package(pool, plugin, publisher).await;
+            let deployment = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 VALUES ($1,$2,$3,'1.0.0',1,1,$4,$5,'READY',now(),now())",
+            )
+            .bind(deployment)
+            .bind(plugin)
+            .bind(package_id)
+            .bind(serde_json::json!({
+                "nodeSelector": { "test-run": run },
+                "maxInstancesPerNode": 1,
+            }))
+            .bind(serde_json::json!({
+                "cpuMillis": cpu_millis,
+                "memoryMiB": 128,
+            }))
+            .execute(pool)
+            .await
+            .expect("incumbent deployment");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_instances
+                   (id, deployment_id, node_id, slot, deployment_generation,
+                    desired_action, state, container_id)
+                 VALUES ($1,$2,$3,0,1,'START','READY',$4)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(deployment)
+            .bind(node)
+            .bind(format!("incumbent-{}", Uuid::new_v4().simple()))
+            .execute(pool)
+            .await
+            .expect("incumbent instance");
+            deployment
+        }
+
+        async fn try_deploy(
+            state: &crate::state::AppState,
+            plugin: &str,
+            run: &str,
+        ) -> anyhow::Result<Uuid> {
+            let request = crate::deployments::CreateDeploymentRequest {
+                version: "1.0.0".to_string(),
+                desired_replicas: 1,
+                node_selector: std::collections::BTreeMap::from([(
+                    "test-run".to_string(),
+                    run.to_string(),
+                )]),
+                max_instances_per_node: Some(1),
+                cpu_millis: Some(1000),
+                memory_mib: Some(128),
+            };
+            super::super::create_deployment_inner(state, &auth(), plugin, &request).await?;
+            let id: Uuid = sqlx::query_scalar(
+                "SELECT id FROM kernel.plugin_deployments WHERE plugin_id=$1 AND version='1.0.0'",
+            )
+            .bind(plugin)
+            .fetch_one(&state.db)
+            .await?;
+            Ok(id)
+        }
+
+        /// THE SAME REQUEST, ACCEPTED OR REFUSED BY WHAT THE FIRST ONE RESERVED.
+        ///
+        /// The node has 2 cores and an 1800m budget. The incumbent reserves 1000m.
+        /// The candidate also asks for 1000m: `1000 + 1000 = 2000 > 1800`, so it must
+        /// be refused for CPU - NOT for instance count (the per-node limit is 4 and
+        /// only one instance exists).
+        ///
+        /// The control is the same test run with a 100m incumbent, where the
+        /// candidate fits. Without the control, an implementation that refused every
+        /// second deployment would pass.
+        #[tokio::test]
+        async fn a_second_deployment_is_refused_for_cpu_the_first_one_reserved() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let limit = state.config.max_instances_per_node as i64;
+            assert!(
+                limit >= 4,
+                "the point of this test is that the INSTANCE limit is not what binds; \
+                 max_instances_per_node is {limit}"
+            );
+
+            // ---- the refusal ----
+            let run_full = Uuid::new_v4().simple().to_string();
+            let node_full = node(&pool, &run_full).await;
+            let pub_full = format!("pub-{run_full}");
+            publisher(&pool, &pub_full).await;
+            incumbent(
+                &pool,
+                node_full,
+                &format!("test.budget.holder.{run_full}"),
+                &pub_full,
+                &run_full,
+                1000,
+            )
+            .await;
+
+            let plugin_a = format!("test.budget.a.{run_full}");
+            package(&pool, &plugin_a, &pub_full).await;
+            let deployment_a = try_deploy(&state, &plugin_a, &run_full)
+                .await
+                .expect("the deploy is ACCEPTED; capacity refuses placement, not creation");
+            super::super::reconcile_once_scoped(&state, Some(deployment_a))
+                .await
+                .expect("reconcile");
+
+            let (status, reason): (String, Option<String>) = sqlx::query_as(
+                "SELECT status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(deployment_a)
+            .fetch_one(&pool)
+            .await
+            .expect("status");
+            let reason = reason.unwrap_or_default();
+            assert_ne!(
+                status, "READY",
+                "the candidate must not become READY: 1000m + 1000m exceeds the \
+                 1800m budget of a 2-core node"
+            );
+            assert!(
+                reason.contains("CPU") || reason.to_lowercase().contains("cpu"),
+                "and the reason must name CPU, not instance count: {reason}"
+            );
+            assert!(
+                !reason.contains("INSTANCE_CAPACITY_EXCEEDED"),
+                "instance count is NOT what binds here - only one instance exists on a \
+                 node whose limit is {limit}. A refusal for instance count would mean \
+                 the reservation is being read as occupancy: {reason}"
+            );
+
+            // ---- the control: a small incumbent leaves room ----
+            let run_room = Uuid::new_v4().simple().to_string();
+            let node_room = node(&pool, &run_room).await;
+            let pub_room = format!("pub-{run_room}");
+            publisher(&pool, &pub_room).await;
+            incumbent(
+                &pool,
+                node_room,
+                &format!("test.budget.small.{run_room}"),
+                &pub_room,
+                &run_room,
+                100,
+            )
+            .await;
+            let plugin_b = format!("test.budget.b.{run_room}");
+            package(&pool, &plugin_b, &pub_room).await;
+            let deployment_b = try_deploy(&state, &plugin_b, &run_room)
+                .await
+                .expect("accepted");
+            super::super::reconcile_once_scoped(&state, Some(deployment_b))
+                .await
+                .expect("reconcile");
+            let placed: i64 = sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.plugin_instances
+                  WHERE deployment_id=$1 AND desired_action='START'",
+            )
+            .bind(deployment_b)
+            .fetch_one(&pool)
+            .await
+            .expect("placed");
+            assert_eq!(
+                placed, 1,
+                "with only 100m reserved, the identical request must be placed - \
+                 otherwise the refusal above was not about the reservation"
+            );
+        }
+    }
 }
