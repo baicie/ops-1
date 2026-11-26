@@ -1980,6 +1980,16 @@ async fn reconcile_once_locked(
 ///
 /// `generation=$4` is TASK-13's fence: everything that produced `$2` was read at the
 /// start of the pass, and a redeploy can bump the row in between.
+/// The nodes a placement may consider.
+///
+/// A constant rather than an inline string so a test can run THE PRODUCTION QUERY.
+/// The first version of the revocation tests repeated this SQL, and a
+/// counterfactual that removed `revoked_at IS NULL` from the real query left them
+/// both green - the same defect `INSTANCE_OBSERVATION_SQL` documents above.
+pub(crate) const PLACEMENT_CANDIDATE_NODES_SQL: &str =
+    "SELECT * FROM kernel.nodes WHERE revoked_at IS NULL AND status='READY' \
+     AND last_seen_at > now() - ($1 || ' seconds')::interval ORDER BY name";
+
 pub(crate) const STATUS_WRITE_BACK_SQL: &str = r#"
     UPDATE kernel.plugin_deployments
        SET status=$2,
@@ -1993,12 +2003,10 @@ pub(crate) const STATUS_WRITE_BACK_SQL: &str = r#"
     "#;
 
 async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> anyhow::Result<()> {
-    let nodes = sqlx::query_as::<_, NodeRow>(
-        "SELECT * FROM kernel.nodes WHERE revoked_at IS NULL AND status='READY' AND last_seen_at > now() - ($1 || ' seconds')::interval ORDER BY name",
-    )
-    .bind(state.config.node_stale_seconds)
-    .fetch_all(&state.db)
-    .await?;
+    let nodes = sqlx::query_as::<_, NodeRow>(PLACEMENT_CANDIDATE_NODES_SQL)
+        .bind(state.config.node_stale_seconds)
+        .fetch_all(&state.db)
+        .await?;
     let selector: BTreeMap<String, String> = deployment
         .placement
         .get("nodeSelector")

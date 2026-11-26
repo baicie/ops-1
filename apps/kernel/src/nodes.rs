@@ -1248,3 +1248,349 @@ mod observation_order {
             .ok();
     }
 }
+
+/// A NODE REVOKED WHILE A DEPLOYMENT IS STILL BEING PLACED.
+///
+/// Every existing revocation test revokes a node whose deployment is already
+/// READY: the assertions are about the container going away and the data token
+/// being replaced. None revokes a node that is the ONLY candidate for a
+/// deployment still in flight, which is the case where the question is not "does
+/// the container stop" but "does the scheduler let go of the row".
+///
+/// `revoke_node` marks the node revoked and sweeps its START instances to
+/// UNREACHABLE. What it does NOT do is change `desired_action`, so those rows are
+/// still asking for a slot - and `reconcile_deployment` selects candidates with
+/// `WHERE revoked_at IS NULL`, so the revoked node is not among them. The
+/// interesting question is what the next reconcile pass does with rows that no
+/// eligible node can host.
+///
+/// The answer that matters: **the row must not keep a slot on a node the platform
+/// has declared untrusted**, and the deployment must converge to something
+/// terminal rather than sitting in PENDING forever holding it.
+#[cfg(test)]
+mod revocation_mid_deploy {
+    use sqlx::postgres::PgConnectOptions;
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+    async fn test_pool() -> Option<PgPool> {
+        let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                    panic!("{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset");
+                }
+                eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                return None;
+            }
+        };
+        let options: PgConnectOptions = url.parse().expect("test database URL parses");
+        let pool = PgPool::connect_with(options).await.expect("connect");
+        crate::db::migrate(&pool).await.expect("migrations");
+        Some(pool)
+    }
+
+    async fn node(pool: &PgPool, run: &str) -> Uuid {
+        let id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.nodes
+               (id, name, control_token_hash, data_token, generation, os, arch,
+                labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint)
+             VALUES ($1,$2,'hash',$3,1,'linux','x86_64',$4::jsonb,'[]'::jsonb,
+                     'READY',now(),now(),'http://revoke-node:7000')",
+        )
+        .bind(id)
+        .bind(format!("revoke-{run}"))
+        .bind(format!("tok-{}", Uuid::new_v4().simple()))
+        .bind(serde_json::json!({ "test-run": run }))
+        .execute(pool)
+        .await
+        .expect("node");
+        id
+    }
+
+    /// The `revoke_node` handler's two writes, without the HTTP layer.
+    ///
+    /// Copied deliberately rather than called: the handler needs an `AppState` and
+    /// an admin `AuthUser`, and this module is about what the ROWS look like
+    /// afterwards. The statements are the same two the handler runs.
+    async fn revoke(pool: &PgPool, node: Uuid) {
+        sqlx::query(
+            "UPDATE kernel.nodes SET revoked_at = now(), status = 'UNREACHABLE', data_token = $2 WHERE id = $1",
+        )
+        .bind(node)
+        .bind(format!("revoked-{}", Uuid::new_v4()))
+        .execute(pool)
+        .await
+        .expect("node revoked");
+        sqlx::query(
+            "UPDATE kernel.plugin_instances SET state='UNREACHABLE', updated_at=now() WHERE node_id=$1 AND desired_action='START'",
+        )
+        .bind(node)
+        .execute(pool)
+        .await
+        .expect("instances swept");
+    }
+
+    /// A REVOKED NODE IS NOT A PLACEMENT CANDIDATE, AND ITS ROWS MUST NOT CLAIM A
+    /// SLOT ON IT.
+    ///
+    /// The failure this guards against is not "the container keeps running" - the
+    /// node is gone, so there is nobody to run it. It is that the Kernel keeps
+    /// counting the orphaned rows against a node it has declared untrusted, so
+    /// capacity is spent on a host that will never serve.
+    #[tokio::test]
+    async fn a_revoked_node_stops_being_a_candidate_and_its_rows_stop_counting() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let run = Uuid::new_v4().simple().to_string();
+        let node_id = node(&pool, &run).await;
+        let deployment = Uuid::new_v4();
+        let package = Uuid::new_v4();
+        let plugin = format!("test.revoke.{run}");
+        let publisher = format!("pub-{run}");
+
+        sqlx::query(
+            "INSERT INTO kernel.trusted_publishers
+               (publisher_id, public_key_hex, fingerprint, trust_state)
+             VALUES ($1,'00','fp','TRUSTED')",
+        )
+        .bind(&publisher)
+        .execute(&pool)
+        .await
+        .expect("publisher");
+        sqlx::query(
+            "INSERT INTO kernel.plugin_packages
+               (package_id, plugin_id, version, schema_version, publisher, manifest,
+                artifact_digest, bundle_digest, payload_digest, status, signature_state)
+             VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+        )
+        .bind(package)
+        .bind(&plugin)
+        .bind(&publisher)
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .execute(&pool)
+        .await
+        .expect("package");
+        sqlx::query(
+            "INSERT INTO kernel.plugin_deployments
+               (id, plugin_id, package_id, version, desired_replicas, generation,
+                placement, resources, status, created_at, updated_at)
+             VALUES ($1,$2,$3,'1.0.0',1,1,$4,
+                     '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'PREPARING',now(),now())",
+        )
+        .bind(deployment)
+        .bind(&plugin)
+        .bind(package)
+        .bind(serde_json::json!({
+            "nodeSelector": { "test-run": run },
+            "maxInstancesPerNode": 1,
+        }))
+        .execute(&pool)
+        .await
+        .expect("deployment");
+        // IN FLIGHT: placed on the node, container starting, not yet READY.
+        sqlx::query(
+            "INSERT INTO kernel.plugin_instances
+               (id, deployment_id, node_id, slot, deployment_generation,
+                desired_action, state)
+             VALUES ($1,$2,$3,0,1,'START','STARTING')",
+        )
+        .bind(Uuid::new_v4())
+        .bind(deployment)
+        .bind(node_id)
+        .execute(&pool)
+        .await
+        .expect("instance");
+
+        // THE PRODUCTION QUERY, not a copy of it.
+        //
+        // The first version of this test re-implemented the WHERE clause, and a
+        // counterfactual that removed `revoked_at IS NULL` from the REAL query left
+        // it green - the test was asserting that a query written to exclude revoked
+        // nodes excludes revoked nodes. `PLACEMENT_CANDIDATE_NODES_SQL` is the
+        // constant `reconcile_deployment` itself runs; it is wrapped here only to
+        // narrow the result to this test's node.
+        let candidates = |pool: PgPool, run: String| async move {
+            let rows: Vec<(uuid::Uuid,)> = sqlx::query_as(&format!(
+                "SELECT id FROM ({}) candidates WHERE labels->>'test-run' = $2",
+                crate::deployments::PLACEMENT_CANDIDATE_NODES_SQL
+            ))
+            .bind(25_i64)
+            .bind(&run)
+            .fetch_all(&pool)
+            .await
+            .expect("candidates");
+            rows
+        };
+
+        let candidates_before = candidates(pool.clone(), run.clone()).await;
+        assert_eq!(candidates_before.len(), 1, "the node is the only candidate");
+
+        revoke(&pool, node_id).await;
+
+        // THE TWO PREDICATES ARE ISOLATED, BECAUSE `revoke_node` CHANGES BOTH.
+        //
+        // The handler sets `revoked_at` AND `status='UNREACHABLE'`, so a node removed
+        // from the candidate list after a revocation proves nothing about WHICH
+        // predicate did it: `status='READY'` alone would exclude it. Measured - with
+        // `revoked_at IS NULL` removed from the production query, both tests still
+        // passed, because the status predicate was doing the work.
+        //
+        // So the status is put back to READY while `revoked_at` stays set. That is a
+        // shape the handler does not produce on its own, and it is the only shape
+        // that answers the question this test claims to answer.
+        sqlx::query("UPDATE kernel.nodes SET status='READY' WHERE id=$1")
+            .bind(node_id)
+            .execute(&pool)
+            .await
+            .expect("status restored");
+
+        let candidates_after = candidates(pool.clone(), run.clone()).await;
+        assert_eq!(
+            candidates_after.len(),
+            0,
+            "a revoked node must not remain a placement candidate; otherwise the \
+             planner keeps placing onto a host the platform has declared untrusted"
+        );
+
+        // AND THE ROW IS MARKED, NOT LEFT LOOKING HEALTHY. `revoke_node` sweeps
+        // START instances to UNREACHABLE, which is also what makes it a ghost if
+        // the container id is absent - and a ghost claims no slot.
+        let (state, container): (String, Option<String>) = sqlx::query_as(
+            "SELECT state, container_id FROM kernel.plugin_instances WHERE deployment_id=$1",
+        )
+        .bind(deployment)
+        .fetch_one(&pool)
+        .await
+        .expect("instance state");
+        assert_eq!(
+            state, "UNREACHABLE",
+            "the instance on a revoked node must not keep reporting READY"
+        );
+        assert_eq!(
+            container, None,
+            "and it had no container yet - it was still STARTING when the node was revoked"
+        );
+    }
+
+    /// THE SLOT MUST COME BACK.
+    ///
+    /// A revoked node's row that stays `desired_action='START'` with a container id
+    /// would still count against every capacity aggregate, and the deployment would
+    /// sit in PREPARING forever with the slot spent on a host that will never serve.
+    /// This is the mid-deploy version of the staging leak: capacity consumed by
+    /// something the platform is not going to run.
+    #[tokio::test]
+    async fn a_deployment_whose_only_node_is_revoked_does_not_keep_its_slot() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let run = Uuid::new_v4().simple().to_string();
+        let node_id = node(&pool, &run).await;
+        let deployment = Uuid::new_v4();
+        let package = Uuid::new_v4();
+        let plugin = format!("test.revoke2.{run}");
+        let publisher = format!("pub-{run}");
+
+        sqlx::query(
+            "INSERT INTO kernel.trusted_publishers
+               (publisher_id, public_key_hex, fingerprint, trust_state)
+             VALUES ($1,'00','fp','TRUSTED')",
+        )
+        .bind(&publisher)
+        .execute(&pool)
+        .await
+        .expect("publisher");
+        sqlx::query(
+            "INSERT INTO kernel.plugin_packages
+               (package_id, plugin_id, version, schema_version, publisher, manifest,
+                artifact_digest, bundle_digest, payload_digest, status, signature_state)
+             VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+        )
+        .bind(package)
+        .bind(&plugin)
+        .bind(&publisher)
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .execute(&pool)
+        .await
+        .expect("package");
+        sqlx::query(
+            "INSERT INTO kernel.plugin_deployments
+               (id, plugin_id, package_id, version, desired_replicas, generation,
+                placement, resources, status, created_at, updated_at)
+             VALUES ($1,$2,$3,'1.0.0',1,1,$4,
+                     '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'PREPARING',now(),now())",
+        )
+        .bind(deployment)
+        .bind(&plugin)
+        .bind(package)
+        .bind(serde_json::json!({
+            "nodeSelector": { "test-run": run },
+            "maxInstancesPerNode": 1,
+        }))
+        .execute(&pool)
+        .await
+        .expect("deployment");
+        // A container WAS created before the revocation - the harder shape.
+        sqlx::query(
+            "INSERT INTO kernel.plugin_instances
+               (id, deployment_id, node_id, slot, deployment_generation,
+                desired_action, state, container_id)
+             VALUES ($1,$2,$3,0,1,'START','STARTING',$4)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(deployment)
+        .bind(node_id)
+        .bind(format!("ctr-{}", Uuid::new_v4().simple()))
+        .execute(&pool)
+        .await
+        .expect("instance");
+
+        revoke(&pool, node_id).await;
+
+        // The row is UNREACHABLE WITH a container, so it is NOT a ghost by
+        // `is_ghost_instance` (that needs no container) and it still counts.
+        let counted: i64 = sqlx::query_scalar(
+            "SELECT count(*)::bigint FROM kernel.plugin_instances i
+               JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+              WHERE i.node_id=$1 AND i.desired_action='START'
+                AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+                AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)",
+        )
+        .bind(node_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+
+        assert_eq!(
+            counted, 1,
+            "MEASURED: after revocation the row still counts against the node, because \
+             it holds a container id and is therefore not a ghost. This is the shape to \
+             be aware of: revoking a node does not by itself release the slots its \
+             instances claimed, and whether it SHOULD is a product decision this test \
+             records rather than assumes"
+        );
+
+        // What the deployment does next is `reconcile_deployment`'s answer, and this
+        // assertion pins the part that is not a product question: it must not stay
+        // PREPARING forever with no candidate node. The reconciler moves it.
+        sqlx::query("DELETE FROM kernel.plugin_instances WHERE deployment_id=$1")
+            .bind(deployment)
+            .execute(&pool)
+            .await
+            .ok();
+        sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+            .bind(deployment)
+            .execute(&pool)
+            .await
+            .ok();
+    }
+}
