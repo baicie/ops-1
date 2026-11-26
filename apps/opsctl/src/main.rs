@@ -516,6 +516,20 @@ async fn main() -> Result<()> {
                         }),
                         "nodes": report,
                         "occupants": occupants,
+                        // THE RECLAIM PLAN, WHICH THE KERNEL ALREADY COMPUTES.
+                        //
+                        // `capacity.json` used to stop at "why is the node full".
+                        // The other half - "why was this row not released" - was in
+                        // the preflight all along and nobody passed it through, so
+                        // the one question an operator asks next could not be
+                        // answered from the artifact. Measured on staging
+                        // 2026-11-26: the candidate was still DEGRADED after the
+                        // reclaim rule shipped, and the artifact could not say
+                        // whether that was a protection or a bug.
+                        //
+                        // Passed through, never recomputed: `protected` carries the
+                        // Kernel's own `ReclaimEligibility` code per deployment.
+                        "reclaim": preflight["reclaim"],
                         // The kernel's caveat, not a second one: a consumer that
                         // reads two caveats learns that one of them is decoration.
                         "caveat": preflight["caveat"],
@@ -544,6 +558,23 @@ async fn main() -> Result<()> {
                         n["instancesTotal"],
                         n["freeSlots"]
                     );
+                }
+                if let Some(reclaim) = preflight.get("reclaim") {
+                    println!(
+                        "reclaim: {} slot(s) would be freed{}",
+                        reclaim["slots_freed"],
+                        reclaim["detail"]
+                            .as_str()
+                            .map(|d| format!("  ({d})"))
+                            .unwrap_or_default()
+                    );
+                    for p in reclaim["protected"].as_array().into_iter().flatten() {
+                        println!(
+                            "  protected {}: {}",
+                            p["deployment"].as_str().unwrap_or(""),
+                            p["code"].as_str().unwrap_or("")
+                        );
+                    }
                 }
                 println!("occupants (NOT a removal list):");
                 for o in &occupants {
