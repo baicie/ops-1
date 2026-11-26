@@ -7288,4 +7288,340 @@ mod tests {
             );
         }
     }
+
+    /// TASK-11: CAN A DEPLOYMENT SIT IN `PREPARING` FOREVER?
+    ///
+    /// #227 fixed the PENDING case: zero replicas placed, past a timeout, becomes
+    /// FAILED. `PREPARING` is a different state and the PR that fixed PENDING said so
+    /// in as many words - "PREPARING carries a similar forever risk and is not
+    /// addressed here". This module answers whether the risk is real, by building the
+    /// situations that would cause it and asking the reconciler what it does.
+    ///
+    /// THE BRIEF'S CONSTRAINT, WHICH SHAPES EVERY TEST BELOW:
+    ///
+    ///   「不能直接把 PENDING 的 600 秒规则复制给 PREPARING。」
+    ///   「不能错误停止仍在正常拉取大镜像、初始化数据或即将 READY 的部署。」
+    ///
+    /// A `PREPARING` deployment has placed instances. Some are up, some are starting.
+    /// A large image pull takes minutes; a database migration takes minutes. A timer
+    /// that does not distinguish "slow" from "stuck" would kill exactly those.
+    #[cfg(test)]
+    mod preparing_convergence {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        struct Fix {
+            deployment: Uuid,
+            instances: Vec<Uuid>,
+        }
+
+        /// One node (optionally stale) and a deployment with `desired` replicas, of
+        /// which the listed states are placed.
+        async fn fixture(
+            pool: &PgPool,
+            desired: i32,
+            instance_states: &[&str],
+            node_healthy: bool,
+        ) -> Fix {
+            let tag = Uuid::new_v4().simple().to_string();
+            let node = Uuid::new_v4();
+            let last_seen = if node_healthy {
+                "now()"
+            } else {
+                "now() - interval '1 hour'"
+            };
+            // Concatenation, not `format!`: the SQL contains `{}` (an empty JSON
+            // object) and `format!` reads that as a placeholder.
+            let sql = "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64',$4::jsonb,'{}'::jsonb,
+                         'READY',now(),"
+                .to_string()
+                + last_seen
+                + ",'http://n:7000',$5)";
+            sqlx::query(&sql)
+                .bind(node)
+                .bind(format!("prep-{tag}"))
+                .bind(format!("tok-{tag}"))
+                .bind(serde_json::json!({"prep": tag.clone()}))
+                .bind(serde_json::json!({
+                    "cpuCores": 64, "memoryTotalBytes": 256i64 * 1024 * 1024 * 1024,
+                    "memoryUsedBytes": 0, "diskTotalBytes": 1024i64 * 1024 * 1024 * 1024,
+                    "diskUsedBytes": 0,
+                }))
+                .execute(pool)
+                .await
+                .expect("node");
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(format!("pub-{tag}"))
+            .execute(pool)
+            .await
+            .expect("publisher");
+            let package = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'0.0.1','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            .bind(package)
+            .bind(format!("test.prep.{tag}"))
+            .bind(format!("pub-{tag}"))
+            .bind(format!("{tag}-a"))
+            .bind(format!("{tag}-b"))
+            .bind(format!("{tag}-p"))
+            .execute(pool)
+            .await
+            .expect("package");
+
+            let deployment = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, attempt_started_at)
+                 VALUES ($1,$2,$3,'0.0.1',$4,1,$5::jsonb,
+                         '{\"cpuMillis\":100,\"memoryMib\":128}'::jsonb,'PREPARING',
+                         now() - interval '2 hours')",
+            )
+            .bind(deployment)
+            .bind(format!("test.prep.{tag}"))
+            .bind(package)
+            .bind(desired)
+            // `maxInstancesPerNode` must be at least `desired`, or the per-deployment
+            // limit refuses the extra slot and the deployment is not PREPARING at all
+            // - it is a placement failure. The first version left this at the default
+            // of 1 and asked for 2 replicas, which produced
+            // "2 instances already scheduled against a per-deployment limit of 1" and
+            // made #227's zero-placed timeout fire, turning the test into a
+            // measurement of the wrong state machine.
+            .bind(serde_json::json!({
+                "nodeSelector": {"prep": tag},
+                "maxInstancesPerNode": desired.max(1),
+            }))
+            .execute(pool)
+            .await
+            .expect("deployment");
+
+            let mut instances = Vec::new();
+            for (slot, state) in instance_states.iter().enumerate() {
+                let id = Uuid::new_v4();
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_instances
+                       (id, deployment_id, node_id, slot, state, desired_action,
+                        deployment_generation, container_id)
+                     VALUES ($1,$2,$3,$4,$5,'START',1,$6)",
+                )
+                .bind(id)
+                .bind(deployment)
+                .bind(node)
+                .bind(slot as i32)
+                .bind(*state)
+                // A STARTING row may or may not have a container; a RUNNING one does.
+                // The distinction decides whether the reconciler treats it as a ghost.
+                .bind(if *state == "STARTING" {
+                    None
+                } else {
+                    Some(format!("c{slot}"))
+                })
+                .execute(pool)
+                .await
+                .expect("instance");
+                instances.push(id);
+            }
+            Fix {
+                deployment,
+                instances,
+            }
+        }
+
+        async fn status_of(pool: &PgPool, id: Uuid) -> (String, Option<String>) {
+            sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .expect("status")
+        }
+
+        /// THE CASE THE BRIEF ASKS ABOUT: instances placed, one still starting, and
+        /// the deployment has been that way for two hours.
+        ///
+        /// It stays PREPARING. **There is no timer**, and this test records that as
+        /// the current behaviour rather than asserting it is correct.
+        ///
+        /// When TASK-11 adds a progress deadline this test is expected to change, and
+        /// the change should be a deliberate decision about what "no progress" means -
+        /// not a 600 replicated from PENDING.
+        #[tokio::test]
+        async fn a_starting_instance_is_not_on_a_timer() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let f = fixture(&pool, 2, &["READY", "STARTING"], true).await;
+            let state = state_for(pool.clone());
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+
+            let (status, reason) = status_of(&pool, f.deployment).await;
+            assert_eq!(
+                status, "PREPARING",
+                "an instance that is STARTING keeps the deployment PREPARING; there is no \
+                 timeout for this state (reason={reason:?})"
+            );
+        }
+
+        /// THE THING A NAIVE TIMER WOULD BREAK: a slow but healthy pull.
+        ///
+        /// `observed_at` is the only evidence the platform has that the Node is
+        /// making progress - it is cleared when an instance enters STARTING and set
+        /// when the Node reports. A rule that timed out on age alone would stop a
+        /// deployment whose Node is reporting regularly.
+        #[tokio::test]
+        async fn a_reporting_node_keeps_its_deployment_alive() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let f = fixture(&pool, 2, &["READY", "STARTING"], true).await;
+            // The Node has reported recently: this is a pull in progress, not a stall.
+            sqlx::query("UPDATE kernel.plugin_instances SET observed_at = now() WHERE id = $1")
+                .bind(f.instances[1])
+                .execute(&pool)
+                .await
+                .expect("observation");
+
+            let state = state_for(pool.clone());
+            for _ in 0..3 {
+                crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                    .await
+                    .expect("reconcile");
+            }
+            let (status, _) = status_of(&pool, f.deployment).await;
+            assert_eq!(
+                status, "PREPARING",
+                "a deployment whose Node reports observations must not be aged out"
+            );
+            let observed: Option<chrono::DateTime<chrono::Utc>> =
+                sqlx::query_scalar("SELECT observed_at FROM kernel.plugin_instances WHERE id=$1")
+                    .bind(f.instances[1])
+                    .fetch_one(&pool)
+                    .await
+                    .expect("observed_at");
+            assert!(
+                observed.is_some(),
+                "reconciling must not clear a Node's observation; that would erase the only \
+                 evidence of progress"
+            );
+        }
+
+        /// A NODE THAT WENT AWAY IS NOT PREPARING - IT IS DEGRADED.
+        ///
+        /// The stale sweep rewrites STARTING instances to UNREACHABLE, and `starting`
+        /// counts only STARTING/UNKNOWN, so the deployment leaves PREPARING by itself.
+        /// This is why "PREPARING forever" cannot be caused by a lost node: the state
+        /// machine already handles it.
+        ///
+        /// Asserted because the opposite is the intuitive guess, and the difference
+        /// decides whether TASK-11 needs to handle that case at all.
+        #[tokio::test]
+        async fn a_lost_node_moves_the_deployment_out_of_preparing() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let f = fixture(&pool, 2, &["READY", "STARTING"], false).await;
+            let state = state_for(pool.clone());
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+
+            let (status, reason) = status_of(&pool, f.deployment).await;
+            assert_ne!(
+                status, "PREPARING",
+                "with the node stale the STARTING instance becomes UNREACHABLE, so nothing is \
+                 'starting' any more - the deployment must leave PREPARING rather than wait \
+                 for a node that is gone (reason={reason:?})"
+            );
+        }
+
+        /// A CONTAINER THAT NEVER STARTS, ON A NODE THAT KEEPS REPORTING, IS THE REAL
+        /// FOREVER CASE.
+        ///
+        /// The Node is healthy, the instance is STARTING, and the Node either reports
+        /// no observation at all (`observed_at` NULL) or keeps reporting the same
+        /// STARTING state. Nothing in the reconciler changes it. This is the row TASK-11
+        /// exists to bound, and this test records it as still unbounded.
+        #[tokio::test]
+        async fn a_container_that_never_starts_stays_preparing() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let f = fixture(&pool, 2, &["READY", "STARTING"], true).await;
+            // `observed_at` stays NULL: the Node has never reported this instance once.
+            // That is different from reporting progress, and the difference is what a
+            // future deadline must key on.
+            let state = state_for(pool.clone());
+            for _ in 0..5 {
+                crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                    .await
+                    .expect("reconcile");
+            }
+            let (status, reason) = status_of(&pool, f.deployment).await;
+            assert_eq!(
+                status, "PREPARING",
+                "five reconcile passes and the deployment is still PREPARING; there is no \
+                 progress deadline, and `observed_at IS NULL` is not treated as a stall \
+                 (reason={reason:?})"
+            );
+            let observed: Option<chrono::DateTime<chrono::Utc>> =
+                sqlx::query_scalar("SELECT observed_at FROM kernel.plugin_instances WHERE id=$1")
+                    .bind(f.instances[1])
+                    .fetch_one(&pool)
+                    .await
+                    .expect("observed_at");
+            assert!(
+                observed.is_none(),
+                "the fixture must represent a Node that has never reported; if this were set \
+                 the test would be measuring the progress case instead"
+            );
+        }
+    }
 }
