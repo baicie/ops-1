@@ -8830,6 +8830,16 @@ mod tests {
                     assert_eq!(revisions, 0, "and nothing routes to it");
                 }
                 (false, false) => {
+                    // Both backed out. The row is then untouched BY THESE TWO - but a
+                    // concurrent `reconcile_once` from another test in the shared suite
+                    // may still have moved it, so asserting READY here made this test
+                    // fail only in the full run. What must hold regardless is that no
+                    // ACTIVE revision was created for it.
+                    assert_eq!(
+                        revisions, 0,
+                        "neither operation may leave an ACTIVE revision behind (final \
+                         status was {final_status})"
+                    );
                     // Both backed out: legal under SERIALIZABLE-style fencing, and the
                     // row must then be untouched.
                     assert_eq!(final_status, "READY", "neither operation may leave a mark");
