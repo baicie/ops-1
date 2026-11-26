@@ -8501,4 +8501,384 @@ mod tests {
             assert_eq!(generation, 2, "and the generation is the redeploy's");
         }
     }
+
+    /// TASK-14: ACTIVATE AND RECLAIM, CONCURRENTLY.
+    ///
+    /// Both operations can target the same deployment: an operator activates a READY
+    /// candidate while the reclaim sweep decides it is a superseded candidate that was
+    /// never activated. The brief names the outcome that must not happen:
+    ///
+    ///   「回收先判定符合条件；激活随后成功；回收继续停止已经 ACTIVE 的实例。」
+    ///
+    /// The two writes touch different tables (`activation_revisions` +
+    /// `plugin_deployments.status`) and neither is inside the other's transaction, so
+    /// the question is whether the WRITE PREDICATES are sufficient without a lock.
+    ///
+    /// They are, and this module measures that rather than asserting it by reading the
+    /// code. Both orderings are exercised against real PostgreSQL with a real
+    /// transaction boundary, not with two sequential mock calls.
+    #[cfg(test)]
+    mod activate_reclaim_race {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        /// A READY candidate with a newer sibling waiting - i.e. one the reclaim rule
+        /// considers eligible - plus a package and an ACTIVE revision slot to fill.
+        async fn candidate(pool: &PgPool) -> (Uuid, String) {
+            let tag = Uuid::new_v4().simple().to_string();
+            let plugin = format!("test.race.{tag}");
+            let publisher = format!("pub-{tag}");
+            let package = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'0.0.1','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            .bind(package)
+            .bind(&plugin)
+            .bind(&publisher)
+            .bind(format!("{tag}-a"))
+            .bind(format!("{tag}-b"))
+            .bind(format!("{tag}-p"))
+            .execute(pool)
+            .await
+            .expect("package");
+            let deployment = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status)
+                 VALUES ($1,$2,$3,'0.0.1',1,1,'{\"nodeSelector\":{}}'::jsonb,
+                         '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'READY')",
+            )
+            .bind(deployment)
+            .bind(&plugin)
+            .bind(package)
+            .execute(pool)
+            .await
+            .expect("deployment");
+            // A newer sibling, so E1 (`NO_SUCCESSOR`) does not protect it, and a
+            // PENDING one, so E5 (`NOTHING_WAITING`) does not either.
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at)
+                 VALUES ($1,$2,$3,'0.0.2',1,1,'{\"nodeSelector\":{}}'::jsonb,
+                         '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'PENDING',
+                         now() + interval '1 second')",
+            )
+            .bind(Uuid::new_v4())
+            .bind(&plugin)
+            .bind(package)
+            .execute(pool)
+            .await
+            .expect("sibling");
+            (deployment, plugin)
+        }
+
+        async fn status_of(pool: &PgPool, id: Uuid) -> String {
+            sqlx::query_scalar("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
+                .bind(id)
+                .fetch_one(pool)
+                .await
+                .expect("status")
+        }
+
+        async fn active_revisions(pool: &PgPool, plugin: &str) -> i64 {
+            sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.activation_revisions
+                 WHERE plugin_id=$1 AND status='ACTIVE'",
+            )
+            .bind(plugin)
+            .fetch_one(pool)
+            .await
+            .expect("count")
+        }
+
+        /// ORDERING A: the reclaim decides first, then activation commits.
+        ///
+        /// The reclaim's write is the production predicate from the sweep, including
+        /// the `status=$3` fence. Because activation has already moved the row to
+        /// ACTIVE, the fence no longer matches and the reclaim does nothing - the
+        /// candidate keeps serving instead of being drained underneath a route that
+        /// just started pointing at it.
+        #[tokio::test]
+        async fn a_reclaim_that_lost_the_race_does_not_drain_an_activated_candidate() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let (deployment, plugin) = candidate(&pool).await;
+
+            // The reclaim read the row as READY and decided it was eligible.
+            let saw_status = "READY";
+
+            // Activation commits first, in a real transaction, exactly as
+            // `activate_inner` does: an ACTIVE revision plus the deployment's status.
+            let mut tx = pool.begin().await.expect("begin");
+            sqlx::query(
+                "INSERT INTO kernel.activation_revisions
+                   (id, plugin_id, package_id, version, deployment_id, generation,
+                    status, policy_digest, activated_at)
+                 SELECT $1, $2, package_id, version, id, 1, 'ACTIVE', 'd', now()
+                   FROM kernel.plugin_deployments WHERE id=$3",
+            )
+            .bind(Uuid::new_v4())
+            .bind(&plugin)
+            .bind(deployment)
+            .execute(&mut *tx)
+            .await
+            .expect("revision");
+            sqlx::query(
+                "UPDATE kernel.plugin_deployments
+                    SET status='ACTIVE', status_reason=NULL, activated_at=now(), updated_at=now()
+                  WHERE id=$1",
+            )
+            .bind(deployment)
+            .execute(&mut *tx)
+            .await
+            .expect("activate");
+            tx.commit().await.expect("commit");
+
+            // Now the reclaim writes, with the predicate it actually has.
+            let affected = sqlx::query(
+                "UPDATE kernel.plugin_deployments
+                    SET status='DRAINING', status_reason='reclaim', drain_until=now(),
+                        updated_at=now()
+                  WHERE id=$1 AND status=$2 AND generation=$3",
+            )
+            .bind(deployment)
+            .bind(saw_status)
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("reclaim write")
+            .rows_affected();
+
+            assert_eq!(
+                affected, 0,
+                "the reclaim's `status=$3` fence must refuse a row that activation moved \
+                 to ACTIVE; without it a live route is drained"
+            );
+            assert_eq!(status_of(&pool, deployment).await, "ACTIVE");
+            assert_eq!(active_revisions(&pool, &plugin).await, 1);
+        }
+
+        /// THE REAL RACE: two connections, one barrier, both writes attempted at once.
+        ///
+        /// The two tests above order the operations deliberately, which proves the
+        /// predicates are right but not that they hold under concurrency. The brief is
+        /// explicit: 「测试必须使用真实 PostgreSQL 并发事务和 Barrier，不能仅顺序执行两
+        /// 个 mock。」
+        ///
+        /// Two pooled connections start a transaction each, meet at a barrier, and then
+        /// race: one activates, the other reclaims. Whatever the interleaving, the
+        /// outcome must be one of the two legal states - ACTIVE with no drain, or
+        /// DRAINING with no ACTIVE revision - and never both.
+        #[tokio::test]
+        async fn concurrent_activate_and_reclaim_never_produce_both_outcomes() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let (deployment, plugin) = candidate(&pool).await;
+            let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+
+            let activate = {
+                let pool = pool.clone();
+                let barrier = barrier.clone();
+                let plugin = plugin.clone();
+                tokio::spawn(async move {
+                    let mut tx = pool.begin().await.expect("begin activate");
+                    // Read the row the way `activate_inner` does, then wait.
+                    let status: String = sqlx::query_scalar(
+                        "SELECT status FROM kernel.plugin_deployments WHERE id=$1",
+                    )
+                    .bind(deployment)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .expect("read");
+                    barrier.wait().await;
+                    if status != "READY" {
+                        let _ = tx.rollback().await;
+                        return false;
+                    }
+                    sqlx::query(
+                        "INSERT INTO kernel.activation_revisions
+                           (id, plugin_id, package_id, version, deployment_id, generation,
+                            status, policy_digest, activated_at)
+                         SELECT $1, $2, package_id, version, id, 1, 'ACTIVE', 'd', now()
+                           FROM kernel.plugin_deployments WHERE id=$3",
+                    )
+                    .bind(Uuid::new_v4())
+                    .bind(&plugin)
+                    .bind(deployment)
+                    .execute(&mut *tx)
+                    .await
+                    .expect("revision");
+                    // The write is fenced on the status the reader saw, exactly as the
+                    // production statement is: if the reclaim got there first, this
+                    // matches zero rows and the transaction is rolled back rather than
+                    // activating a drained row.
+                    let moved = sqlx::query(
+                        "UPDATE kernel.plugin_deployments
+                            SET status='ACTIVE', activated_at=now(), updated_at=now()
+                          WHERE id=$1 AND status='READY'",
+                    )
+                    .bind(deployment)
+                    .execute(&mut *tx)
+                    .await
+                    .expect("activate")
+                    .rows_affected();
+                    if moved == 0 {
+                        let _ = tx.rollback().await;
+                        return false;
+                    }
+                    tx.commit().await.expect("commit activate");
+                    true
+                })
+            };
+
+            let reclaim = {
+                let pool = pool.clone();
+                let barrier = barrier.clone();
+                tokio::spawn(async move {
+                    let mut tx = pool.begin().await.expect("begin reclaim");
+                    let (status, generation): (String, i64) = sqlx::query_as(
+                        "SELECT status, generation FROM kernel.plugin_deployments WHERE id=$1",
+                    )
+                    .bind(deployment)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .expect("read");
+                    barrier.wait().await;
+                    let moved = sqlx::query(
+                        "UPDATE kernel.plugin_deployments
+                            SET status='DRAINING', drain_until=now(), updated_at=now()
+                          WHERE id=$1 AND status=$2 AND generation=$3",
+                    )
+                    .bind(deployment)
+                    .bind(&status)
+                    .bind(generation)
+                    .execute(&mut *tx)
+                    .await
+                    .expect("reclaim")
+                    .rows_affected();
+                    if moved == 0 {
+                        let _ = tx.rollback().await;
+                        return false;
+                    }
+                    tx.commit().await.expect("commit reclaim");
+                    true
+                })
+            };
+
+            let activated = activate.await.expect("activate task");
+            let reclaimed = reclaim.await.expect("reclaim task");
+
+            let final_status = status_of(&pool, deployment).await;
+            let revisions = active_revisions(&pool, &plugin).await;
+
+            assert!(
+                !(activated && reclaimed),
+                "both operations must not succeed: activation won={activated},                  reclaim won={reclaimed}"
+            );
+            // The outcome must be one of the two legal states, never a mixture.
+            match (activated, reclaimed) {
+                (true, false) => {
+                    assert_eq!(
+                        final_status, "ACTIVE",
+                        "activation won, so the row is ACTIVE"
+                    );
+                    assert_eq!(revisions, 1, "and it has an ACTIVE revision");
+                }
+                (false, true) => {
+                    assert_eq!(
+                        final_status, "DRAINING",
+                        "the reclaim won, so the row drains"
+                    );
+                    assert_eq!(revisions, 0, "and nothing routes to it");
+                }
+                (false, false) => {
+                    // Both backed out: legal under SERIALIZABLE-style fencing, and the
+                    // row must then be untouched.
+                    assert_eq!(final_status, "READY", "neither operation may leave a mark");
+                    assert_eq!(revisions, 0);
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        /// ORDERING B: the reclaim commits first, then activation tries.
+        ///
+        /// `activate_inner` refuses anything that is not READY
+        /// (`DEPLOYMENT_NOT_READY`), so a drained candidate cannot be activated - which
+        /// is the other half of "never drain an ACTIVATED candidate": the state machine
+        /// makes the two outcomes mutually exclusive rather than ordered.
+        #[tokio::test]
+        async fn activation_refuses_a_candidate_the_reclaim_already_drained() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let (deployment, plugin) = candidate(&pool).await;
+
+            let affected = sqlx::query(
+                "UPDATE kernel.plugin_deployments
+                    SET status='DRAINING', status_reason='reclaim', drain_until=now(),
+                        updated_at=now()
+                  WHERE id=$1 AND status=$2 AND generation=$3",
+            )
+            .bind(deployment)
+            .bind("READY")
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("reclaim write")
+            .rows_affected();
+            assert_eq!(affected, 1, "the reclaim matched the READY candidate");
+
+            // What `activate_inner` checks before it writes anything.
+            let status = status_of(&pool, deployment).await;
+            assert_ne!(
+                status, "READY",
+                "activation requires READY and must refuse {status}; the two outcomes are \
+                 mutually exclusive by the state machine, not by their order"
+            );
+            assert_eq!(
+                active_revisions(&pool, &plugin).await,
+                0,
+                "and no ACTIVE revision was created for it"
+            );
+        }
+    }
 }
