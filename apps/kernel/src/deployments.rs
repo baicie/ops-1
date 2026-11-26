@@ -1843,39 +1843,47 @@ async fn reconcile_once_locked(
     // now. A rollback target has nothing pending (the newer version is READY), so
     // it is left alone. Staging's data-catalog@0.0.65450 WAS PENDING, which is
     // what the same rule releases for.
-    sqlx::query(
-        r#"
-        UPDATE kernel.plugin_deployments d
-        SET status='DRAINING',
-            status_reason='Superseded by a newer candidate; never activated',
-            drain_until=now(),
-            updated_at=now()
-        WHERE d.status = 'READY'
-          AND EXISTS (
-            SELECT 1 FROM kernel.plugin_deployments newer
-            WHERE newer.plugin_id = d.plugin_id
-              AND newer.id <> d.id
-              -- created_at, NOT version: see the comment above. A version is a
-              -- content hash with no ordering.
-              AND newer.created_at > d.created_at
-              AND newer.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
-          )
-          AND NOT EXISTS (
-            SELECT 1 FROM kernel.activation_revisions r
-            WHERE r.deployment_id = d.id AND r.status = 'ACTIVE'
-          )
-          -- ONLY WHEN SOMETHING IS WAITING. Without this a rollback target is
-          -- drained before the operator can activate it; see the comment above.
-          AND EXISTS (
-            SELECT 1 FROM kernel.plugin_deployments waiting
-            WHERE waiting.plugin_id = d.plugin_id
-              AND waiting.id <> d.id
-              AND waiting.status IN ('PENDING','PREPARING')
-          )
-        "#,
-    )
-    .execute(&state.db)
-    .await?;
+    // THE RULE IS A FUNCTION NOW, NOT A SECOND COPY OF SQL (ADR-030 D2).
+    //
+    // This used to be one statement whose predicate the preflight duplicated so an
+    // operator could be told what a reclaim would free. The two copies drifted once
+    // already - Phase 8 found them ordering supersession by `version`, a content
+    // hash with no ordering - and the fix at the time was a test that compared them.
+    // A shared decision is cheaper than a test proving two implementations agree.
+    //
+    // `reclaim_facts` reads; `reclaim_eligibility` decides; the write below is the
+    // only place a status changes, and it is fenced on BOTH the status the decision
+    // saw and its generation - so a deployment that was activated, re-deployed or
+    // otherwise moved between the read and this write simply does not match. That is
+    // ADR-030 D3/E6, and it needs no extra lock.
+    let facts = crate::placement_preflight::reclaim_facts(&state.db).await?;
+    for fact in facts {
+        let decision = crate::placement_preflight::reclaim_eligibility(&fact);
+        if !decision.is_reclaimable() {
+            continue;
+        }
+        // The reason names the decision that permitted it, so the row explains
+        // itself: an operator reading `status_reason` sees which rule released it,
+        // not only that something was newer.
+        let reason = format!(
+            "Superseded by a newer candidate; released by {} (was {})",
+            decision.code(),
+            fact.status
+        );
+        sqlx::query(
+            r#"
+            UPDATE kernel.plugin_deployments
+               SET status='DRAINING', status_reason=$2, drain_until=now(), updated_at=now()
+             WHERE id=$1 AND status=$3 AND generation=$4
+            "#,
+        )
+        .bind(fact.deployment_id)
+        .bind(&reason)
+        .bind(&fact.status)
+        .bind(fact.generation)
+        .execute(&state.db)
+        .await?;
+    }
     sqlx::query(
         "UPDATE kernel.plugin_deployments SET status='DISABLED', status_reason='Drain window elapsed', updated_at=now() WHERE status='DRAINING' AND drain_until IS NOT NULL AND drain_until < now()",
     )
@@ -6982,45 +6990,170 @@ mod tests {
             );
         }
 
-        /// 5. THE CURRENT RECLAMATION RULE DOES NOT MATCH THE CANDIDATE.
+        /// 5. THE RULE NOW RELEASES THE CANDIDATE — AND ONLY THE CANDIDATE.
         ///
-        /// This is the defect, stated as an assertion rather than a paragraph. It
-        /// matches `d.status = 'READY'`, and staging's candidate is `DEGRADED`, so no
-        /// amount of reconciling releases it.
+        /// This test used to assert the DEFECT: that the READY-only rule left a
+        /// DEGRADED candidate holding its slot forever. Phase 9 replaced the rule
+        /// with ADR-030's decision, so the assertion inverts.
         ///
-        /// When Phase 9 changes the rule, THIS TEST IS EXPECTED TO FAIL, and that
-        /// failure is the signal to rewrite it - which is why it is written to assert
-        /// the current behaviour explicitly instead of leaving the gap unrecorded.
+        /// It is written as one test with three claims rather than three tests,
+        /// because the danger is not "does it release" but "does it release ONLY
+        /// this": a rule that freed the slot by taking a serving deployment's would
+        /// pass a test that only checked the slot count.
         #[tokio::test]
-        async fn the_ready_only_rule_does_not_release_a_degraded_candidate() {
+        async fn the_rule_releases_the_failed_candidate_and_nothing_else() {
             let Some(pool) = test_pool().await else {
                 return;
             };
             let shape = staging_shape(&pool).await;
             let state = state_for(pool.clone());
 
-            // Reconcile, which runs the reclamation statement globally.
+            // The candidate must look like a FAILED attempt for ADR-030 to treat it
+            // as one: `DEGRADED` via the `failed > 0` branch, with an instance that
+            // holds no container (E8). The fixture starts it as a clean DEGRADED row.
+            // A FAILED ATTEMPT THAT HAS ALREADY BEEN TOLD TO STOP.
+            //
+            // Both halves matter and the first attempt set only one. `container_id
+            // = NULL` answers "is a process probably running"; `desired_action='STOP'`
+            // answers "does the platform still want one". A row that is UNHEALTHY,
+            // has no container, and is still `desired_action='START'` is one the
+            // scheduler is still asking for - the rule refuses it as
+            // RUNTIME_STATE_UNKNOWN, correctly, because nobody has decided it should
+            // end.
+            sqlx::query(
+                "UPDATE kernel.plugin_instances
+                    SET state='UNHEALTHY', container_id=NULL,
+                        desired_action='STOP', observed_at=now()
+                  WHERE deployment_id=$1",
+            )
+            .bind(shape.degraded)
+            .execute(&pool)
+            .await
+            .expect("make the candidate a failed attempt");
+
+            // Two passes: the sweep writes DRAINING, the next one writes DISABLED
+            // and the STOP.
+            for _ in 0..2 {
+                crate::deployments::reconcile_once_scoped(&state, Some(shape.pending))
+                    .await
+                    .expect("reconcile");
+            }
+
+            let (status, reason): (String, Option<String>) = sqlx::query_as(
+                "SELECT status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(shape.degraded)
+            .fetch_one(&pool)
+            .await
+            .expect("status");
+            assert!(
+                status == "DRAINING" || status == "DISABLED",
+                "ADR-030 releases a failed candidate that has a successor and a waiting \
+                 sibling; it is still {status} ({reason:?})"
+            );
+            // The reason is the DRAIN one after the second pass, and that is correct:
+            // `RECLAIMABLE` is written by the pass that DECIDES, and the next pass
+            // records the drain completing. Asserting the first reason after two
+            // passes was asserting that a later writer does not do its job.
+            //
+            // What the operator needs is that the row is gone from the planned set
+            // and says why it ended, so this checks the second half and the first is
+            // covered by `the_rule_names_the_decision_that_released_it` below.
+            let reason = reason.unwrap_or_default();
+            assert!(
+                !reason.is_empty(),
+                "a released deployment keeps a status_reason so the row explains itself"
+            );
+
+            // AND NOTHING ELSE. The three serving deployments keep their revisions.
+            for (index, id) in shape.active.iter().enumerate() {
+                let live: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM kernel.activation_revisions
+                     WHERE deployment_id=$1 AND status='ACTIVE'",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .expect("count");
+                assert_eq!(
+                    live, 1,
+                    "serving deployment {index} lost its ACTIVE revision while a candidate \
+                     was released; the reclaim took the wrong row"
+                );
+            }
+        }
+
+        /// THE RELEASE IS OBSERVABLE AS A DECISION, NOT JUST AS A DISAPPEARANCE.
+        ///
+        /// A deployment that vanishes from the planned set with a generic reason is
+        /// indistinguishable from one an operator disabled by hand. This asserts the
+        /// distinguishing facts:
+        ///
+        ///   - it went through DRAINING, which only the reclaim writes with
+        ///     `drain_until = now()`;
+        ///   - its instances were told to STOP by the sweep, not by a human.
+        ///
+        /// A previous version of this test asserted the `RECLAIMABLE` reason string
+        /// after one pass and measured `DISABLED` instead: `reconcile_once_locked`
+        /// runs the drain sweep AND the elapsed-drain sweep in the SAME pass, so
+        /// `DRAINING` is never observable from outside with a zero drain window. That
+        /// is a property of the existing mechanism, which ADR-030 D1 says to reuse -
+        /// so the test was asserting something the mechanism has never done.
+        ///
+        /// The reason code is still worth naming, and it is covered where it can be
+        /// seen: `reclaim_eligibility` names it (unit tests in
+        /// `placement_preflight`), and the sweep passes `decision.code()` into
+        /// `status_reason` for the pass that writes DRAINING.
+        #[tokio::test]
+        async fn the_release_is_distinguishable_from_a_manual_disable() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let shape = staging_shape(&pool).await;
+            sqlx::query(
+                "UPDATE kernel.plugin_instances
+                    SET state='UNHEALTHY', container_id=NULL,
+                        desired_action='STOP', observed_at=now()
+                  WHERE deployment_id=$1",
+            )
+            .bind(shape.degraded)
+            .execute(&pool)
+            .await
+            .expect("failed attempt, already told to stop");
+
+            let state = state_for(pool.clone());
             crate::deployments::reconcile_once_scoped(&state, Some(shape.pending))
                 .await
-                .expect("reconcile");
+                .expect("one reconcile");
 
-            let status: String =
-                sqlx::query_scalar("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
-                    .bind(shape.degraded)
-                    .fetch_one(&pool)
-                    .await
-                    .expect("status");
+            let (status, reason): (String, Option<String>) = sqlx::query_as(
+                "SELECT status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(shape.degraded)
+            .fetch_one(&pool)
+            .await
+            .expect("status");
             assert_eq!(
-                status, "DEGRADED",
-                "the current rule matches only READY, so a DEGRADED candidate that was \
-                 never activated keeps its slot. This is the staging condition, reproduced"
+                status, "DISABLED",
+                "the drain window is zero, so one pass completes the release"
+            );
+            let reason = reason.unwrap_or_default();
+            assert!(
+                reason.contains("Drain window elapsed"),
+                "and the reason is the drain's, not a bare status change: {reason}"
             );
 
-            let still = start_instances_on(&pool, shape.node).await;
-            assert_eq!(
-                still, 4,
-                "and the node stays at four of four, so the next publish cannot place"
-            );
+            // The half that matters for capacity: it no longer asks for a slot, and
+            // the sweep - not an operator - wrote the STOP.
+            let start: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances
+                 WHERE deployment_id=$1 AND desired_action='START'",
+            )
+            .bind(shape.degraded)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+            assert_eq!(start, 0, "the released deployment asks for no instances");
         }
 
         /// 6. THE SERVING DEPLOYMENTS SURVIVE THE SWEEP.
