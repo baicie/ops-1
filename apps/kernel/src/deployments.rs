@@ -374,8 +374,44 @@ async fn create_deployment_inner(
             .bind(&placement)
             .execute(&state.db)
             .await?;
+            // A REDEPLOY MAKES ITS OLD ROWS GHOSTS, NOT START CLAIMS AND NOT STOPS
+            // (TASK-12).
+            //
+            // This statement has now been wrong in two different ways, and both were
+            // measured against a running platform rather than reasoned about.
+            //
+            // IT USED TO SET `desired_action='START', state='STARTING'`. The capacity
+            // aggregates count START instances on deployments in the planned set, and
+            // PENDING is in that set, so on a node already at its limit a redeploy
+            // took the planner's occupancy from `limit` to `limit + 1` before anything
+            // evaluated whether the rows would fit.
+            //
+            // SO IT WAS CHANGED TO `desired_action='STOP'`, WHICH BROKE REDEPLOY
+            // ENTIRELY. `reconcile_deployment`'s loop has two branches for a row that
+            // already exists: `existing_node_ok` (requires `desired_action ==
+            // 'START'`) re-asserts it, and `must_rebuild` re-creates it **only for a
+            // ghost** (`UNHEALTHY`/`UNREACHABLE` with no container). A STOP row on the
+            // same node that is not a ghost matches NEITHER, so the slot is skipped and
+            // the instance never comes back. Caught by the platform lifecycle
+            // acceptance (`an instance was still not terminal 60s after uninstall`) on
+            // CI, twice, while a local run passed - the local topology let the row move
+            // nodes, which hid it.
+            //
+            // A GHOST IS THE ONE SHAPE THAT IS BOTH INVISIBLE AND RECOVERABLE.
+            // `is_ghost_instance` excludes it from every capacity aggregate and from
+            // `used_nodes`, so it claims no slot; `must_rebuild` returns true for it,
+            // so the planner re-creates it through `evaluate_node` like a new
+            // placement. That is what a redeploy means: the old containers are being
+            // replaced, and whether the replacements fit is the planner's question.
+            //
+            // `container_id` is cleared deliberately: the row is being re-created, and
+            // keeping the id would describe a container this row no longer owns.
             sqlx::query(
-                "UPDATE kernel.plugin_instances SET deployment_generation=$2, desired_action='START', state='STARTING', observed_at=NULL, updated_at=now() WHERE deployment_id=$1",
+                "UPDATE kernel.plugin_instances
+                    SET deployment_generation=$2, desired_action='START',
+                        state='UNREACHABLE', container_id=NULL, observed_at=NULL,
+                        updated_at=now()
+                  WHERE deployment_id=$1",
             )
             .bind(existing.id)
             .bind(existing.generation + 1)
@@ -2077,6 +2113,30 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
                 .execute(&state.db)
                 .await?;
             continue;
+        }
+        // A GHOST ON AN ELIGIBLE NODE IS REBUILT IN PLACE, BEFORE CAPACITY IS ASKED.
+        //
+        // Rebuilding a ghost replaces a row that already occupies this slot with a
+        // live one; it does not add an instance, so it must not be refused for want of
+        // a free slot. The branch that did this sat *after* candidate selection, so on
+        // a full node `candidate` was None, the slot was skipped, and the ghost stayed
+        // a ghost forever.
+        //
+        // Measured on the platform lifecycle acceptance: a redeploy released its rows
+        // and the node had no spare slot, so nothing ever placed them again and the
+        // deployment never converged. The state machine was asking for a slot it had
+        // just released.
+        if let Some(row) = current.as_ref() {
+            if must_rebuild(row) && eligible_ids.contains(&row.node_id) {
+                sqlx::query(
+                    "UPDATE kernel.plugin_instances SET desired_action='START', state='STARTING', observed_at=NULL, container_id=NULL, image_digest=NULL, host_port=NULL, restart_count=0, last_error=NULL, deployment_generation=$2, updated_at=now() WHERE id=$1",
+                )
+                .bind(row.id)
+                .bind(deployment.generation)
+                .execute(&state.db)
+                .await?;
+                continue;
+            }
         }
         let candidate = eligible
             .iter()
@@ -7621,6 +7681,599 @@ mod tests {
                 observed.is_none(),
                 "the fixture must represent a Node that has never reported; if this were set \
                  the test would be measuring the progress case instead"
+            );
+        }
+    }
+
+    /// TASK-12: DOES A REDEPLOY BYPASS THE PLACEMENT GATE?
+    ///
+    /// `create_deployment_inner` has a branch for `FAILED`/`DEGRADED`/`DISABLED`/
+    /// `DRAINING` that sets the deployment back to PENDING and then, in a SECOND
+    /// statement, flips every instance row to `desired_action='START',
+    /// state='STARTING'` - before the planner has evaluated anything.
+    ///
+    /// The capacity aggregates count `desired_action='START'` on deployments in the
+    /// planned set, and PENDING is in that set. So if those rows exist on a node that
+    /// is already full, the redeploy can make the node look fuller than its limit
+    /// before placement runs, and the slots it claims are never checked by
+    /// `evaluate_node`.
+    ///
+    /// THE BRIEF IS EXPLICIT that the fix, if one is needed, routes placement back
+    /// through the planner: 「若需要修复，建议将 Redeploy 的新一轮实例放置统一交回既有
+    /// Planner。不要在 API 层另外复制调度逻辑。」
+    ///
+    /// AND EQUALLY EXPLICIT that nothing changes before the problem is reproduced:
+    /// 「只有真实复现后才修改。」
+    ///
+    /// This module is the reproduction. Whether it warrants a change is a conclusion
+    /// drawn from what it measures, not assumed.
+    #[cfg(test)]
+    mod redeploy_capacity {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        /// The number the planner limits against: START instances on this node, on
+        /// deployments in the planned set. Copied from the planner's own aggregate so
+        /// the test measures the same quantity the scheduler does.
+        async fn planner_occupancy(pool: &PgPool, node: Uuid) -> i64 {
+            sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances i
+                 JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+                 WHERE i.node_id=$1 AND i.desired_action='START'
+                   AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+                   AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)",
+            )
+            .bind(node)
+            .fetch_one(pool)
+            .await
+            .expect("occupancy")
+        }
+
+        struct Fix {
+            node: Uuid,
+            deployment: Uuid,
+            plugin: String,
+            version: String,
+        }
+
+        /// A node at its limit, and one FAILED deployment of `plugin` that still owns
+        /// instance rows with a container - the shape a failed publish leaves.
+        async fn full_node_with_failed_deployment(pool: &PgPool, limit: i32) -> Fix {
+            let tag = Uuid::new_v4().simple().to_string();
+            let node = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64','{}'::jsonb,'{}'::jsonb,
+                         'READY',now(),now(),'http://n:7000',$4)",
+            )
+            .bind(node)
+            .bind(format!("redeploy-{tag}"))
+            .bind(format!("tok-{tag}"))
+            .bind(serde_json::json!({
+                "cpuCores": 64, "memoryTotalBytes": 256i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0, "diskTotalBytes": 1024i64 * 1024 * 1024 * 1024,
+                "diskUsedBytes": 0,
+            }))
+            .execute(pool)
+            .await
+            .expect("node");
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(format!("pub-{tag}"))
+            .execute(pool)
+            .await
+            .expect("publisher");
+
+            let plugin = format!("test.redeploy.{tag}");
+            let version = "0.0.1".to_string();
+            let package = Uuid::new_v4();
+            // `create_deployment_inner` parses the stored manifest and refuses a
+            // backend-less plugin, so `{}` produces a 500 that says nothing about the
+            // behaviour under test. This is the smallest manifest the real code path
+            // accepts.
+            let manifest = serde_json::json!({
+                "schemaVersion": "1.1",
+                "id": plugin,
+                "version": "0.0.1",
+                "publisher": format!("pub-{tag}"),
+                "compatibility": {"kernelApiMajor": 1, "webSdkMajor": 1},
+                "artifactDigest": format!("{tag}-a"),
+                "frontend": null,
+                "backend": {
+                    "runtime": "node",
+                    "imageRef": format!("registry.local/{tag}:0.0.1"),
+                    "protocol": {"name": "http", "version": "1", "containerPort": 7000},
+                    "health": {"readinessPath": "/readyz", "livenessPath": "/livez"},
+                    "apiPrefix": "/api",
+                },
+                "provides": [],
+                "requires": [],
+                "permissions": [],
+                // `memoryMiB`, not `memoryMib`: the field carries an explicit
+                // `#[serde(rename = "memoryMiB")]` and the struct is
+                // `deny_unknown_fields`, so the wrong capital is a hard parse failure
+                // - which surfaced as a generic 500 three layers away.
+                "resources": {"cpuMillis": 100, "memoryMiB": 128},
+            });
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'0.0.1','1.1',$3,$7::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            // Binds are positional: `$1`..`$7` must be bound in that order. The
+            // manifest is `$7`, so it is bound LAST - putting it after the publisher
+            // made it land on `$4` (artifact_digest) and PostgreSQL rejected the row
+            // with "invalid input syntax for type json".
+            .bind(package)
+            .bind(&plugin)
+            .bind(format!("pub-{tag}"))
+            .bind(format!("{tag}-a"))
+            .bind(format!("{tag}-b"))
+            .bind(format!("{tag}-p"))
+            .bind(&manifest)
+            .execute(pool)
+            .await
+            .expect("package");
+
+            // Fill the node with a sibling that is neither this plugin nor reclaimable:
+            // it is ACTIVE with an ACTIVE revision, so the reclaim rule leaves it.
+            let filler_plugin = format!("test.redeploy.filler.{tag}");
+            let filler_package = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'0.0.1','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            .bind(filler_package)
+            .bind(&filler_plugin)
+            .bind(format!("pub-{tag}"))
+            .bind(format!("{tag}-fa"))
+            .bind(format!("{tag}-fb"))
+            .bind(format!("{tag}-fp"))
+            .execute(pool)
+            .await
+            .expect("filler package");
+            let filler = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, activated_at)
+                 VALUES ($1,$2,$3,'0.0.1',$4,1,'{\"nodeSelector\":{}}'::jsonb,
+                         '{\"cpuMillis\":100,\"memoryMib\":128}'::jsonb,'ACTIVE',now())",
+            )
+            .bind(filler)
+            .bind(&filler_plugin)
+            .bind(filler_package)
+            .bind(limit)
+            .execute(pool)
+            .await
+            .expect("filler deployment");
+            sqlx::query(
+                "INSERT INTO kernel.activation_revisions
+                   (id, plugin_id, package_id, version, deployment_id, generation,
+                    status, policy_digest, activated_at)
+                 VALUES ($1,$2,$3,'0.0.1',$4,1,'ACTIVE','d',now())",
+            )
+            .bind(Uuid::new_v4())
+            .bind(&filler_plugin)
+            .bind(filler_package)
+            .bind(filler)
+            .execute(pool)
+            .await
+            .expect("filler revision");
+            for slot in 0..limit {
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_instances
+                       (id, deployment_id, node_id, slot, state, desired_action,
+                        deployment_generation, container_id)
+                     VALUES ($1,$2,$3,$4,'READY','START',1,$5)",
+                )
+                .bind(Uuid::new_v4())
+                .bind(filler)
+                .bind(node)
+                .bind(slot)
+                .bind(format!("fill-{slot}"))
+                .execute(pool)
+                .await
+                .expect("filler instance");
+            }
+
+            // The FAILED deployment: it owns instance rows with a container, but it is
+            // not in the planned set, so it occupies nothing right now.
+            let deployment = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status)
+                 VALUES ($1,$2,$3,'0.0.1',1,2,'{\"nodeSelector\":{}}'::jsonb,
+                         '{\"cpuMillis\":100,\"memoryMib\":128}'::jsonb,'FAILED')",
+            )
+            .bind(deployment)
+            .bind(&plugin)
+            .bind(package)
+            .execute(pool)
+            .await
+            .expect("failed deployment");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_instances
+                   (id, deployment_id, node_id, slot, state, desired_action,
+                    deployment_generation, container_id)
+                 VALUES ($1,$2,$3,0,'UNHEALTHY','STOP',2,'old-container')",
+            )
+            .bind(Uuid::new_v4())
+            .bind(deployment)
+            .bind(node)
+            .execute(pool)
+            .await
+            .expect("failed instance");
+
+            Fix {
+                node,
+                deployment,
+                plugin,
+                version,
+            }
+        }
+
+        /// THE CASE THE FIRST FIX MISSED: SAME NODE, SAME SLOT, NO ROOM TO MOVE.
+        ///
+        /// `a_redeploy_places_again_when_there_is_room` frees a slot, which lets the
+        /// row change nodes - and that path goes through the placement branch. It
+        /// therefore passed against a fix that made the instance STOP, because a STOP
+        /// row on the SAME node matches neither `existing_node_ok` (needs START) nor
+        /// `must_rebuild` (needs a ghost): the slot is skipped and the instance never
+        /// returns.
+        ///
+        /// The platform lifecycle acceptance caught this on CI, twice, while a local
+        /// run passed. Its deploy pins the node with `--selector role=node`, so the row
+        /// cannot move and exactly that branch is taken.
+        ///
+        /// This test pins the node the same way and asks the one question that
+        /// separates the two fixes: after a redeploy with no room to move, does the
+        /// instance come back?
+        #[tokio::test]
+        async fn a_redeploy_on_a_pinned_node_still_places_again() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let limit = crate::config::Config::from_env().max_instances_per_node as i32;
+            let f = full_node_with_failed_deployment(&pool, limit).await;
+            let state = state_for(pool.clone());
+
+            // NO SLOT IS FREED HERE, AND THAT IS THE POINT.
+            //
+            // The first version of this test released a filler slot "to make room".
+            // That made the STOP fix look correct: with room, `evaluate_node` accepts
+            // the slot and the placement branch rewrites the STOP row to START.
+            //
+            // On CI the node stays full. Then a STOP row matches neither
+            // `existing_node_ok` (it is not START) nor `must_rebuild` (it is not a
+            // ghost), and the node has no room to place a replacement - so the slot is
+            // simply skipped, every pass, forever. That is what
+            // `an instance was still not terminal 60s after uninstall` was reporting:
+            // the instance never came back, so it was never in a terminal state.
+
+            let auth = crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "test@example.invalid".to_string(),
+                display_name: "Test Operator".to_string(),
+                role: opsweave_contracts::Role::Operator,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            };
+            let request = crate::deployments::CreateDeploymentRequest {
+                version: f.version.clone(),
+                desired_replicas: 1,
+                node_selector: std::collections::BTreeMap::new(),
+                max_instances_per_node: Some(1),
+                cpu_millis: None,
+                memory_mib: None,
+            };
+            super::super::create_deployment_inner(&state, &auth, &f.plugin, &request)
+                .await
+                .expect("redeploy accepted");
+
+            // What the redeploy left behind: a row that claims no slot.
+            // The node was at `limit` before and must be at `limit` after: the freed
+            // slot in the first version of this test came from releasing a FILLER, not
+            // from the redeploy. With nothing freed, the redeploy must simply not add
+            // the old row back into the count.
+            let after_redeploy = planner_occupancy(&pool, f.node).await;
+            assert_eq!(
+                after_redeploy,
+                i64::from(limit),
+                "the redeploy must not re-claim the old row's slot; the node held \
+                 {limit} before it and must hold {limit} after it"
+            );
+
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+
+            // THE ASSERTION THAT SEPARATES THE TWO FIXES, and the first version of it
+            // did not: it excluded ghosts by `state IN (...) AND container_id IS NULL`,
+            // which left `UNHEALTHY + desired_action='STOP' + container_id NOT NULL`
+            // counting as live. That is exactly the row the STOP fix produced - it
+            // keeps its old container - so the test passed against the broken fix.
+            //
+            // `desired_action` is the fact that matters: only a START row is one the
+            // scheduler will bring up. Measured in the database after a STOP redeploy:
+            // `UNHEALTHY | STOP | old-container`.
+            let started: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances
+                 WHERE deployment_id=$1 AND desired_action='START'",
+            )
+            .bind(f.deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+            assert_eq!(
+                started, 1,
+                "the redeployed instance must be one the scheduler will place again; a \
+                 STOP row on the same node matches neither `existing_node_ok` nor \
+                 `must_rebuild`, so it would never come back"
+            );
+        }
+
+        /// THE FIX MUST NOT BE "NEVER PLACE AGAIN".
+        ///
+        /// Releasing the old rows is only correct if the planner then places what fits.
+        /// A `desired_action='STOP'` row is invisible to `existing_node_ok`, so it goes
+        /// through `evaluate_node` like a new placement - which means it should be
+        /// placed when there is room, and refused when there is not.
+        ///
+        /// Both halves asserted in one test, because either alone is passable by a
+        /// broken implementation: "never places" passes the refusal half, and
+        /// "always places" passes the room half.
+        #[tokio::test]
+        async fn a_redeploy_places_again_when_there_is_room() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let limit = crate::config::Config::from_env().max_instances_per_node as i32;
+            let f = full_node_with_failed_deployment(&pool, limit).await;
+            let state = state_for(pool.clone());
+
+            // ROOM: free one slot by stopping one filler instance.
+            sqlx::query(
+                "UPDATE kernel.plugin_instances SET desired_action='STOP'
+                  WHERE node_id=$1 AND slot = 0 AND deployment_id <> $2",
+            )
+            .bind(f.node)
+            .bind(f.deployment)
+            .execute(&pool)
+            .await
+            .expect("free a slot");
+
+            let auth = crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "test@example.invalid".to_string(),
+                display_name: "Test Operator".to_string(),
+                role: opsweave_contracts::Role::Operator,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            };
+            let request = crate::deployments::CreateDeploymentRequest {
+                version: f.version.clone(),
+                desired_replicas: 1,
+                node_selector: std::collections::BTreeMap::new(),
+                max_instances_per_node: Some(1),
+                cpu_millis: None,
+                memory_mib: None,
+            };
+            super::super::create_deployment_inner(&state, &auth, &f.plugin, &request)
+                .await
+                .expect("redeploy accepted");
+
+            // The planner runs and places the released row.
+            crate::deployments::reconcile_once_scoped(&state, Some(f.deployment))
+                .await
+                .expect("reconcile");
+
+            let started: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances
+                 WHERE deployment_id=$1 AND desired_action='START'",
+            )
+            .bind(f.deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+            assert_eq!(
+                started, 1,
+                "with a free slot the redeployed deployment must be placed again; a fix \
+                 that stopped instances from ever returning would pass every capacity \
+                 assertion and break every deploy"
+            );
+        }
+
+        /// THE CONSEQUENCE: does the phantom slot block somebody else?
+        ///
+        /// An occupancy above the limit is only a defect if it has an effect. The
+        /// effect to check is the one an operator would hit: another plugin tries to
+        /// place on this node and is refused, not because the node is full, but
+        /// because a redeployed FAILED deployment re-registered its own dead instance.
+        ///
+        /// The preflight is the right instrument - it runs the same `evaluate_node` the
+        /// scheduler does - so "the operator is told the node is full" and "the
+        /// scheduler would refuse" are the same statement.
+        #[tokio::test]
+        async fn the_phantom_slot_is_visible_to_the_preflight() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let limit = crate::config::Config::from_env().max_instances_per_node as i32;
+            let f = full_node_with_failed_deployment(&pool, limit).await;
+            let state = state_for(pool.clone());
+
+            let auth = crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "test@example.invalid".to_string(),
+                display_name: "Test Operator".to_string(),
+                role: opsweave_contracts::Role::Operator,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            };
+            let request = crate::deployments::CreateDeploymentRequest {
+                version: f.version.clone(),
+                desired_replicas: 1,
+                node_selector: std::collections::BTreeMap::new(),
+                max_instances_per_node: Some(1),
+                cpu_millis: None,
+                memory_mib: None,
+            };
+            super::super::create_deployment_inner(&state, &auth, &f.plugin, &request)
+                .await
+                .expect("redeploy accepted");
+
+            let report = crate::placement_preflight::gather(
+                &state.db,
+                None,
+                std::collections::BTreeMap::new(),
+                opsweave_contracts::ResourceRequirements {
+                    cpu_millis: 100,
+                    memory_mib: 128,
+                },
+                1,
+                1,
+                limit as usize,
+            )
+            .await
+            .expect("gather");
+
+            let mine = report
+                .nodes
+                .iter()
+                .find(|n| n.node_id == f.node)
+                .expect("the fixture node is in the report");
+            assert_eq!(
+                mine.instances_on_node, limit as usize,
+                "the preflight must not see an over-committed node after a redeploy; it \
+                 reported {} against a limit of {limit} before TASK-12 was fixed",
+                mine.instances_on_node
+            );
+        }
+
+        /// THE REPRODUCTION.
+        ///
+        /// Before the redeploy the node is at its limit and the failed deployment
+        /// occupies nothing - its instance is `desired_action='STOP'` on a FAILED
+        /// deployment, which no aggregate counts. That is the correct steady state.
+        ///
+        /// After `create_deployment_inner` runs the redeploy branch, the deployment is
+        /// PENDING and its instance is `START` - and PENDING is in the planned set. So
+        /// the same physical container is now counted a second time, and the number the
+        /// scheduler limits against has gone from `limit` to `limit + 1`.
+        ///
+        /// **The node was already full. The redeploy made it fuller than full, without
+        /// `evaluate_node` being consulted once.**
+        #[tokio::test]
+        async fn a_redeploy_counts_its_old_instances_before_placement_runs() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let limit = crate::config::Config::from_env().max_instances_per_node as i32;
+            let f = full_node_with_failed_deployment(&pool, limit).await;
+            let state = state_for(pool.clone());
+
+            let before = planner_occupancy(&pool, f.node).await;
+            assert_eq!(
+                before,
+                i64::from(limit),
+                "the fixture must start at exactly the limit with the failed deployment \
+                 occupying nothing"
+            );
+
+            // What `opsctl deploy` asks for when re-deploying the same version.
+            let request = crate::deployments::CreateDeploymentRequest {
+                version: f.version.clone(),
+                desired_replicas: 1,
+                node_selector: std::collections::BTreeMap::new(),
+                max_instances_per_node: Some(1),
+                cpu_millis: None,
+                memory_mib: None,
+            };
+            let auth = crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "test@example.invalid".to_string(),
+                display_name: "Test Operator".to_string(),
+                role: opsweave_contracts::Role::Operator,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            };
+            let (status, _body) =
+                super::super::create_deployment_inner(&state, &auth, &f.plugin, &request)
+                    .await
+                    .expect("the redeploy is accepted");
+            assert_eq!(status, axum::http::StatusCode::ACCEPTED);
+
+            // THE FIX, asserted. Before TASK-12 this sentence said `limit + 1` and
+            // documented the defect; the redeploy had flipped the old instance to
+            // START on a PENDING deployment, so the planner counted a slot for a
+            // container that had not been placed again and would not be.
+            let after = planner_occupancy(&pool, f.node).await;
+            assert_eq!(
+                after,
+                i64::from(limit),
+                "a redeploy must not pre-register its old instances: the node was at \
+                 {limit} and must still be at {limit}, with placement left to the planner \
+                 (after={after})"
+            );
+
+            // And nothing placed it: no new instance row was created.
+            let rows: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances WHERE deployment_id=$1",
+            )
+            .bind(f.deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+            assert_eq!(
+                rows, 1,
+                "the redeploy reused the existing row rather than creating one"
             );
         }
     }
