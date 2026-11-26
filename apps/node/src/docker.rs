@@ -1461,4 +1461,106 @@ esac
             .expect("inner run hung");
         assert!(result.is_ok());
     }
+
+    // ---- digest pinning ------------------------------------------------------
+    //
+    // `verify_digest` had NO test. It is the check that stands between a signed
+    // manifest and a container running content that is not what was signed, and
+    // it is also the one place that refuses a tag-only reference. Neither
+    // behaviour was exercised: the e2e suites publish by digest and never
+    // present a wrong one.
+    //
+    // A fake `docker` answers `image inspect --format '{{json .RepoDigests}}'`
+    // with a fixed JSON array, which is the real shape docker prints.
+
+    /// A `docker` stand-in that answers the one subcommand `verify_digest` runs.
+    fn fake_docker_repo_digests(dir: &std::path::Path, digests_json: &str) -> String {
+        let script = dir.join("docker");
+        std::fs::write(
+            &script,
+            format!(
+                r#"#!/bin/sh
+case "$1" in
+  image) printf '%s' '{digests_json}' ; exit 0 ;;
+  *)     echo "unexpected: $*" >&2 ; exit 9 ;;
+esac
+"#
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        script.to_string_lossy().into_owned()
+    }
+
+    /// THE DIGEST IN THE MANIFEST IS THE DIGEST THAT RUNS.
+    ///
+    /// `verify_digest` is what makes that true. Without it, an attacker who can
+    /// push a tag - or a registry that was re-tagged - serves different content
+    /// than the manifest signed, and the platform starts it.
+    #[tokio::test]
+    async fn a_mismatched_digest_is_refused() {
+        let _lock = serial_docker_test();
+        let dir = tempfile::tempdir().unwrap();
+        // The local image carries a DIFFERENT digest than the one requested.
+        let binary = fake_docker_repo_digests(
+            dir.path(),
+            r#"["registry.local/app@sha256:1111111111111111111111111111111111111111111111111111111111111111"]"#,
+        );
+        let adapter = DockerAdapter::new(binary, "unix://unused".into());
+        let requested = "registry.local/app@sha256:2222222222222222222222222222222222222222222222222222222222222222";
+        let error = adapter
+            .verify_digest(requested)
+            .await
+            .expect_err("a mismatched digest must be refused");
+        let message = error.to_string();
+        assert!(
+            message.contains("digest mismatch"),
+            "the refusal must name the reason, not fail obscurely: {message}"
+        );
+        assert!(
+            message.contains("2222"),
+            "and it must name the digest that was requested: {message}"
+        );
+    }
+
+    /// THE CONTROL. Without it the test above passes against a function that
+    /// refuses everything.
+    #[tokio::test]
+    async fn a_matching_digest_is_accepted() {
+        let _lock = serial_docker_test();
+        let dir = tempfile::tempdir().unwrap();
+        let digest = "sha256:3333333333333333333333333333333333333333333333333333333333333333";
+        let binary =
+            fake_docker_repo_digests(dir.path(), &format!(r#"["registry.local/app@{digest}"]"#));
+        let adapter = DockerAdapter::new(binary, "unix://unused".into());
+        adapter
+            .verify_digest(&format!("registry.local/app@{digest}"))
+            .await
+            .expect("a matching digest must be accepted");
+    }
+
+    /// A TAG IS NOT A DIGEST. `latest` names whatever the registry decides today,
+    /// so there is nothing to verify against - and the function says so instead of
+    /// inspecting a local image and reporting success.
+    #[tokio::test]
+    async fn a_tag_only_reference_is_refused_before_any_inspection() {
+        let _lock = serial_docker_test();
+        let dir = tempfile::tempdir().unwrap();
+        // The fake answers with digests that WOULD match a pinned reference, so a
+        // function that fell through to the comparison could still succeed.
+        let binary = fake_docker_repo_digests(dir.path(), r#"["registry.local/app@sha256:4444"]"#);
+        let adapter = DockerAdapter::new(binary, "unix://unused".into());
+        let error = adapter
+            .verify_digest("registry.local/app:latest")
+            .await
+            .expect_err("a tag-only reference must be refused");
+        assert!(
+            error.to_string().contains("pinned by sha256 digest"),
+            "the refusal must say the reference is not pinned: {error}"
+        );
+    }
 }

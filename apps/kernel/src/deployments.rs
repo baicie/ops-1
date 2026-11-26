@@ -1980,6 +1980,16 @@ async fn reconcile_once_locked(
 ///
 /// `generation=$4` is TASK-13's fence: everything that produced `$2` was read at the
 /// start of the pass, and a redeploy can bump the row in between.
+/// The nodes a placement may consider.
+///
+/// A constant rather than an inline string so a test can run THE PRODUCTION QUERY.
+/// The first version of the revocation tests repeated this SQL, and a
+/// counterfactual that removed `revoked_at IS NULL` from the real query left them
+/// both green - the same defect `INSTANCE_OBSERVATION_SQL` documents above.
+pub(crate) const PLACEMENT_CANDIDATE_NODES_SQL: &str =
+    "SELECT * FROM kernel.nodes WHERE revoked_at IS NULL AND status='READY' \
+     AND last_seen_at > now() - ($1 || ' seconds')::interval ORDER BY name";
+
 pub(crate) const STATUS_WRITE_BACK_SQL: &str = r#"
     UPDATE kernel.plugin_deployments
        SET status=$2,
@@ -1993,12 +2003,10 @@ pub(crate) const STATUS_WRITE_BACK_SQL: &str = r#"
     "#;
 
 async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> anyhow::Result<()> {
-    let nodes = sqlx::query_as::<_, NodeRow>(
-        "SELECT * FROM kernel.nodes WHERE revoked_at IS NULL AND status='READY' AND last_seen_at > now() - ($1 || ' seconds')::interval ORDER BY name",
-    )
-    .bind(state.config.node_stale_seconds)
-    .fetch_all(&state.db)
-    .await?;
+    let nodes = sqlx::query_as::<_, NodeRow>(PLACEMENT_CANDIDATE_NODES_SQL)
+        .bind(state.config.node_stale_seconds)
+        .fetch_all(&state.db)
+        .await?;
     let selector: BTreeMap<String, String> = deployment
         .placement
         .get("nodeSelector")
@@ -9099,6 +9107,995 @@ mod tests {
                 "MEASURED: the row still names a container after the instance stopped. \
                  Nothing clears it, so `container_id IS NOT NULL` cannot mean 'a process \
                  may be running' - which is what ADR-030 D4 asked it to mean"
+            );
+        }
+    }
+
+    /// TASK-16: THE REPEATED RELEASE CYCLE.
+    ///
+    /// Phase 9A-9C fixed four paths that each leaked or mis-accounted for a
+    /// scheduling slot, one at a time:
+    ///
+    ///   - a READY candidate that was never activated and was overtaken (9B),
+    ///   - a superseded version's 15-second drain (ADR-027),
+    ///   - a DISABLED deployment whose instances kept `desired_action='START'`,
+    ///   - a redeploy's old rows (TASK-12: ghosts, not claims and not stops).
+    ///
+    /// Each was proven in isolation. **None was proven to hold across many
+    /// cycles**, which is what staging actually does: every push publishes a new
+    /// version, and a node with a fixed number of slots serves a handful before
+    /// it is full.
+    ///
+    /// THE TWO-SIDED INVARIANT, because one side alone is not a test.
+    ///
+    /// It is tempting to assert `occupancy <= limit`. That assertion is TRUE BY
+    /// CONSTRUCTION: `evaluate_node` refuses any placement that would exceed the
+    /// limit, so the count can never pass it. A test built on it passes against
+    /// every possible leak.
+    ///
+    /// The failure that actually happened (ADR-027, measured twice on staging:
+    /// runs 44016184862 and 44029228405) is the other direction - the node fills
+    /// up, nothing releases, and the NEXT publish is refused with
+    /// `INSTANCE_CAPACITY_EXCEEDED` after a full image build. So the assertion
+    /// that catches a leak is LIVENESS: with no spare slot anywhere, publish N+1
+    /// must still land, which is only possible if publish N released its slot.
+    ///
+    /// Both are asserted, and the second is the one that does the work.
+    mod repeated_release_cycle {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        fn auth() -> crate::auth::AuthUser {
+            crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "cycle@example.invalid".to_string(),
+                display_name: "Cycle Operator".to_string(),
+                role: opsweave_contracts::Role::Operator,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            }
+        }
+
+        /// THE NUMBER THE PLATFORM ACTS ON: `evaluate_node`'s own aggregate. START
+        /// instances on deployments in the planned set, excluding ghosts.
+        async fn occupancy(pool: &PgPool, node: Uuid) -> i64 {
+            sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances i
+                 JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+                 WHERE i.node_id=$1 AND i.desired_action='START'
+                   AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+                   AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)",
+            )
+            .bind(node)
+            .fetch_one(pool)
+            .await
+            .expect("occupancy")
+        }
+
+        async fn node(pool: &PgPool, run: &str) -> Uuid {
+            let id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64',$4::jsonb,'[]'::jsonb,
+                         'READY',now(),now(),'http://cycle:7000',$5)",
+            )
+            .bind(id)
+            .bind(format!("cycle-{run}"))
+            .bind(format!("tok-{}", Uuid::new_v4().simple()))
+            .bind(serde_json::json!({ "test-run": run }))
+            .bind(serde_json::json!({
+                "cpuCores": 64, "memoryTotalBytes": 256i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0, "diskTotalBytes": 1024i64 * 1024 * 1024 * 1024,
+                "diskUsedBytes": 0,
+            }))
+            .execute(pool)
+            .await
+            .expect("node");
+            id
+        }
+
+        async fn publisher(pool: &PgPool, publisher: &str) {
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')
+                 ON CONFLICT (publisher_id) DO NOTHING",
+            )
+            .bind(publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+        }
+
+        /// The smallest manifest the real code path accepts. `{}` would make
+        /// `create_deployment_inner` fail at the parse with a generic 500, and
+        /// `memoryMib` (lower-case b) is a hard `deny_unknown_fields` failure.
+        async fn package(pool: &PgPool, plugin: &str, version: &str, publisher: &str) -> Uuid {
+            let id = Uuid::new_v4();
+            let tag = Uuid::new_v4().simple().to_string();
+            let manifest = serde_json::json!({
+                "schemaVersion": "1.1",
+                "id": plugin,
+                "version": version,
+                "publisher": publisher,
+                "compatibility": {"kernelApiMajor": 1, "webSdkMajor": 1},
+                "artifactDigest": format!("{tag}-a"),
+                "frontend": null,
+                "backend": {
+                    "runtime": "node",
+                    "imageRef": format!("registry.local/{tag}:{version}"),
+                    "protocol": {"name": "http", "version": "1", "containerPort": 7000},
+                    "health": {"readinessPath": "/readyz", "livenessPath": "/livez"},
+                    "apiPrefix": "/api",
+                },
+                "provides": [], "requires": [], "permissions": [],
+                "resources": {"cpuMillis": 100, "memoryMiB": 128},
+            });
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,$3,'1.1',$4,$5::jsonb,$6,$7,$8,'INSTALLED','VERIFIED')",
+            )
+            .bind(id)
+            .bind(plugin)
+            .bind(version)
+            .bind(publisher)
+            .bind(&manifest)
+            .bind(format!("{tag}-a"))
+            .bind(format!("{tag}-b"))
+            .bind(format!("{tag}-p"))
+            .execute(pool)
+            .await
+            .expect("package");
+            id
+        }
+
+        async fn selector(
+            state: &crate::state::AppState,
+            node: Uuid,
+        ) -> std::collections::BTreeMap<String, String> {
+            let run: String =
+                sqlx::query_scalar("SELECT labels->>'test-run' FROM kernel.nodes WHERE id=$1")
+                    .bind(node)
+                    .fetch_one(&state.db)
+                    .await
+                    .expect("node label");
+            std::collections::BTreeMap::from([("test-run".to_string(), run)])
+        }
+
+        /// The node reporting SUCCESS for whatever this deployment has placed.
+        /// The real observation path (`INSTANCE_OBSERVATION_SQL`) is fenced on
+        /// generation and observed_at; this writes the same fields, but the tests
+        /// that exercise the fence are elsewhere. Here the intent is only "the
+        /// node says the container is up".
+        async fn mark_instance_ready(state: &crate::state::AppState, deployment: Uuid) {
+            sqlx::query(
+                "UPDATE kernel.plugin_instances
+                    SET state='READY', container_id=('ctr-' || floor(random()*1e9)::text),
+                        observed_at=now(), updated_at=now()
+                  WHERE deployment_id=$1 AND desired_action='START'",
+            )
+            .bind(deployment)
+            .execute(&state.db)
+            .await
+            .expect("instance reported ready");
+        }
+
+        async fn status_of(state: &crate::state::AppState, deployment: Uuid) -> String {
+            sqlx::query_scalar("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
+                .bind(deployment)
+                .fetch_one(&state.db)
+                .await
+                .expect("status")
+        }
+
+        async fn row(
+            state: &crate::state::AppState,
+            deployment: Uuid,
+        ) -> crate::deployments::DeploymentRow {
+            sqlx::query_as::<_, crate::deployments::DeploymentRow>(
+                "SELECT * FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(deployment)
+            .fetch_one(&state.db)
+            .await
+            .expect("deployment row")
+        }
+
+        async fn deployment_id_of(
+            state: &crate::state::AppState,
+            plugin: &str,
+            version: &str,
+        ) -> Uuid {
+            sqlx::query_scalar(
+                "SELECT id FROM kernel.plugin_deployments WHERE plugin_id=$1 AND version=$2",
+            )
+            .bind(plugin)
+            .bind(version)
+            .fetch_one(&state.db)
+            .await
+            .expect("deployment row")
+        }
+
+        /// Run the production planner until `deployment` reaches a terminal-ish
+        /// state, with the node reporting READY between passes. Returns the status.
+        ///
+        /// A bounded loop, not `while true`: a planner that never converges must
+        /// fail the test with a message, not hang it.
+        /// Drive one deployment with the PER-DEPLOYMENT reconciler only.
+        ///
+        /// `reconcile_once_scoped(state, Some(id))` is NOT per-deployment: it takes
+        /// the planner lock, runs the GLOBAL drain sweep
+        /// (`status='DISABLED' ... WHERE status='DRAINING'`, no plugin filter) and the
+        /// GLOBAL reclaim sweep, and only then filters the per-deployment loop by id.
+        ///
+        /// That matters here. The first version of this module used it and could not
+        /// detect a counterfactual that disabled supersession entirely: the global
+        /// sweeps kept releasing rows through paths that were not under test, so the
+        /// cycle passed either way. This helper runs `reconcile_deployment` directly -
+        /// the same function the loop calls - so the only releases in play are the
+        /// ones this test drives itself.
+        async fn converge(state: &crate::state::AppState, deployment: Uuid) -> String {
+            for _ in 0..6 {
+                // EVERY test node is refreshed, not only this deployment's: the
+                // planner's candidate list is built from all fresh nodes, and a node
+                // from a sibling test going stale mid-run changes what is eligible.
+                sqlx::query("UPDATE kernel.nodes SET last_seen_at=now() WHERE labels ? 'test-run'")
+                    .execute(&state.db)
+                    .await
+                    .expect("refresh test nodes");
+                super::super::reconcile_deployment(state, row(state, deployment).await)
+                    .await
+                    .expect("reconcile pass");
+                mark_instance_ready(state, deployment).await;
+                super::super::reconcile_deployment(state, row(state, deployment).await)
+                    .await
+                    .expect("reconcile pass");
+                let status = status_of(state, deployment).await;
+                if status != "PENDING" && status != "PREPARING" {
+                    return status;
+                }
+            }
+            status_of(state, deployment).await
+        }
+
+        /// Fill a node to `limit` with a foreign plugin that no reclaim rule may
+        /// touch: it is READY, has no successor, and is not a candidate.
+        ///
+        /// This is what removes the spare slot. Without it every cycle publish has
+        /// room somewhere and the liveness assertion proves nothing.
+        async fn fill_node(
+            state: &crate::state::AppState,
+            pool: &PgPool,
+            node: Uuid,
+            run: &str,
+            publisher_id: &str,
+            slots: i64,
+        ) -> Uuid {
+            let plugin = format!("test.cycle.filler.{run}");
+            package(pool, &plugin, "filler-1", publisher_id).await;
+            let request = crate::deployments::CreateDeploymentRequest {
+                version: "filler-1".to_string(),
+                desired_replicas: slots as i32,
+                node_selector: selector(state, node).await,
+                max_instances_per_node: Some(slots as i32),
+                cpu_millis: None,
+                memory_mib: None,
+            };
+            super::super::create_deployment_inner(state, &auth(), &plugin, &request)
+                .await
+                .expect("filler accepted");
+            let filler = deployment_id_of(state, &plugin, "filler-1").await;
+            assert_eq!(
+                converge(state, filler).await,
+                "READY",
+                "the filler must occupy the node before the cycle starts, or every \
+                 publish has room and the liveness assertion measures nothing"
+            );
+            assert_eq!(
+                occupancy(pool, node).await,
+                slots,
+                "the node is full: this is the precondition of the whole test"
+            );
+            filler
+        }
+
+        /// ONE FULL RELEASE SWEEP, RESTRICTED TO THIS PLUGIN.
+        ///
+        /// `reconcile_once` cannot be used here. It is a FULL sweep: it places every
+        /// PENDING deployment in the database, including the ones other tests in this
+        /// shared suite created with an empty selector. Measured twice - with the
+        /// limit at 4 and again at 12 - a foreign deployment took the slots this test
+        /// had reserved and the publish under test was refused for a slot it never
+        /// took. Raising the limit does not help: the foreign placement takes the new
+        /// headroom too.
+        ///
+        /// So the three release paths are driven here, restricted to this plugin:
+        ///
+        ///   1. supersession (ADR-030 D3 / the 9B rule) for a READY candidate that was
+        ///      never activated and whose plugin has something waiting,
+        ///   2. the drain sweep for a DRAINING row whose window has elapsed,
+        ///   3. the DISABLED STOP for instances whose deployment was disabled.
+        ///
+        /// Each is THE PRODUCTION DECISION, not a copy: supersession calls
+        /// `reclaim_facts` + `reclaim_eligibility`, the same pair the real sweep calls.
+        /// The difference is only the `WHERE plugin_id=$1` on the rows it iterates -
+        /// which is the whole point, because the sweep's own scope is the database and
+        /// this test's scope is one plugin.
+        async fn release_sweep_for(state: &crate::state::AppState, plugin: &str) {
+            let facts = crate::placement_preflight::reclaim_facts(&state.db)
+                .await
+                .expect("reclaim facts");
+            for fact in facts.iter().filter(|f| f.plugin_id == plugin) {
+                let decision = crate::placement_preflight::reclaim_eligibility(fact);
+                if !decision.is_reclaimable() {
+                    continue;
+                }
+                let reason = format!(
+                    "Superseded by a newer candidate; released by {} (was {})",
+                    decision.code(),
+                    fact.status
+                );
+                sqlx::query(
+                    "UPDATE kernel.plugin_deployments
+                        SET status='DRAINING', status_reason=$2, drain_until=now(), updated_at=now()
+                      WHERE id=$1 AND status=$3 AND generation=$4",
+                )
+                .bind(fact.deployment_id)
+                .bind(&reason)
+                .bind(&fact.status)
+                .bind(fact.generation)
+                .execute(&state.db)
+                .await
+                .expect("reclaim write");
+            }
+            sqlx::query(
+                "UPDATE kernel.plugin_deployments SET status='DISABLED',
+                        status_reason='Drain window elapsed', updated_at=now()
+                  WHERE plugin_id=$1 AND status='DRAINING'
+                    AND drain_until IS NOT NULL AND drain_until < now()",
+            )
+            .bind(plugin)
+            .execute(&state.db)
+            .await
+            .expect("drain sweep");
+            sqlx::query(
+                "UPDATE kernel.plugin_instances i SET desired_action='STOP', updated_at=now()
+                   FROM kernel.plugin_deployments d
+                  WHERE i.deployment_id = d.id AND d.plugin_id = $1
+                    AND d.status = 'DISABLED' AND i.desired_action <> 'STOP'",
+            )
+            .bind(plugin)
+            .execute(&state.db)
+            .await
+            .expect("disabled stop");
+        }
+
+        /// TWENTY CONSECUTIVE PUBLISHES OF DISTINCT VERSIONS.
+        ///
+        /// THE INVARIANT IS SCOPED TO THIS PLUGIN, AND THAT IS DELIBERATE.
+        ///
+        /// This suite shares one PostgreSQL database with ~390 other tests, and some
+        /// of them place deployments with an EMPTY selector - which matches every
+        /// node, including the one this test created. Measured: a `test.capacity.*`
+        /// instance landed on this node mid-run and the publish under test was
+        /// refused with INSTANCE_CAPACITY_EXCEEDED for a slot it never took.
+        /// Asserting on the node's TOTAL occupancy would make this test fail for
+        /// another test's writes - the same class of mistake as asserting a status
+        /// another writer owns.
+        ///
+        /// So the assertion is on what this test owns: **at most two versions of this
+        /// plugin may hold a START slot at once** - the one serving and the one being
+        /// placed. Two, because deploy-then-activate requires them to coexist for one
+        /// cycle. A leak shows up as three, four, five, growing one per round.
+        ///
+        /// THE TWO RELEASE PATHS ARE SEPARATED IN TIME, WHICH IS WHAT MAKES THE TEST
+        /// ABLE TO FAIL.
+        ///
+        /// The first version of this test activated two rounds out of three, and that
+        /// made it USELESS against the supersession rule: every measurement of a
+        /// counterfactual that disabled supersession entirely still passed, because
+        /// the drain from the previous round had already released the slot. A test
+        /// whose protection can be removed without changing its result is not testing
+        /// that protection.
+        ///
+        /// So the cycle runs in two phases:
+        ///
+        ///   rounds 0..10  NEVER activated. The only rule that can release a
+        ///                 predecessor is supersession, so removing it stops the
+        ///                 cycle at round 1.
+        ///   rounds 10..20 ACTIVATED every round. The only rule in play is the
+        ///                 15-second drain, and removing the drain stops it there.
+        ///
+        /// Each half is a counterfactual in its own right, and both are run.
+        #[tokio::test]
+        async fn twenty_publishes_never_accumulate_slots() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let run = Uuid::new_v4().simple().to_string();
+            let node_id = node(&pool, &run).await;
+            let plugin = format!("test.cycle.{run}");
+            let publisher_id = format!("pub-{run}");
+            publisher(&pool, &publisher_id).await;
+            let limit = state.config.max_instances_per_node as i64;
+            assert!(
+                limit >= 4,
+                "the cycle needs room for the filler and the two versions that coexist \
+                 during a transition; max_instances_per_node is {limit}"
+            );
+
+            // The filler holds `limit - 2`, so the plugin under test has exactly two
+            // slots on this node - the serving version and the one being placed, and
+            // not one more. That is what makes a leak visible: the third version has
+            // nowhere to go.
+            fill_node(&state, &pool, node_id, &run, &publisher_id, limit - 2).await;
+
+            // The most this plugin may ever occupy at once: the serving version and
+            // the one being placed. Not one - deploy-then-activate needs both.
+            let ceiling = 2i64;
+
+            for round in 0..20 {
+                let version = format!("cycle-{round:02}");
+                package(&pool, &plugin, &version, &publisher_id).await;
+
+                // EVERY test node is refreshed before each pass. `reconcile_deployment`
+                // selects only nodes seen within `node_stale_seconds` (25 by default),
+                // and a node that goes quiet is removed from every placement decision -
+                // its instances are then stopped for lack of a node and the failure
+                // looks like a release defect. A real node heartbeats; this is that.
+                sqlx::query("UPDATE kernel.nodes SET last_seen_at=now() WHERE labels ? 'test-run'")
+                    .execute(&pool)
+                    .await
+                    .expect("refresh test nodes");
+
+                let request = crate::deployments::CreateDeploymentRequest {
+                    version: version.clone(),
+                    desired_replicas: 1,
+                    node_selector: selector(&state, node_id).await,
+                    max_instances_per_node: Some(1),
+                    cpu_millis: None,
+                    memory_mib: None,
+                };
+                super::super::create_deployment_inner(&state, &auth(), &plugin, &request)
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "publish {round} was refused: {error:?}. The previous version \
+                             must have released its slot before this one was accepted"
+                        )
+                    });
+                let deployment = deployment_id_of(&state, &plugin, &version).await;
+
+                // THE RELEASE SWEEP, AFTER publishing and BEFORE converging.
+                //
+                // Supersession's `a_sibling_is_waiting` requires a PENDING/PREPARING
+                // sibling, so it can only fire once the new publish exists. Running
+                // this sweep BEFORE `create_deployment_inner` - the first version of
+                // this test did - finds no waiting sibling, releases nothing, and then
+                // the new publish has no slot. Measured: the cycle stopped at round 2
+                // with INSTANCE_CAPACITY_EXCEEDED while two predecessors still held
+                // their slots.
+                //
+                // This ordering is also the real one: the reconciler ticks every two
+                // seconds independently of publishes, so a publish always lands before
+                // the pass that releases what it superseded.
+                release_sweep_for(&state, &plugin).await;
+
+                assert_eq!(
+                    converge(&state, deployment).await,
+                    "READY",
+                    "round {round}: the publish did not converge to READY"
+                );
+
+                // THE INVARIANT. At most two versions of THIS plugin hold a slot.
+                let held: i64 = sqlx::query_scalar(
+                    "SELECT count(*)::bigint FROM kernel.plugin_instances i
+                       JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+                      WHERE d.plugin_id=$1 AND i.desired_action='START'
+                        AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+                        AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)",
+                )
+                .bind(&plugin)
+                .fetch_one(&pool)
+                .await
+                .expect("slots held by this plugin");
+                assert!(
+                    held <= ceiling,
+                    "round {round}: this plugin holds {held} START slots against a ceiling \
+                     of {ceiling} (the serving version and the one being placed). Twenty \
+                     publishes have happened; a count that grows with the round number is \
+                     the ADR-027 overrun - each version keeping the slot of the one it \
+                     replaced"
+                );
+
+                // AND NO VERSION MAY LINGER IN DRAINING. This is the assertion the
+                // first version of this test was missing, and it mattered: with the
+                // ceiling alone, a DRAINING row still holds `desired_action='START'`
+                // and was counted as one of the two, so a drain sweep that never
+                // completed left a predecessor holding its slot INDEFINITELY while
+                // the test stayed green. Measured with the sweep disabled: cycle-18
+                // sat in DRAINING at the end of a 20-round run and nothing failed.
+                //
+                // A drained version must reach DISABLED and have its instances
+                // stopped; that is what "the slot is released" means.
+                let lingering: i64 = sqlx::query_scalar(
+                    "SELECT count(*)::bigint FROM kernel.plugin_deployments
+                      WHERE plugin_id=$1 AND status='DRAINING'",
+                )
+                .bind(&plugin)
+                .fetch_one(&pool)
+                .await
+                .expect("draining rows");
+                let stale_drainers: i64 = sqlx::query_scalar(
+                    "SELECT count(*)::bigint FROM kernel.plugin_deployments
+                      WHERE plugin_id=$1 AND status='DRAINING'
+                        AND drain_until IS NOT NULL AND drain_until < now()",
+                )
+                .bind(&plugin)
+                .fetch_one(&pool)
+                .await
+                .expect("elapsed drains");
+                assert_eq!(
+                    stale_drainers, 0,
+                    "round {round}: {stale_drainers} of {lingering} DRAINING rows are past \
+                     their window and the sweep did not finish them. A drain that never \
+                     completes is a version that holds its slot forever"
+                );
+
+                // PHASE 2 ONLY. Rounds 0..10 must stay unactivated so that
+                // supersession is the only release path in play; see the doc comment.
+                if round >= 10 {
+                    // `expected_revision` is the CURRENT active revision's generation.
+                    // A constant 0 works only for the first activation; `activate_inner`
+                    // refuses anything else with REVISION_CONFLICT.
+                    let current: i64 = sqlx::query_scalar(
+                        "SELECT COALESCE((SELECT generation FROM kernel.activation_revisions
+                                           WHERE plugin_id=$1 AND status='ACTIVE'), 0)",
+                    )
+                    .bind(&plugin)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("current revision");
+                    let payload = crate::deployments::ActivateRequest {
+                        version: version.clone(),
+                        expected_revision: current,
+                    };
+                    super::super::activate_inner(&state, &auth(), &plugin, &payload)
+                        .await
+                        .unwrap_or_else(|error| {
+                            panic!("round {round}: activation was refused: {error:?}")
+                        });
+                    // The drain has a 15-second grace period, and this loop must not
+                    // sleep through it twenty times. Elapsing the window is a database
+                    // write, not a wall-clock wait - the same thing
+                    // `a_drained_version_frees_its_node_slots_after_the_grace_period`
+                    // does, and it keeps the suite fast without changing the rule.
+                    sqlx::query(
+                        "UPDATE kernel.plugin_deployments SET drain_until=now()-interval '1 second'
+                          WHERE plugin_id=$1 AND status='DRAINING'",
+                    )
+                    .bind(&plugin)
+                    .execute(&pool)
+                    .await
+                    .expect("elapse the drain window");
+                }
+            }
+
+            // EXACTLY ONE VERSION IS LEFT SERVING.
+            let live_versions: i64 = sqlx::query_scalar(
+                "SELECT count(DISTINCT i.deployment_id)::bigint
+                   FROM kernel.plugin_instances i
+                   JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+                  WHERE d.plugin_id=$1 AND i.desired_action='START'
+                    AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')",
+            )
+            .bind(&plugin)
+            .fetch_one(&pool)
+            .await
+            .expect("live versions");
+            assert_eq!(
+                live_versions, 1,
+                "after twenty publishes exactly one version may hold a slot; \
+                 {live_versions} still do"
+            );
+
+            // THE FILLER SURVIVED. A cycle that made room by reclaiming an unrelated
+            // healthy deployment would satisfy every assertion above while taking a
+            // service down.
+            let filler_plugin = format!("test.cycle.filler.{run}");
+            let filler = deployment_id_of(&state, &filler_plugin, "filler-1").await;
+            assert_eq!(
+                status_of(&state, filler).await,
+                "READY",
+                "the filler is a different plugin with no successor and no ACTIVE \
+                 revision - no release rule may touch it"
+            );
+            let filler_starting: i64 = sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.plugin_instances
+                  WHERE deployment_id=$1 AND desired_action='START'",
+            )
+            .bind(filler)
+            .fetch_one(&pool)
+            .await
+            .expect("filler instances");
+            assert_eq!(
+                filler_starting,
+                limit - 2,
+                "and it still holds every slot it took"
+            );
+        }
+    }
+
+    /// TASK-22 GAP: A NODE FILLED TO ITS RESOURCE BUDGET, NOT ITS SLOT LIMIT.
+    ///
+    /// `evaluate_node` refuses on two independent budgets: instance count and
+    /// CPU/memory. The instance-count side has many tests. The resource side has
+    /// only a pure-function test (`placement_rejects_insufficient_cpu_with_the_numbers`)
+    /// and a whole-node test that asks for more than the host has.
+    ///
+    /// Neither covers the shape staging actually had: **one plugin's instance is
+    /// already holding the budget, and a second plugin is refused because of what
+    /// the first one reserved** - on a node that still has free instance slots. That
+    /// is the "CPU/memory is the binding constraint" case, and if the aggregate is
+    /// wrong the refusal is either spurious (nothing fits on a half-empty node) or
+    /// absent (an over-committed node accepts another container).
+    ///
+    /// The assertion is deliberately about the SECOND deployment. A test that only
+    /// checks that an oversized request is refused would pass against a `reserved`
+    /// map that was always empty.
+    mod resource_budget_exhaustion {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        fn auth() -> crate::auth::AuthUser {
+            crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "budget@example.invalid".to_string(),
+                display_name: "Budget Operator".to_string(),
+                role: opsweave_contracts::Role::Operator,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            }
+        }
+
+        /// The resource a node reports: 2 cores, so `node_has_capacity` budgets
+        /// `2000 * 9 / 10 = 1800` millicores. Two 1000m plugins cannot both fit,
+        /// and one can - so the SAME second request succeeds or fails depending on
+        /// what the first one reserved. That is what makes this test able to fail.
+        async fn node(pool: &PgPool, run: &str) -> Uuid {
+            let id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64',$4::jsonb,'[]'::jsonb,
+                         'READY',now(),now(),'http://budget:7000',$5)",
+            )
+            .bind(id)
+            .bind(format!("budget-{run}"))
+            .bind(format!("tok-{}", Uuid::new_v4().simple()))
+            .bind(serde_json::json!({ "test-run": run }))
+            .bind(serde_json::json!({
+                "cpuCores": 2,
+                "memoryTotalBytes": 4i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0,
+                "diskTotalBytes": 100i64 * 1024 * 1024 * 1024,
+                "diskUsedBytes": 0,
+            }))
+            .execute(pool)
+            .await
+            .expect("node");
+            id
+        }
+
+        async fn publisher(pool: &PgPool, publisher: &str) {
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')
+                 ON CONFLICT (publisher_id) DO NOTHING",
+            )
+            .bind(publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+        }
+
+        async fn package(pool: &PgPool, plugin: &str, publisher: &str) -> Uuid {
+            let id = Uuid::new_v4();
+            let tag = Uuid::new_v4().simple().to_string();
+            let manifest = serde_json::json!({
+                "schemaVersion": "1.1",
+                "id": plugin,
+                "version": "1.0.0",
+                "publisher": publisher,
+                "compatibility": {"kernelApiMajor": 1, "webSdkMajor": 1},
+                "artifactDigest": format!("{tag}-a"),
+                "frontend": null,
+                "backend": {
+                    "runtime": "node",
+                    "imageRef": format!("registry.local/{tag}:1.0.0"),
+                    "protocol": {"name": "http", "version": "1", "containerPort": 7000},
+                    "health": {"readinessPath": "/readyz", "livenessPath": "/livez"},
+                    "apiPrefix": "/api",
+                },
+                "provides": [], "requires": [], "permissions": [],
+                "resources": {"cpuMillis": 1000, "memoryMiB": 128},
+            });
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'1.0.0','1.1',$3,$4::jsonb,$5,$6,$7,'INSTALLED','VERIFIED')",
+            )
+            .bind(id)
+            .bind(plugin)
+            .bind(publisher)
+            .bind(&manifest)
+            .bind(format!("{tag}-a"))
+            .bind(format!("{tag}-b"))
+            .bind(format!("{tag}-p"))
+            .execute(pool)
+            .await
+            .expect("package");
+            id
+        }
+
+        /// A deployment that has already taken its slot and its reservation:
+        /// status READY, one START instance with a container.
+        ///
+        /// Written directly rather than deployed, because what is under test is the
+        /// SECOND placement's arithmetic, not the first one's convergence.
+        async fn incumbent(
+            pool: &PgPool,
+            node: Uuid,
+            plugin: &str,
+            publisher: &str,
+            run: &str,
+            cpu_millis: i64,
+        ) -> Uuid {
+            let package_id = package(pool, plugin, publisher).await;
+            let deployment = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 VALUES ($1,$2,$3,'1.0.0',1,1,$4,$5,'READY',now(),now())",
+            )
+            .bind(deployment)
+            .bind(plugin)
+            .bind(package_id)
+            .bind(serde_json::json!({
+                "nodeSelector": { "test-run": run },
+                "maxInstancesPerNode": 1,
+            }))
+            .bind(serde_json::json!({
+                "cpuMillis": cpu_millis,
+                "memoryMiB": 128,
+            }))
+            .execute(pool)
+            .await
+            .expect("incumbent deployment");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_instances
+                   (id, deployment_id, node_id, slot, deployment_generation,
+                    desired_action, state, container_id)
+                 VALUES ($1,$2,$3,0,1,'START','READY',$4)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(deployment)
+            .bind(node)
+            .bind(format!("incumbent-{}", Uuid::new_v4().simple()))
+            .execute(pool)
+            .await
+            .expect("incumbent instance");
+            deployment
+        }
+
+        async fn try_deploy(
+            state: &crate::state::AppState,
+            plugin: &str,
+            run: &str,
+        ) -> anyhow::Result<Uuid> {
+            let request = crate::deployments::CreateDeploymentRequest {
+                version: "1.0.0".to_string(),
+                desired_replicas: 1,
+                node_selector: std::collections::BTreeMap::from([(
+                    "test-run".to_string(),
+                    run.to_string(),
+                )]),
+                max_instances_per_node: Some(1),
+                cpu_millis: Some(1000),
+                memory_mib: Some(128),
+            };
+            super::super::create_deployment_inner(state, &auth(), plugin, &request).await?;
+            let id: Uuid = sqlx::query_scalar(
+                "SELECT id FROM kernel.plugin_deployments WHERE plugin_id=$1 AND version='1.0.0'",
+            )
+            .bind(plugin)
+            .fetch_one(&state.db)
+            .await?;
+            Ok(id)
+        }
+
+        /// THE SAME REQUEST, ACCEPTED OR REFUSED BY WHAT THE FIRST ONE RESERVED.
+        ///
+        /// The node has 2 cores and an 1800m budget. The incumbent reserves 1000m.
+        /// The candidate also asks for 1000m: `1000 + 1000 = 2000 > 1800`, so it must
+        /// be refused for CPU - NOT for instance count (the per-node limit is 4 and
+        /// only one instance exists).
+        ///
+        /// The control is the same test run with a 100m incumbent, where the
+        /// candidate fits. Without the control, an implementation that refused every
+        /// second deployment would pass.
+        #[tokio::test]
+        async fn a_second_deployment_is_refused_for_cpu_the_first_one_reserved() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let limit = state.config.max_instances_per_node as i64;
+            assert!(
+                limit >= 4,
+                "the point of this test is that the INSTANCE limit is not what binds; \
+                 max_instances_per_node is {limit}"
+            );
+
+            // ---- the refusal ----
+            let run_full = Uuid::new_v4().simple().to_string();
+            let node_full = node(&pool, &run_full).await;
+            let pub_full = format!("pub-{run_full}");
+            publisher(&pool, &pub_full).await;
+            incumbent(
+                &pool,
+                node_full,
+                &format!("test.budget.holder.{run_full}"),
+                &pub_full,
+                &run_full,
+                1000,
+            )
+            .await;
+
+            let plugin_a = format!("test.budget.a.{run_full}");
+            package(&pool, &plugin_a, &pub_full).await;
+            let deployment_a = try_deploy(&state, &plugin_a, &run_full)
+                .await
+                .expect("the deploy is ACCEPTED; capacity refuses placement, not creation");
+            super::super::reconcile_once_scoped(&state, Some(deployment_a))
+                .await
+                .expect("reconcile");
+
+            let (status, reason): (String, Option<String>) = sqlx::query_as(
+                "SELECT status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(deployment_a)
+            .fetch_one(&pool)
+            .await
+            .expect("status");
+            let reason = reason.unwrap_or_default();
+            assert_ne!(
+                status, "READY",
+                "the candidate must not become READY: 1000m + 1000m exceeds the \
+                 1800m budget of a 2-core node"
+            );
+            assert!(
+                reason.contains("CPU") || reason.to_lowercase().contains("cpu"),
+                "and the reason must name CPU, not instance count: {reason}"
+            );
+            assert!(
+                !reason.contains("INSTANCE_CAPACITY_EXCEEDED"),
+                "instance count is NOT what binds here - only one instance exists on a \
+                 node whose limit is {limit}. A refusal for instance count would mean \
+                 the reservation is being read as occupancy: {reason}"
+            );
+
+            // ---- the control: a small incumbent leaves room ----
+            let run_room = Uuid::new_v4().simple().to_string();
+            let node_room = node(&pool, &run_room).await;
+            let pub_room = format!("pub-{run_room}");
+            publisher(&pool, &pub_room).await;
+            incumbent(
+                &pool,
+                node_room,
+                &format!("test.budget.small.{run_room}"),
+                &pub_room,
+                &run_room,
+                100,
+            )
+            .await;
+            let plugin_b = format!("test.budget.b.{run_room}");
+            package(&pool, &plugin_b, &pub_room).await;
+            let deployment_b = try_deploy(&state, &plugin_b, &run_room)
+                .await
+                .expect("accepted");
+            super::super::reconcile_once_scoped(&state, Some(deployment_b))
+                .await
+                .expect("reconcile");
+            let placed: i64 = sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.plugin_instances
+                  WHERE deployment_id=$1 AND desired_action='START'",
+            )
+            .bind(deployment_b)
+            .fetch_one(&pool)
+            .await
+            .expect("placed");
+            assert_eq!(
+                placed, 1,
+                "with only 100m reserved, the identical request must be placed - \
+                 otherwise the refusal above was not about the reservation"
             );
         }
     }
