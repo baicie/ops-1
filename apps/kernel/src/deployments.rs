@@ -8830,6 +8830,16 @@ mod tests {
                     assert_eq!(revisions, 0, "and nothing routes to it");
                 }
                 (false, false) => {
+                    // Both backed out. The row is then untouched BY THESE TWO - but a
+                    // concurrent `reconcile_once` from another test in the shared suite
+                    // may still have moved it, so asserting READY here made this test
+                    // fail only in the full run. What must hold regardless is that no
+                    // ACTIVE revision was created for it.
+                    assert_eq!(
+                        revisions, 0,
+                        "neither operation may leave an ACTIVE revision behind (final \
+                         status was {final_status})"
+                    );
                     // Both backed out: legal under SERIALIZABLE-style fencing, and the
                     // row must then be untouched.
                     assert_eq!(final_status, "READY", "neither operation may leave a mark");
@@ -8878,6 +8888,217 @@ mod tests {
                 active_revisions(&pool, &plugin).await,
                 0,
                 "and no ACTIVE revision was created for it"
+            );
+        }
+    }
+
+    /// TASK-15: A SLOT IS NOT A CONTAINER.
+    ///
+    /// The brief states the distinction this module exists to measure:
+    ///
+    ///   「不能把 desired_action=STOP 单独当成物理资源回收成功。」
+    ///   「调度槽位释放与实际容器退出可能不是同一时刻。必须分别验证。」
+    ///
+    /// The Kernel's only evidence that a container exists is `container_id`. Phase 9B
+    /// made that field load-bearing for the reclaim decision (ADR-030 D4: a failed
+    /// candidate whose instance still references a container is NOT auto-reclaimed).
+    /// So the question is whether the field tells the truth about a stopped instance.
+    ///
+    /// It does not, and the reason is on the Node's side: `RuntimeState::Stopped` is
+    /// reported through `set_state` (`apps/node/src/runtime.rs:94`), which updates
+    /// `state`, `error` and `observed_at` - and leaves `container_id` alone. A stopped
+    /// instance therefore reports the id of a container that no longer exists.
+    #[cfg(test)]
+    mod slot_is_not_a_container {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        /// Count what the SCHEDULER thinks occupies the node - the number that decides
+        /// whether the next deploy is refused.
+        async fn scheduler_occupancy(pool: &PgPool, node: Uuid) -> i64 {
+            sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.plugin_instances i
+                 JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+                 WHERE i.node_id=$1 AND i.desired_action='START'
+                   AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+                   AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)",
+            )
+            .bind(node)
+            .fetch_one(pool)
+            .await
+            .expect("occupancy")
+        }
+
+        async fn fixture(pool: &PgPool) -> (Uuid, Uuid) {
+            let tag = Uuid::new_v4().simple().to_string();
+            let node = Uuid::new_v4();
+            let deployment = Uuid::new_v4();
+            let package = Uuid::new_v4();
+            let plugin = format!("test.slot.{tag}");
+            let publisher = format!("pub-{tag}");
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64','{}'::jsonb,'{}'::jsonb,
+                         'READY',now(),now(),'http://n:7000',$4)",
+            )
+            .bind(node)
+            .bind(format!("slot-{tag}"))
+            .bind(format!("tok-{tag}"))
+            .bind(serde_json::json!({
+                "cpuCores": 64, "memoryTotalBytes": 256i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0, "diskTotalBytes": 1024i64 * 1024 * 1024 * 1024,
+                "diskUsedBytes": 0,
+            }))
+            .execute(pool)
+            .await
+            .expect("node");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'0.0.1','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            .bind(package)
+            .bind(&plugin)
+            .bind(&publisher)
+            .bind(format!("{tag}-a"))
+            .bind(format!("{tag}-b"))
+            .bind(format!("{tag}-p"))
+            .execute(pool)
+            .await
+            .expect("package");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status)
+                 VALUES ($1,$2,$3,'0.0.1',1,1,'{\"nodeSelector\":{}}'::jsonb,
+                         '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'ACTIVE')",
+            )
+            .bind(deployment)
+            .bind(&plugin)
+            .bind(package)
+            .execute(pool)
+            .await
+            .expect("deployment");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_instances
+                   (id, deployment_id, node_id, slot, state, desired_action,
+                    deployment_generation, container_id)
+                 VALUES ($1,$2,$3,0,'READY','START',1,'ctr-live')",
+            )
+            .bind(Uuid::new_v4())
+            .bind(deployment)
+            .bind(node)
+            .execute(pool)
+            .await
+            .expect("instance");
+            (node, deployment)
+        }
+
+        /// THE SCHEDULER RELEASES THE SLOT WHEN `desired_action` BECOMES `STOP`.
+        ///
+        /// This half works: the aggregate counts START instances, so a STOP row stops
+        /// occupying capacity immediately - before the container has necessarily gone.
+        /// That is the "slot released" half of the brief's distinction.
+        #[tokio::test]
+        async fn a_stopped_instance_releases_its_scheduling_slot() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let (node, deployment) = fixture(&pool).await;
+            assert_eq!(scheduler_occupancy(&pool, node).await, 1);
+
+            sqlx::query(
+                "UPDATE kernel.plugin_instances SET desired_action='STOP' WHERE deployment_id=$1",
+            )
+            .bind(deployment)
+            .execute(&pool)
+            .await
+            .expect("stop");
+
+            assert_eq!(
+                scheduler_occupancy(&pool, node).await,
+                0,
+                "a STOP instance no longer occupies a scheduling slot"
+            );
+        }
+
+        /// AND THE CONTAINER FIELD SURVIVES IT, WHICH IS THE DEFECT.
+        ///
+        /// After the Node reports the instance stopped, the row still carries the old
+        /// `container_id`. Nothing in the Kernel clears it: the only production writes
+        /// that do are rebuilds and migrations, and neither runs for a plain stop.
+        ///
+        /// A slot released is therefore NOT evidence that a container exited, and the
+        /// Kernel cannot tell them apart from this row alone.
+        #[tokio::test]
+        async fn a_stopped_instance_still_reports_a_container() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let (_node, deployment) = fixture(&pool).await;
+
+            // What the Node reports when it stops the instance: state STOPPED, and the
+            // container id it last saw - `runtime.rs:94` leaves that field alone.
+            sqlx::query(
+                "UPDATE kernel.plugin_instances
+                    SET state='STOPPED', desired_action='STOP', observed_at=now()
+                  WHERE deployment_id=$1",
+            )
+            .bind(deployment)
+            .execute(&pool)
+            .await
+            .expect("stop");
+
+            let (state, container): (String, Option<String>) = sqlx::query_as(
+                "SELECT state, container_id FROM kernel.plugin_instances WHERE deployment_id=$1",
+            )
+            .bind(deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("row");
+
+            assert_eq!(state, "STOPPED", "the Node reported the instance stopped");
+            assert_eq!(
+                container.as_deref(),
+                Some("ctr-live"),
+                "MEASURED: the row still names a container after the instance stopped. \
+                 Nothing clears it, so `container_id IS NOT NULL` cannot mean 'a process \
+                 may be running' - which is what ADR-030 D4 asked it to mean"
             );
         }
     }
