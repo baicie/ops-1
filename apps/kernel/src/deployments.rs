@@ -8840,6 +8840,10 @@ mod tests {
                         "neither operation may leave an ACTIVE revision behind (final \
                          status was {final_status})"
                     );
+                    // Both backed out: legal under SERIALIZABLE-style fencing, and the
+                    // row must then be untouched.
+                    assert_eq!(final_status, "READY", "neither operation may leave a mark");
+                    assert_eq!(revisions, 0);
                 }
                 _ => unreachable!(),
             }
