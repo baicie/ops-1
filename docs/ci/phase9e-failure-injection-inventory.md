@@ -122,6 +122,55 @@ get one fewer attempt than the contract says.
 test cannot fail for the reason it exists — it does not know there are two call
 sites. It was deleted rather than shipped.
 
+### 6. `docker pull` had no test, and its failure is what three designs assume
+
+`pull` decides whether a plugin ever starts. Its failure leaves an instance
+`UNHEALTHY` with no container — the shape `is_ghost_instance` excludes, the shape
+`RUNTIME_MAY_BE_RUNNING` (ADR-030 D4) exists for, and the shape the staging
+capacity leak was made of.
+
+**Every one of those was tested with a hand-seeded row that looked like a failed
+pull.** None produced the failure through the code that pulls. A fixture that
+starts from the expected end state cannot show you the code reaches it.
+
+| test | counterfactual |
+|---|---|
+| failed pull is an error naming the image and reason | ignoring the exit status |
+| a successful pull is not an error | (control) |
+| a command past its bound is abandoned and the error says so | removing the timeout — fails after 32 s |
+
+### 7. Scaling down must actually free the slots it stops
+
+`reconcile_deployment` stops every instance whose `slot >= desired_replicas`, and
+nothing tested it. A deployment reduced from 3 to 1 that keeps two instances
+running and holding slots means the operator who scaled down to free capacity gets
+none back — while the deployment still reports `READY`.
+
+The assertion that matters is the second half: the freed slots must be visible to
+the **next placement**. A scale-down that stops the rows but leaves the capacity
+aggregate counting them frees nothing.
+
+Counterfactual: `>=` changed to `>` fails both tests — the replica at the index is
+the one `desired_replicas` asks for.
+
+### 8. Uninstall had no Kernel-level test at all
+
+`uninstall` is the only path that takes a plugin out of service on purpose. Its
+only coverage was live acceptance, and the workflow that runs the multilang driver
+is **not a required check** — so nothing on main protected the path.
+
+The clause that matters most: **`route_candidates` joins on
+`activation_revisions.status='ACTIVE'` and reads nothing about the deployment's own
+status.** An uninstall that only disabled the deployment would leave the plugin
+serving.
+
+To make the counterfactual work at all, `uninstall` had to be split into a handler
+and `uninstall_inner` — the first version of the tests repeated the four UPDATEs,
+so removing the revision write from production changed nothing. **That is the
+third time on this branch** (`INSTANCE_OBSERVATION_SQL`,
+`PLACEMENT_CANDIDATE_NODES_SQL`, now this). The rule: a test that contains a copy
+of the SQL has no counterfactual.
+
 ## Attempted, and not delivered: `diagnose_placement`
 
 `diagnose_placement` is the second pass that runs when no slot found a candidate.
@@ -176,13 +225,47 @@ records the current behaviour and says so, rather than asserting it is correct.
 
 | area | most significant gaps |
 |---|---|
-| node boundary | `docker pull` failure and its 300 s timeout; `pull` interaction with quarantine; the `supervise()` LOOP itself (all three decisions it makes are now unit-tested; the loop that calls them is not driven end to end); node heartbeating with an old generation at the API (409 path); observation for an unknown instance |
-| capacity | scale-down releasing a slot; the preflight's `reserved`/`deployment_counts` inputs always empty in tests; revoked node excluded from the preflight's node list |
-| lifecycle | uninstall has **no** Kernel-level test at all; `REPLICAS_NOT_READY` on activation; rollback to a staged-but-never-deployed version; redeploy while the old version is DRAINING; enable/disable repeated cycles |
+| node boundary | `pull` interaction with quarantine (the pull now has a failure test; the interaction does not); the `supervise()` LOOP itself (all three decisions it makes are now unit-tested; the loop that calls them is not driven end to end); node heartbeating with an old generation at the API (409 path); observation for an unknown instance |
+| capacity | the preflight's `reserved`/`deployment_counts` inputs always empty in tests; revoked node excluded from the preflight's node list |
+| lifecycle | `REPLICAS_NOT_READY` on activation; rollback to a staged-but-never-deployed version; redeploy while the old version is DRAINING; enable/disable repeated cycles |
 | diagnosis | `diagnose_placement` is untested AND unscoped — see the section above; the query has no selector, so it can blame a node the deployment was never eligible for |
 
 **This is not "add a few tests".** Three of the four release paths Phase 9C fixed
 have a test; the fault conditions that *cause* them mostly do not.
+
+## An external dependency that costs a rerun, measured four times in one day
+
+`full TypeScript lifecycle` and `conformance` both build the Java plugin, which
+resolves `org.springframework.boot:spring-boot-starter-parent:3.3.5` from Maven
+Central. On 2026-11-26 that artifact failed with **HTTP 429** four times:
+
+| time | job | outcome |
+|---|---|---|
+| 16:23 | `conformance` (#240) | failed |
+| 20:39 | `full TypeScript lifecycle` (#242) | failed, rerun passed |
+| 21:04 | `full TypeScript lifecycle` (#242) | passed |
+| 21:45 | `full TypeScript lifecycle` (#244) | failed |
+
+Every failure is identical and names the same artifact:
+
+```
+[FATAL] Non-resolvable parent POM for dev.opsweave:hello-java:0.0.1:
+Could not transfer artifact org.springframework.boot:spring-boot-starter-parent:pom:3.3.5
+... status: 429
+```
+
+**None of these was caused by the change under test.** The signal that settles it:
+the same check passed at 19:41 on a commit from the same branch.
+
+Reruns clear it, so the failure is transient rate limiting rather than an outage —
+but it means every Java-touching check has roughly a one-in-three chance of needing
+a rerun, and a rerun costs 40–60 minutes.
+
+**Not fixed here, and deliberately not worked around.** The fixes are
+infrastructure (mirror the artifact, or bake it into the runner image), and a
+retry loop added to the CI step would hide the rate limit rather than solve it.
+Recorded so the next person does not spend an afternoon proving it is not their
+commit.
 
 ## Method note
 
