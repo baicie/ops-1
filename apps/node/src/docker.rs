@@ -1563,4 +1563,134 @@ esac
             "the refusal must say the reference is not pinned: {error}"
         );
     }
+
+    // ---- pull failures -------------------------------------------------------
+    //
+    // `pull` had no test. It is the step that decides whether a plugin ever starts,
+    // and its failure is what leaves an instance UNHEALTHY with no container - the
+    // shape `is_ghost_instance` had to be taught to exclude, the shape
+    // `RUNTIME_MAY_BE_RUNNING` was written for, and the shape the staging capacity
+    // leak was made of. Every one of those was tested with a HAND-SEEDED row that
+    // looked like a failed pull. None of them produced the failure through the code
+    // that actually pulls.
+
+    /// A `docker` stand-in that fails `pull` with a chosen stderr and exit code.
+    fn fake_docker_failing_pull(dir: &std::path::Path, stderr: &str, code: i32) -> String {
+        let script = dir.join("docker");
+        std::fs::write(
+            &script,
+            format!(
+                r#"#!/bin/sh
+case "$1" in
+  pull) echo '{stderr}' >&2 ; exit {code} ;;
+  *)    echo "unexpected: $*" >&2 ; exit 9 ;;
+esac
+"#
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        script.to_string_lossy().into_owned()
+    }
+
+    /// A FAILED PULL IS AN ERROR, AND THE ERROR NAMES THE IMAGE AND THE REASON.
+    ///
+    /// The Kernel needs that reason: it becomes `last_error` on the instance, and
+    /// `is_ghost_instance` uses the absence of a container to know the row is not
+    /// using the node. A pull that returned Ok on failure would place a phantom
+    /// instance that holds a slot forever.
+    #[tokio::test]
+    async fn a_failed_pull_is_an_error_that_names_the_image_and_the_reason() {
+        let _lock = serial_docker_test();
+        let dir = tempfile::tempdir().unwrap();
+        let binary = fake_docker_failing_pull(
+            dir.path(),
+            "manifest unknown: manifest tagged by sha256 is not found",
+            1,
+        );
+        let adapter = DockerAdapter::new(binary, "unix://unused".into());
+        let image = "registry.local/app@sha256:5555555555555555555555555555555555555555555555555555555555555555";
+        let error = adapter
+            .pull(image)
+            .await
+            .expect_err("a failed pull must not report success");
+        let message = error.to_string();
+        assert!(
+            message.contains("docker pull failed"),
+            "the error must say the PULL failed, not something vaguer: {message}"
+        );
+        assert!(
+            message.contains("manifest unknown"),
+            "and it must carry docker's own reason - the Kernel writes this into \
+             last_error and an operator reads it: {message}"
+        );
+    }
+
+    /// THE CONTROL: a pull that succeeds is not an error.
+    ///
+    /// Without this the test above passes against a function that fails every pull.
+    #[tokio::test]
+    async fn a_successful_pull_is_not_an_error() {
+        let _lock = serial_docker_test();
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("docker");
+        std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let adapter = DockerAdapter::new(
+            script.to_string_lossy().into_owned(),
+            "unix://unused".into(),
+        );
+        adapter
+            .pull("registry.local/app@sha256:6666")
+            .await
+            .expect("a pull that exits 0 must succeed");
+    }
+
+    /// A PULL THAT HANGS MUST BE ABANDONED, NOT WAITED ON FOREVER.
+    ///
+    /// `pull` carries a 300-second bound (`run_with_timeout`). The test cannot wait
+    /// five minutes, so it exercises the MECHANISM at `run_with_timeout`'s own
+    /// granularity: a short bound against a command that sleeps past it. What it
+    /// pins is that the timeout is enforced and NAMED, which is the part that would
+    /// break if someone replaced `timeout` with a bare `await`.
+    #[tokio::test]
+    async fn a_command_that_outlives_its_bound_is_abandoned_with_a_named_error() {
+        let _lock = serial_docker_test();
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("docker");
+        std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let adapter = DockerAdapter::new(
+            script.to_string_lossy().into_owned(),
+            "unix://unused".into(),
+        );
+        let started = std::time::Instant::now();
+        let error = adapter
+            .run_with_timeout(&["pull", "registry.local/slow@sha256:7777"], 1)
+            .await
+            .expect_err("a command past its bound must not return Ok");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "the bound was 1s and the command sleeps 30s; returning after {:?} means \
+             the timeout did not apply",
+            started.elapsed()
+        );
+        assert!(
+            error.to_string().contains("timed out"),
+            "and the error must say it timed out, so an operator can tell a slow \
+             registry from a bad manifest: {error}"
+        );
+    }
 }
