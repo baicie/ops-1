@@ -1566,6 +1566,24 @@ pub async fn reconcile(shared: Arc<Shared>) {
     }
 }
 
+/// HOW MANY CONSECUTIVE FAILURES BEFORE THE INSTANCE IS DECLARED FAILED.
+///
+/// Exceeding this is what tells the Kernel to stop retrying and mark the instance
+/// unhealthy for good, so the number is part of the failure contract - not a local
+/// tuning knob. It was a literal `> 3` written twice in `supervise`, once per
+/// error branch, and nothing held the two together.
+const MAX_RESTART_ATTEMPTS: i32 = 3;
+
+/// Whether the supervisor has given up.
+///
+/// The SAME call from both error branches - the container exiting and the runtime
+/// call failing. Two inline comparisons of a literal drift apart the moment one is
+/// edited, and each reads as correct on its own, which is why this is a function
+/// rather than a comment telling the next person to change both.
+fn exhausted_restart_budget(attempts: i32) -> bool {
+    attempts > MAX_RESTART_ATTEMPTS
+}
+
 async fn supervise(
     shared: Arc<Shared>,
     runtime: InstanceRuntime,
@@ -1593,7 +1611,7 @@ async fn supervise(
                 }
                 runtime.set_state(RuntimeState::Unhealthy, Some(error.clone()));
                 cleanup(&shared, &workload).await;
-                if restart_attempts > 3 {
+                if exhausted_restart_budget(restart_attempts) {
                     runtime.set_state(RuntimeState::Failed, Some(error));
                     return;
                 }
@@ -1611,7 +1629,7 @@ async fn supervise(
                 restart_attempts += 1;
                 runtime.set_state(RuntimeState::Unhealthy, Some(error.to_string()));
                 cleanup(&shared, &workload).await;
-                if restart_attempts > 3 {
+                if exhausted_restart_budget(restart_attempts) {
                     runtime.set_state(RuntimeState::Failed, Some(error.to_string()));
                     return;
                 }
@@ -3130,6 +3148,50 @@ mod tests {
             Some("ctr-1"),
             "an unhealthy instance still HAS a container - that is what makes it \
              different from a stopped one"
+        );
+    }
+
+    /// THE RESTART BUDGET, AND THE FACT THAT BOTH FAILURE PATHS SHARE IT.
+    ///
+    /// `supervise` has two error branches - the container exited, and the runtime
+    /// call itself failed - and each used to compare its own `restart_attempts`
+    /// against the literal `3`. Two copies of a threshold drift apart the moment
+    /// one is edited, and each reads as correct on its own.
+    ///
+    /// The decision is now one function called from both. These assertions pin the
+    /// BOUNDARY, not the shape: a change from `>` to `>=` gives the container one
+    /// fewer attempt than the contract says, and a change to the constant changes
+    /// how long a crashlooping plugin runs before the Kernel is told it failed.
+    #[test]
+    fn the_restart_budget_is_exceeded_on_the_fourth_failure() {
+        // Three is the budget, so three consecutive failures are still retried.
+        for attempts in 0..=super::MAX_RESTART_ATTEMPTS {
+            assert!(
+                !super::exhausted_restart_budget(attempts),
+                "attempt {attempts} must still be retried: the budget is \
+                 {} failures, and giving up ON the last one contradicts 'exceeds'",
+                super::MAX_RESTART_ATTEMPTS
+            );
+        }
+        // The next one is where it stops.
+        assert!(
+            super::exhausted_restart_budget(super::MAX_RESTART_ATTEMPTS + 1),
+            "the attempt after the budget must give up, or the instance retries forever"
+        );
+    }
+
+    /// The value itself is part of the failure contract.
+    ///
+    /// The Kernel declares an instance FAILED after this many consecutive failures.
+    /// A silent change to 10 would turn a crashloop into ten container starts
+    /// before any operator is told, and nothing else in the tree would notice.
+    #[test]
+    fn the_restart_budget_value_is_pinned() {
+        assert_eq!(
+            super::MAX_RESTART_ATTEMPTS,
+            3,
+            "if this number is meant to change, change this assertion in the same \
+             commit - an edited constant should not be able to pass unnoticed"
         );
     }
 }

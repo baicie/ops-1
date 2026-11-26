@@ -51,6 +51,25 @@ is the point.
 Every existing revocation test revokes a node whose deployment is already READY.
 None revokes the **only candidate** for a deployment still in flight.
 
+### 4. A node filled to its CPU budget, not its slot limit
+
+The instance-count budget had many tests. The CPU/memory side had only a pure
+function test and a whole-node one that asks for more than the host has. Neither
+covered the shape staging had: **one plugin's instance already holding the
+reservation, and a SECOND plugin refused because of what the first one reserved**,
+on a node with free instance slots.
+
+The node reports 2 cores (budget 1800m). The incumbent reserves 1000m; the
+candidate asks 1000m. Two assertions, and the second is what makes it about
+resources rather than occupancy:
+
+- the candidate does not become READY;
+- the reason does **not** say `INSTANCE_CAPACITY_EXCEEDED` — only one instance
+  exists on a node whose limit is 4.
+
+The control runs the identical request beside a 100m incumbent and requires it to
+be **placed**. Counterfactual: `NodeUsage::of` reporting zero reserved fails it.
+
 ## The part that matters: three attempts to make one counterfactual bite
 
 This is the most useful result in the document. Each attempt passed, and each
@@ -83,6 +102,26 @@ The test now restores `status='READY'` after the revocation while leaving
 is the only shape that answers the question. Removing `revoked_at IS NULL` fails
 the test.
 
+### 5. The restart budget was a literal written twice
+
+`supervise` has two error branches - the container exited, and the runtime call
+itself failed - and each compared its own counter against the literal `3`. Two
+copies of a threshold drift apart the moment one is edited, and **each reads as
+correct on its own**: a container that cannot start and one that crashes on exit
+would simply have different budgets, with nothing to notice.
+
+The decision is now `exhausted_restart_budget()` called from both, over one
+`MAX_RESTART_ATTEMPTS`. The tests pin the **boundary** (three failures still
+retry; the fourth gives up) and the **value** (it is part of the failure contract:
+the Kernel is told `FAILED` after this many).
+
+Counterfactual: changing `>` to `>=` fails the boundary test — the container would
+get one fewer attempt than the contract says.
+
+**A first version of this test asserted only that the constant equalled 3.** That
+test cannot fail for the reason it exists — it does not know there are two call
+sites. It was deleted rather than shipped.
+
 ## Measured, and recorded rather than assumed
 
 A revoked node's instance that **holds a container** does not count as a ghost
@@ -100,8 +139,8 @@ records the current behaviour and says so, rather than asserting it is correct.
 
 | area | most significant gaps |
 |---|---|
-| node boundary | `docker pull` failure and its 300 s timeout; `pull` interaction with quarantine; container `supervise()` restart loop never driven; node heartbeating with an old generation at the API (409 path); observation for an unknown instance |
-| capacity | resource-budget exhaustion by an incumbent (the exact staging shape, tested only as a pure function); scale-down releasing a slot; the preflight's `reserved`/`deployment_counts` inputs always empty in tests; revoked node excluded from the preflight's node list |
+| node boundary | `docker pull` failure and its 300 s timeout; `pull` interaction with quarantine; the `supervise()` LOOP itself (all three decisions it makes are now unit-tested; the loop that calls them is not driven end to end); node heartbeating with an old generation at the API (409 path); observation for an unknown instance |
+| capacity | scale-down releasing a slot; the preflight's `reserved`/`deployment_counts` inputs always empty in tests; revoked node excluded from the preflight's node list |
 | lifecycle | uninstall has **no** Kernel-level test at all; `REPLICAS_NOT_READY` on activation; rollback to a staged-but-never-deployed version; redeploy while the old version is DRAINING; `diagnose_placement`'s second pass; enable/disable repeated cycles |
 
 **This is not "add a few tests".** Three of the four release paths Phase 9C fixed
