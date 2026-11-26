@@ -19,9 +19,9 @@ write `COMPLETE`.
 
 Two of those defects were found **by the instruments this phase built**, against
 the claims this phase had written: the `READY` premise that gave #222 its shape was
-false, and `opsctl capacity`'s own verdict is wrong on a full node. Both are in §6.
-That is the phase working as intended, and it is also why its conclusion cannot be
-`COMPLETE`.
+false, and `opsctl capacity`'s own verdict was wrong on a full node. Both are in
+§6; the second was fixed in #229. That is the phase working as intended, and it is
+also why its conclusion cannot be `COMPLETE`.
 
 ---
 
@@ -295,8 +295,25 @@ against the requested replica count, which is not the capacity question.
 
 **This is a wrong answer from the instrument this phase built**, found by putting
 its first real output next to the publish log from the same run — not by reading
-its code. It is not fixed here: the fix needs the per-node limit, which the node
-view does not carry (its own comment says so). Recorded as the next change.
+its code.
+
+**Fixed in #229.** The command no longer computes a verdict at all: it reports
+`/api/v1/capacity/preflight`'s `verdict`, per-node verdicts and rejection code,
+which come from the same `evaluate_node` the planner runs. `decidedBy` names the
+source in the JSON. It keeps what the preflight does not carry — who occupies the
+slots, and since when.
+
+Verified end to end against a real kernel with a node at its per-node limit:
+the command reported the preflight's `CAPACITY_BLOCKED` / `NODE_NOT_READY` /
+`replicasPlaceable: 0` verbatim, and earlier in the same session — while that
+fixture node's heartbeat was still fresh — both reported `FITS`. The answer tracks
+the host at the moment it is asked, which is what an estimate is for.
+
+The two structural tests exist because the first version of the fix's own test was
+wrong twice: searching the file matched the comment that quotes the old
+arithmetic, and `include_str!("main.rs")` contains the test itself. The property it
+now asserts — no verdict literal is invented in that arm — was tightened by a
+counterfactual that reintroduced the defect with a different phrasing and passed.
 
 ### 6.3 What is now unknown versus known
 
@@ -425,7 +442,7 @@ identity problem ADR-025 describes remains `NEEDS_DECISION`.
 | Real staging acceptance (TASK-39) | **attempted, negative** — the deploy succeeded and the plugin path still fails |
 | The real capacity defect | **nine `PENDING` deployments** that never place and are never removed (§6.1) — **fixed in #227 and observed on staging**: all nine became `FAILED` with a named reason on the first deploy running it, and the three `ACTIVE` rows kept their `activatedAt` (§6.1a) |
 | Making room on staging | **still open** — `freeSlotsTotal` is 1 while the publish needs a slot the scheduler counts as taken; #227 stops futile re-planning, it does not free capacity |
-| `opsctl capacity`'s own verdict | **wrong on a full node** — reports `CAPACITY_AVAILABLE` at 4/4 because it compares READY replicas, not the per-node limit (§6.2) |
+| `opsctl capacity`'s own verdict | **fixed in #229** — it no longer computes one; it reports the kernel preflight's verdict, which is the same `evaluate_node` the planner runs (§6.2) |
 | Deployment state in an artifact | **built and exercised** — `capacity.json` appeared in `staging-deploy` on the first run after the change, and it reversed the diagnosis (§6.1) |
 | `RECLAIM_REQUIRED` reaching a caller | kernel returns it; `opsctl` still times out unchanged |
 | TASK-33/34 release identity | not started |
