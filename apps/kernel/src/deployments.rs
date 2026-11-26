@@ -1053,20 +1053,35 @@ pub async fn uninstall(
     Path(plugin_id): Path<String>,
 ) -> AppResult<Json<serde_json::Value>> {
     auth.require_admin()?;
+    uninstall_inner(&state, &auth, &plugin_id).await
+}
+
+/// The four writes an uninstall performs, separated from the HTTP handler so the
+/// tests run THIS function rather than a copy of its statements.
+///
+/// Its first tests did copy them, and a counterfactual that removed the
+/// ACTIVE-revision write changed nothing - the tests were asserting that a function
+/// written to disable the revision disables the revision. `INSTANCE_OBSERVATION_SQL`
+/// and `STATUS_WRITE_BACK_SQL` exist for the same reason.
+pub(crate) async fn uninstall_inner(
+    state: &AppState,
+    auth: &AuthUser,
+    plugin_id: &str,
+) -> AppResult<Json<serde_json::Value>> {
     sqlx::query("UPDATE kernel.activation_revisions SET status='DISABLED' WHERE plugin_id=$1 AND status='ACTIVE'")
-        .bind(&plugin_id)
+        .bind(plugin_id)
         .execute(&state.db)
         .await?;
     sqlx::query("UPDATE kernel.plugin_installations SET state='UNINSTALLED', active_revision_id=NULL, updated_at=now() WHERE plugin_id=$1")
-        .bind(&plugin_id)
+        .bind(plugin_id)
         .execute(&state.db)
         .await?;
     sqlx::query("UPDATE kernel.plugin_deployments SET status='DISABLED', status_reason='Plugin uninstalled; data retained', updated_at=now() WHERE plugin_id=$1")
-        .bind(&plugin_id)
+        .bind(plugin_id)
         .execute(&state.db)
         .await?;
     sqlx::query("UPDATE kernel.plugin_instances i SET desired_action='STOP', updated_at=now() FROM kernel.plugin_deployments d WHERE i.deployment_id=d.id AND d.plugin_id=$1")
-        .bind(&plugin_id)
+        .bind(plugin_id)
         .execute(&state.db)
         .await?;
     audit::record(
@@ -1075,7 +1090,7 @@ pub async fn uninstall(
         "USER",
         &auth.user_id.to_string(),
         "plugin",
-        &plugin_id,
+        plugin_id,
         "plugin.uninstall",
         "CONFIRMED",
         serde_json::json!({"dataRetained": true}),
@@ -10385,6 +10400,324 @@ mod tests {
             assert_eq!(
                 dropped, 0,
                 "slot 1 is past the new count and must be stopped"
+            );
+        }
+    }
+
+    /// TASK-22 GAP: UNINSTALL, AT THE KERNEL LEVEL.
+    ///
+    /// `uninstall` runs four UPDATEs and is the only path that takes a plugin out of
+    /// service on purpose. It had NO Rust test at all: the only coverage was live
+    /// acceptance (`e2e_platform.sh`, `p001c_multilang_lifecycle.sh`), and the
+    /// workflow that runs the multilang driver is not a required check.
+    ///
+    /// The three things an uninstall must do:
+    ///
+    /// 1. the route goes away - no ACTIVE `activation_revisions` row remains, which
+    ///    is what `route_candidates` joins on
+    /// 2. the instances stop - every instance is `desired_action='STOP'`
+    /// 3. the data is kept - the deployment row still exists, DISABLED, with a
+    ///    reason that says so
+    ///
+    /// And one it must NOT do: delete containers. The Node stops them through the
+    /// lifecycle; a Kernel that deleted rows would lose the audit trail and disagree
+    /// with the host.
+    mod uninstall_kernel_level {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        /// A plugin that is ACTIVE and serving: an ACTIVE revision, an ACTIVE
+        /// deployment, and a READY instance with a container - the shape an
+        /// uninstall is actually asked to take down.
+        struct Live {
+            plugin: String,
+            deployment: Uuid,
+            revision: Uuid,
+        }
+
+        async fn live_plugin(pool: &PgPool) -> Live {
+            let tag = Uuid::new_v4().simple().to_string();
+            let plugin = format!("test.uninstall.{tag}");
+            let publisher = format!("pub-{tag}");
+            let package = Uuid::new_v4();
+            let deployment = Uuid::new_v4();
+            let revision = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+            )
+            .bind(package)
+            .bind(&plugin)
+            .bind(&publisher)
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+            .execute(pool)
+            .await
+            .expect("package");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, activated_at, created_at, updated_at)
+                 VALUES ($1,$2,$3,'1.0.0',1,1,'{\"nodeSelector\":{}}'::jsonb,
+                         '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'ACTIVE',now(),now(),now())",
+            )
+            .bind(deployment)
+            .bind(&plugin)
+            .bind(package)
+            .execute(pool)
+            .await
+            .expect("deployment");
+            // A node is required: `plugin_instances.node_id` is NOT NULL, and a
+            // serving instance is on one by definition.
+            let node = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64','{}'::jsonb,'[]'::jsonb,
+                         'READY',now(),now(),'http://uninstall:7000')",
+            )
+            .bind(node)
+            .bind(format!("uninstall-{tag}"))
+            .bind(format!("tok-{}", Uuid::new_v4().simple()))
+            .execute(pool)
+            .await
+            .expect("node");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_instances
+                   (id, deployment_id, node_id, slot, deployment_generation,
+                    desired_action, state, container_id)
+                 VALUES ($1,$2,$3,0,1,'START','READY',$4)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(deployment)
+            .bind(node)
+            .bind(format!("ctr-{tag}"))
+            .execute(pool)
+            .await
+            .expect("instance");
+            sqlx::query(
+                "INSERT INTO kernel.activation_revisions
+                   (id, plugin_id, package_id, version, deployment_id, generation,
+                    status, policy_digest, activated_at)
+                 VALUES ($1,$2,$3,'1.0.0',$4,1,'ACTIVE','d',now())",
+            )
+            .bind(revision)
+            .bind(&plugin)
+            .bind(package)
+            .bind(deployment)
+            .execute(pool)
+            .await
+            .expect("revision");
+            // `plugin_installations` is keyed on plugin_id itself; there is no `id`.
+            sqlx::query(
+                "INSERT INTO kernel.plugin_installations
+                   (plugin_id, state, active_revision_id, updated_at)
+                 VALUES ($1,'INSTALLED',$2,now())",
+            )
+            .bind(&plugin)
+            .bind(revision)
+            .execute(pool)
+            .await
+            .expect("installation");
+            Live {
+                plugin,
+                deployment,
+                revision,
+            }
+        }
+
+        /// THE PRODUCTION FUNCTION, not a copy of its statements.
+        ///
+        /// The first version of this module repeated the four UPDATEs, and a
+        /// counterfactual that removed the ACTIVE-revision write changed nothing.
+        async fn uninstall(state: &crate::state::AppState, plugin: &str) {
+            let auth = crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "uninstall@example.invalid".to_string(),
+                display_name: "Uninstall Operator".to_string(),
+                role: opsweave_contracts::Role::Admin,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            };
+            let _ = super::super::uninstall_inner(state, &auth, plugin)
+                .await
+                .expect("uninstall");
+        }
+
+        /// THE ROUTE GOES AWAY. This is the assertion that matters most: the Gateway
+        /// joins on `activation_revisions.status='ACTIVE'` and reads nothing about
+        /// the deployment's own status, so an uninstall that only disabled the
+        /// deployment would leave the plugin SERVING.
+        #[tokio::test]
+        async fn uninstall_removes_the_active_revision_so_the_route_disappears() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let live = live_plugin(&pool).await;
+
+            let routed_before: i64 = sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.activation_revisions
+                  WHERE plugin_id=$1 AND status='ACTIVE'",
+            )
+            .bind(&live.plugin)
+            .fetch_one(&pool)
+            .await
+            .expect("routed");
+            assert_eq!(
+                routed_before, 1,
+                "the plugin is serving before the uninstall"
+            );
+
+            uninstall(&state, &live.plugin).await;
+
+            let routed_after: i64 = sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.activation_revisions
+                  WHERE plugin_id=$1 AND status='ACTIVE'",
+            )
+            .bind(&live.plugin)
+            .fetch_one(&pool)
+            .await
+            .expect("routed");
+            assert_eq!(
+                routed_after, 0,
+                "no ACTIVE revision may survive an uninstall - `route_candidates` \
+                 joins on exactly this row, so leaving it is leaving the plugin serving"
+            );
+        }
+
+        /// THE INSTANCES STOP AND THE DATA IS KEPT.
+        ///
+        /// Two halves that a single SQL statement cannot get wrong separately, and
+        /// both matter: a stopped instance that keeps `desired_action='START'` holds
+        /// its slot forever, and a deleted deployment loses the audit trail the
+        /// platform is required to keep.
+        #[tokio::test]
+        async fn uninstall_stops_every_instance_and_keeps_the_deployment_row() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let live = live_plugin(&pool).await;
+
+            uninstall(&state, &live.plugin).await;
+
+            let starting: i64 = sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.plugin_instances i
+                   JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+                  WHERE d.plugin_id=$1 AND i.desired_action='START'",
+            )
+            .bind(&live.plugin)
+            .fetch_one(&pool)
+            .await
+            .expect("starting");
+            assert_eq!(
+                starting, 0,
+                "every instance must be STOP after an uninstall; one left at START holds \
+                 a scheduling slot for a plugin that is no longer installed"
+            );
+
+            let (status, reason): (String, Option<String>) = sqlx::query_as(
+                "SELECT status, status_reason FROM kernel.plugin_deployments WHERE id=$1",
+            )
+            .bind(live.deployment)
+            .fetch_one(&pool)
+            .await
+            .expect("the deployment row must still exist - an uninstall retains data");
+            assert_eq!(status, "DISABLED");
+            assert!(
+                reason.unwrap_or_default().contains("data retained"),
+                "and the reason must say the data was kept, so an operator reading the \
+                 row is not left wondering whether it was deleted"
+            );
+
+            // THE INSTALLATION RECORD TOO, with no active revision pointing anywhere.
+            let (state, active): (String, Option<Uuid>) = sqlx::query_as(
+                "SELECT state, active_revision_id FROM kernel.plugin_installations WHERE plugin_id=$1",
+            )
+            .bind(&live.plugin)
+            .fetch_one(&pool)
+            .await
+            .expect("installation row");
+            assert_eq!(state, "UNINSTALLED");
+            assert_eq!(
+                active, None,
+                "an uninstalled installation must not still name an active revision"
+            );
+        }
+
+        /// THE REVISION ROW IS DISABLED, NOT DELETED.
+        ///
+        /// `uninstall` sets the revision's status; it does not remove it. The
+        /// distinction is the same one ADR-030 makes for deployments: the platform
+        /// keeps the record, and a status change is what takes it out of service.
+        #[tokio::test]
+        async fn the_revision_survives_as_disabled_rather_than_being_deleted() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let live = live_plugin(&pool).await;
+
+            uninstall(&state, &live.plugin).await;
+
+            let (status, still_there): (String, bool) =
+                sqlx::query_as("SELECT status, true FROM kernel.activation_revisions WHERE id=$1")
+                    .bind(live.revision)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("the revision row must still exist");
+            assert!(still_there);
+            assert_eq!(
+                status, "DISABLED",
+                "the revision is disabled, not deleted - the history of what served is \
+                 part of the record"
             );
         }
     }
