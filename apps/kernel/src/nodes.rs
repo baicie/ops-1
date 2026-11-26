@@ -882,6 +882,25 @@ mod observation_order {
     /// that a query written to reject stale writes rejects stale writes.
     /// `INSTANCE_OBSERVATION_SQL` is the constant `heartbeat` itself uses.
     async fn observe(pool: &PgPool, instance: Uuid, node: Uuid, state: &str, at: &str) -> u64 {
+        observe_at_generation(pool, instance, node, state, at, 1).await
+    }
+
+    /// The same production statement, with the GENERATION the node claims.
+    ///
+    /// `observe` hard-codes generation 1, and every fixture instance is also
+    /// generation 1 - so the `deployment_generation = $11` predicate was never
+    /// exercised by anything. A counterfactual that removed it left the whole
+    /// module green. That predicate is the one that stops a node reporting about
+    /// the PREVIOUS attempt of an instance after a redeploy has bumped it, which
+    /// is one of the five interleavings TASK-13 lists.
+    async fn observe_at_generation(
+        pool: &PgPool,
+        instance: Uuid,
+        node: Uuid,
+        state: &str,
+        at: &str,
+        generation: i64,
+    ) -> u64 {
         let result = sqlx::query(crate::nodes::INSTANCE_OBSERVATION_SQL)
             .bind(instance)
             .bind(node)
@@ -893,7 +912,7 @@ mod observation_order {
             .bind(0_i32)
             .bind(Option::<String>::None)
             .bind(Option::<String>::None)
-            .bind(1_i64)
+            .bind(generation)
             .execute(pool)
             .await
             .expect("observe");
@@ -1078,6 +1097,148 @@ mod observation_order {
         assert_eq!(
             applied, 1,
             "a row with no observed_at must accept its first report"
+        );
+
+        sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+            .bind(deployment)
+            .execute(&pool)
+            .await
+            .ok();
+    }
+
+    /// AN OBSERVATION FROM THE PREVIOUS ATTEMPT MUST NOT LAND ON THE CURRENT ONE.
+    ///
+    /// TASK-13 lists five interleavings. Four of them are covered by the tests above
+    /// or by `generation_fencing`. This is the fifth, and until now it was covered by
+    /// NOTHING:
+    ///
+    ///   `INSTANCE_OBSERVATION_SQL` ends with `AND deployment_generation = $11`, and
+    ///   the helper every test in this module calls bound `$11` to a constant 1,
+    ///   against instances that were also generation 1. So the predicate was true in
+    ///   every test by construction, and a counterfactual that deleted it left the
+    ///   whole module GREEN.
+    ///
+    /// Measured, by deleting the line: all three tests in this module still passed.
+    ///
+    /// What the predicate is for: a redeploy bumps `deployment_generation` on the
+    /// instance (TASK-12) and starts a new container. The node's report about the
+    /// OLD container - "READY, container abc" - is still in flight. Without the
+    /// generation fence it lands on the new attempt, which now names a container
+    /// that belongs to the attempt before it. `container_id` is load-bearing for
+    /// reclamation (ADR-030 D4), so the wrong id is not cosmetic.
+    #[tokio::test]
+    async fn an_observation_from_a_superseded_generation_does_not_land() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let tag = Uuid::new_v4().simple().to_string();
+        let node = Uuid::new_v4();
+        let package = Uuid::new_v4();
+        let deployment = Uuid::new_v4();
+        let instance = Uuid::new_v4();
+        let plugin = format!("test.gen.{tag}");
+        let publisher = format!("pub-{tag}");
+
+        sqlx::query(
+            "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+        )
+        .bind(&publisher)
+        .execute(&pool)
+        .await
+        .expect("publisher");
+        sqlx::query(
+            "INSERT INTO kernel.nodes
+               (id, name, control_token_hash, data_token, generation, os, arch,
+                labels, capabilities, status, enrolled_at, last_seen_at)
+             VALUES ($1,$2,'x','tok',1,'linux','amd64','{}'::jsonb,'[]'::jsonb,'READY',now(),now())",
+        )
+        .bind(node)
+        .bind(format!("gen-{tag}"))
+        .execute(&pool)
+        .await
+        .expect("node");
+        sqlx::query(
+            "INSERT INTO kernel.plugin_packages
+               (package_id, plugin_id, version, schema_version, publisher, manifest,
+                artifact_digest, bundle_digest, payload_digest, status, signature_state)
+             VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+        )
+        .bind(package)
+        .bind(&plugin)
+        .bind(&publisher)
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .execute(&pool)
+        .await
+        .expect("package");
+        sqlx::query(
+            "INSERT INTO kernel.plugin_deployments
+               (id, plugin_id, package_id, version, desired_replicas, generation,
+                placement, resources, status, created_at, updated_at)
+             VALUES ($1,$2,$3,'1.0.0',1,2,'{}'::jsonb,
+                     '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'PENDING',now(),now())",
+        )
+        .bind(deployment)
+        .bind(&plugin)
+        .bind(package)
+        .execute(&pool)
+        .await
+        .expect("deployment");
+
+        // THE SHAPE A REDEPLOY LEAVES (TASK-12): the instance is on generation 2,
+        // waiting for its new container, and no observation has been applied since.
+        sqlx::query(
+            "INSERT INTO kernel.plugin_instances
+               (id, deployment_id, node_id, slot, deployment_generation,
+                desired_action, state, container_id, observed_at)
+             VALUES ($1,$2,$3,0,2,'START','STARTING',NULL,NULL)",
+        )
+        .bind(instance)
+        .bind(deployment)
+        .bind(node)
+        .execute(&pool)
+        .await
+        .expect("instance");
+
+        // The node is still running the PREVIOUS attempt's container and reports it
+        // READY. It has not yet seen the new generation, so it claims generation 1.
+        let applied =
+            observe_at_generation(&pool, instance, node, "READY", "2026-11-20T10:00:00Z", 1).await;
+        assert_eq!(
+            applied, 0,
+            "an observation for generation 1 must not land on an instance that is now \
+             at generation 2. Without `deployment_generation = $11` the node's report \
+             about the PREVIOUS container is written onto the new attempt, and the \
+             row starts naming a container it does not own"
+        );
+
+        let (state, container): (String, Option<String>) =
+            sqlx::query_as("SELECT state, container_id FROM kernel.plugin_instances WHERE id=$1")
+                .bind(instance)
+                .fetch_one(&pool)
+                .await
+                .expect("state");
+        assert_eq!(
+            state, "STARTING",
+            "the new attempt is still waiting for its own container"
+        );
+        assert_eq!(
+            container, None,
+            "and it must not have acquired the previous attempt's container id"
+        );
+
+        // The control, and without it the assertion above would pass against a
+        // predicate that rejected everything: the SAME observation at the CURRENT
+        // generation does land.
+        let applied =
+            observe_at_generation(&pool, instance, node, "READY", "2026-11-20T10:00:01Z", 2).await;
+        assert_eq!(
+            applied, 1,
+            "a report for the current generation must land - otherwise the fence is \
+             not a fence, it is a wall"
         );
 
         sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
