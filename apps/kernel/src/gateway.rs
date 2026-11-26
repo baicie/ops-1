@@ -684,6 +684,52 @@ mod tests {
             assert_eq!(got[0].instance_id, f.instance);
         }
 
+        /// E3 IN ADR-030: A DEGRADED DEPLOYMENT THAT IS STILL READY STILL ROUTES.
+        ///
+        /// This is the assertion the reclamation ADR rests on, and it has to exist
+        /// before the rule does. `route_candidates` never reads
+        /// `plugin_deployments.status` - it reads the ACTIVE revision, the instance's
+        /// `state`, and `desired_action`. So a deployment the reconciler has labelled
+        /// `DEGRADED` can be answering traffic right now.
+        ///
+        /// That makes "not ACTIVE" a DIFFERENT protection from "not serving", and a
+        /// reclaim rule needs both. Measured: a rule that trusts the revision alone
+        /// releases a row that this test shows is reachable.
+        #[tokio::test]
+        async fn a_degraded_deployment_with_a_ready_instance_still_routes() {
+            let Some(pool) = pool().await else {
+                return;
+            };
+            let f = fixture(&pool).await;
+
+            // The reconciler writes DEGRADED for an effective deployment whose
+            // replicas are not all healthy (`deployments.rs`, the `is_effective`
+            // branch). Reproduce the label without touching the revision or the
+            // instance: that is exactly TASK-04 case A.
+            sqlx::query("UPDATE kernel.plugin_deployments SET status='DEGRADED' WHERE id=$1")
+                .bind(
+                    sqlx::query_scalar::<_, uuid::Uuid>(
+                        "SELECT deployment_id FROM kernel.activation_revisions WHERE id=$1",
+                    )
+                    .bind(f.revision)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("deployment id"),
+                )
+                .execute(&pool)
+                .await
+                .expect("label DEGRADED");
+
+            let got = routes(&pool, &f.plugin).await;
+            assert_eq!(
+                got.len(),
+                1,
+                "a DEGRADED deployment with an ACTIVE revision and a READY instance is \
+                 reachable; releasing it would empty a live route"
+            );
+            assert_eq!(got[0].instance_id, f.instance);
+        }
+
         /// The empty-route message names a cause an operator can act on.
         ///
         /// Before this, five different situations produced the identical sentence
