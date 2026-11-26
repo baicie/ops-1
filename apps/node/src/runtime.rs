@@ -93,6 +93,21 @@ impl InstanceRuntime {
 
     pub fn set_state(&self, state: RuntimeState, error: Option<String>) {
         if let Ok(mut status) = self.status.lock() {
+            // A STOPPED INSTANCE HAS NO CONTAINER, AND SAYING SO IS THE POINT.
+            //
+            // `container_id` is the Kernel's only evidence that a process may exist.
+            // ADR-030 D4 makes it load-bearing: a failed candidate whose instance
+            // still references a container is not auto-reclaimed. Leaving the id of a
+            // container that has gone would make that check permanently pessimistic -
+            // every stopped instance would look like it might still be running, and
+            // nothing would ever be reclaimable.
+            //
+            // Cleared here rather than at each of the six call sites, because a
+            // seventh caller would otherwise reintroduce the stale id silently.
+            if matches!(state, RuntimeState::Stopped) {
+                status.container_id = None;
+                status.host_port = None;
+            }
             status.state = state;
             status.error = error;
             status.observed_at = Utc::now();
@@ -3034,6 +3049,87 @@ mod tests {
         assert_eq!(
             steady_state_decision(inputs(false, false, true, 1)),
             SteadyStateDecision::MarkUnhealthy("liveness probe failed (1/3)".into())
+        );
+    }
+
+    /// A minimal workload - the runtime only stores it, so the fields that matter are
+    /// the ids.
+    fn test_workload() -> opsweave_contracts::DesiredWorkload {
+        opsweave_contracts::DesiredWorkload {
+            instance_id: uuid::Uuid::nil(),
+            deployment_id: uuid::Uuid::nil(),
+            plugin_id: "test.plugin".into(),
+            version: "0.0.1".into(),
+            generation: 1,
+            action: opsweave_contracts::DesiredAction::Start,
+            backend: opsweave_contracts::DesiredBackend {
+                image_ref: "registry.local/test:0.0.1".into(),
+                container_port: 7000,
+                capability_digest: "d".into(),
+                readiness_path: "/readyz".into(),
+                liveness_path: "/livez".into(),
+                startup_path: None,
+                api_prefix: "/api".into(),
+            },
+            resources: opsweave_contracts::ResourceRequirements {
+                cpu_millis: 100,
+                memory_mib: 128,
+            },
+            labels: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// TASK-15: A STOPPED INSTANCE REPORTS NO CONTAINER.
+    ///
+    /// The Kernel treats `container_id` as its only evidence that a process may exist,
+    /// and ADR-030 D4 refuses to reclaim a failed candidate that still names one. If a
+    /// stopped instance kept the id of a container that has gone, every stopped
+    /// instance would look like it might still be running and nothing would ever be
+    /// reclaimable.
+    ///
+    /// The field is cleared in `set_state` rather than at each `Stopped` call site so a
+    /// future seventh caller cannot reintroduce the stale id silently.
+    #[test]
+    fn stopping_clears_the_container_identity() {
+        let runtime = super::InstanceRuntime::new(test_workload());
+        // The instance was running a container.
+        if let Ok(mut status) = runtime.status.lock() {
+            status.state = super::RuntimeState::Ready;
+            status.container_id = Some("ctr-1".into());
+            status.host_port = Some(7000);
+        }
+
+        runtime.set_state(super::RuntimeState::Stopped, None);
+
+        let status = runtime.status_copy();
+        assert_eq!(status.state, super::RuntimeState::Stopped);
+        assert_eq!(
+            status.container_id, None,
+            "a stopped instance must not name a container: the Kernel reads this field to \
+             decide whether a process may still be running"
+        );
+        assert_eq!(
+            status.host_port, None,
+            "and the port it published is no longer its own"
+        );
+    }
+
+    /// The clearing must not leak into other transitions: a restart sets the id again,
+    /// and an unrelated state change keeps it.
+    #[test]
+    fn only_stopping_clears_the_container_identity() {
+        let runtime = super::InstanceRuntime::new(test_workload());
+        if let Ok(mut status) = runtime.status.lock() {
+            status.state = super::RuntimeState::Ready;
+            status.container_id = Some("ctr-1".into());
+        }
+
+        runtime.set_state(super::RuntimeState::Unhealthy, Some("probe failed".into()));
+        assert_eq!(
+            runtime.status_copy().container_id.as_deref(),
+            Some("ctr-1"),
+            "an unhealthy instance still HAS a container - that is what makes it \
+             different from a stopped one"
         );
     }
 }
