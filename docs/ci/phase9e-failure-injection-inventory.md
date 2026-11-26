@@ -122,6 +122,43 @@ get one fewer attempt than the contract says.
 test cannot fail for the reason it exists — it does not know there are two call
 sites. It was deleted rather than shipped.
 
+## Attempted, and not delivered: `diagnose_placement`
+
+`diagnose_placement` is the second pass that runs when no slot found a candidate.
+It re-evaluates **every** node and reports the refusal that got furthest, so an
+operator learns the real obstacle instead of "no eligible healthy node". It had no
+test, and three attempts to write one all failed — for a reason that is a finding
+about the code, not about the tests.
+
+**The query has no selector.**
+
+```sql
+SELECT * FROM kernel.nodes WHERE revoked_at IS NULL ORDER BY name
+```
+
+`reconcile_deployment` — its caller — filters candidates by the deployment's
+`nodeSelector`. `diagnose_placement` does not. So in a shared database, a node
+belonging to a different plugin (or a different test) competes for "furthest
+refusal", and can be reported as the reason **this** deployment did not place.
+
+Concretely, the three attempts:
+
+1. assert a specific node wins — failed against another test's leftover node;
+2. assert the revoked node is not named — cannot distinguish "it was excluded"
+   from "something else outranked it";
+3. narrow to the part that is stable — still failed in the full suite, because a
+   foreign one-core node outranked the fixture's.
+
+**This is not only a test problem.** A deployment refused because its label
+selector matches nothing can be reported as a CPU shortage on a node it was never
+eligible for. That is worse than no diagnosis: it sends the operator to the wrong
+host.
+
+The fix is a product decision — should the diagnosis be scoped to the deployment's
+selector, or should it keep reporting the whole cluster? Both are defensible, and
+neither is mine to choose unilaterally. **No test was shipped rather than shipping
+one that fails at random.** Recorded here as an open question with a reproduction.
+
 ## Measured, and recorded rather than assumed
 
 A revoked node's instance that **holds a container** does not count as a ghost
@@ -141,7 +178,8 @@ records the current behaviour and says so, rather than asserting it is correct.
 |---|---|
 | node boundary | `docker pull` failure and its 300 s timeout; `pull` interaction with quarantine; the `supervise()` LOOP itself (all three decisions it makes are now unit-tested; the loop that calls them is not driven end to end); node heartbeating with an old generation at the API (409 path); observation for an unknown instance |
 | capacity | scale-down releasing a slot; the preflight's `reserved`/`deployment_counts` inputs always empty in tests; revoked node excluded from the preflight's node list |
-| lifecycle | uninstall has **no** Kernel-level test at all; `REPLICAS_NOT_READY` on activation; rollback to a staged-but-never-deployed version; redeploy while the old version is DRAINING; `diagnose_placement`'s second pass; enable/disable repeated cycles |
+| lifecycle | uninstall has **no** Kernel-level test at all; `REPLICAS_NOT_READY` on activation; rollback to a staged-but-never-deployed version; redeploy while the old version is DRAINING; enable/disable repeated cycles |
+| diagnosis | `diagnose_placement` is untested AND unscoped — see the section above; the query has no selector, so it can blame a node the deployment was never eligible for |
 
 **This is not "add a few tests".** Three of the four release paths Phase 9C fixed
 have a test; the fault conditions that *cause* them mostly do not.
