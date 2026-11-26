@@ -321,10 +321,14 @@ all.
 
 **`CAPACITY_AVAILABLE` on a full node is a wrong answer from the tool this task
 built**, and it was found by reading its first real output against the publish log
-from the same run, not by reading its code. It is recorded here rather than fixed
-in this change, because the fix needs the per-node limit, which the node view does
-not carry (the code comment says so: "The per-node limit is not on the node
-object"). That is the next change, not this one.
+from the same run, not by reading its code.
+
+**Fixed in #229.** `opsctl capacity` no longer computes a verdict: it reports
+`/api/v1/capacity/preflight`'s `verdict`, per-node verdicts and rejection code,
+which come from the same `evaluate_node` the planner runs, and it names that source
+in its JSON as `decidedBy`. Verified end to end against a real kernel with a node at
+its per-node limit — the command reported `CAPACITY_BLOCKED` / `NODE_NOT_READY` /
+`replicasPlaceable: 0` exactly as the preflight did.
 
 
 ---
