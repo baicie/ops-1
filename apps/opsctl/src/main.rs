@@ -358,10 +358,33 @@ async fn main() -> Result<()> {
             // occupying the slots" has so far meant reading the diagnosis document
             // and trusting it. A document goes stale; this asks the running system.
             //
-            // It deliberately does NOT decide what is safe to remove. Four active
+            // IT DELIBERATELY DOES NOT DECIDE WHAT IS SAFE TO REMOVE. Four active
             // deployments with live routes are not garbage, and a tool that named
             // them "reclaimable" would be one step from someone acting on it.
+            //
+            // BUT IT ALSO DOES NOT DECIDE WHETHER THE DEPLOY WOULD FIT.
+            //
+            // The first version computed `freeSlots` as `instancesTotal -
+            // instancesReady` per node and summed it into a verdict. That is not the
+            // capacity question: `instancesTotal` counts instances with
+            // `desired_action='START'`, which is a count of replicas, not of the
+            // per-node limit the scheduler enforces. Measured on staging
+            // 2026-11-25: `verdict: CAPACITY_AVAILABLE`, `freeSlotsTotal: 1`, on a
+            // node a publish had been refused on four seconds earlier at 4/4.
+            //
+            // A second implementation of the capacity rule is exactly what the
+            // project forbids, and it disagreed with the real one. The kernel
+            // already exposes `/api/v1/capacity/preflight`, which runs the SAME
+            // `evaluate_node` the planner runs. So the verdict, the per-node numbers
+            // and the rejection code come from there, and this command contributes
+            // only what the preflight does not carry: who is occupying the slots and
+            // since when.
             let api = Api::new()?;
+            let preflight = api
+                .get(&format!(
+                    "/api/v1/capacity/preflight?replicas={replicas}&max_instances_per_deployment=1"
+                ))
+                .await?;
             let nodes = api
                 .get("/api/v1/nodes")
                 .await?
@@ -395,25 +418,35 @@ async fn main() -> Result<()> {
                 }
             }
 
+            // THE NODE REPORT COMES FROM THE PREFLIGHT, NOT FROM ARITHMETIC HERE.
+            //
+            // `free_slots_per_node` is what the scheduler itself would have left, so
+            // it cannot disagree with the decision it explains. `instancesReady` and
+            // `instancesTotal` are still reported because they are what an operator
+            // uses to recognise the host, but they are no longer the basis of a
+            // verdict.
             let mut report = Vec::new();
-            let mut total_free = 0_i64;
-            for node in &nodes {
-                let ready = node["instancesReady"].as_i64().unwrap_or(0);
-                let total = node["instancesTotal"].as_i64().unwrap_or(0);
-                // The per-node limit is not on the node object; the kernel default
-                // is 4 and `deploy --max-instances-per-node` can change it per
-                // deployment. Both are reported so the arithmetic is visible rather
-                // than implied.
-                let free = (total - ready).max(0);
-                total_free += free;
+            for node in preflight["nodes"].as_array().into_iter().flatten() {
+                let name = node["node"].as_str().unwrap_or("");
+                // Join to the node list only for the fields the preflight omits
+                // (status, staleness). A node missing here is not an error: the
+                // preflight already answered for it.
+                let live = nodes
+                    .iter()
+                    .find(|n| n["name"].as_str() == Some(name))
+                    .cloned()
+                    .unwrap_or(Value::Null);
                 report.push(serde_json::json!({
-                    "node": node["name"],
-                    "nodeId": node["id"],
-                    "status": node["status"],
-                    "stale": node["stale"],
-                    "instancesReady": ready,
-                    "instancesTotal": total,
-                    "freeSlots": free,
+                    "node": name,
+                    "nodeId": node["node_id"],
+                    "status": live["status"],
+                    "stale": live["stale"],
+                    "instancesReady": live["instancesReady"],
+                    "instancesTotal": live["instancesTotal"],
+                    "verdict": node["verdict"],
+                    "reason": node["code"],
+                    "detail": node["detail"],
+                    "freeSlots": node["free_slots_per_node"],
                 }));
             }
 
@@ -454,11 +487,13 @@ async fn main() -> Result<()> {
                 })
                 .collect();
 
-            let verdict = if total_free >= i64::from(replicas) {
-                "CAPACITY_AVAILABLE"
-            } else {
-                "CAPACITY_BLOCKED"
-            };
+            // THE VERDICT IS THE KERNEL'S, VERBATIM.
+            //
+            // `FITS` / `CAPACITY_BLOCKED` (and `RECLAIM_REQUIRED` once the planner
+            // emits it) come from the same `evaluate_node` the scheduler runs. This
+            // command has no opinion of its own, which is the point: an audit that
+            // disagrees with the decision it explains is worse than no audit.
+            let verdict = preflight["verdict"].as_str().unwrap_or("UNKNOWN");
 
             if json {
                 println!(
@@ -466,23 +501,45 @@ async fn main() -> Result<()> {
                     serde_json::to_string_pretty(&serde_json::json!({
                         "verdict": verdict,
                         "replicasRequested": replicas,
-                        "freeSlotsTotal": total_free,
+                        // Where the answer came from, so a reader never mistakes
+                        // this for an arithmetic this command performed.
+                        "decidedBy": "kernel /api/v1/capacity/preflight (same evaluate_node as the scheduler)",
+                        // The preflight's own numbers, passed through rather than
+                        // recomputed.
+                        "replicasPlaceable": preflight["replicas_placeable"],
+                        "reason": preflight["reason"],
+                        "detail": preflight["detail"],
+                        "freeSlotsTotal": preflight["nodes"].as_array().map(|ns| {
+                            ns.iter()
+                                .filter_map(|n| n["free_slots_per_node"].as_i64())
+                                .sum::<i64>()
+                        }),
                         "nodes": report,
                         "occupants": occupants,
-                        // The same caveat the placement preflight carries: this is
-                        // an estimate, and the scheduler re-evaluates every slot.
-                        "caveat": "read-only snapshot; the scheduler re-evaluates every slot and \
-                                   another deploy may place in between",
+                        // The kernel's caveat, not a second one: a consumer that
+                        // reads two caveats learns that one of them is decoration.
+                        "caveat": preflight["caveat"],
                     }))?
                 );
             } else {
-                println!("capacity: {verdict} (want {replicas}, free {total_free})");
+                println!(
+                    "capacity: {verdict} (want {replicas}, placeable {}){}",
+                    preflight["replicas_placeable"],
+                    preflight["reason"]
+                        .as_str()
+                        .map(|r| format!("  reason: {r}"))
+                        .unwrap_or_default()
+                );
+                if let Some(detail) = preflight["detail"].as_str() {
+                    println!("  {detail}");
+                }
                 for n in &report {
                     println!(
-                        "  node {} status={} stale={} ready={}/{} free={}",
+                        "  node {} status={} stale={} verdict={} ready={}/{} free={}",
                         n["node"].as_str().unwrap_or(""),
                         n["status"].as_str().unwrap_or(""),
                         n["stale"],
+                        n["verdict"].as_str().unwrap_or(""),
                         n["instancesReady"],
                         n["instancesTotal"],
                         n["freeSlots"]
@@ -1217,6 +1274,120 @@ mod replica_policy_tests {
         assert_ne!(
             ready_after_placement, desired_under_old_default,
             "with 1 placeable instance and desired 2 the deployment can never report READY"
+        );
+    }
+}
+
+#[cfg(test)]
+mod capacity_verdict_comes_from_the_kernel {
+    //! `opsctl capacity` used to compute its own verdict, and it was wrong.
+    //!
+    //! Measured on staging 2026-11-25: `verdict: CAPACITY_AVAILABLE`,
+    //! `freeSlotsTotal: 1`, on a node a publish had been refused on four seconds
+    //! earlier at 4/4 with INSTANCE_CAPACITY_EXCEEDED.
+    //!
+    //! The arithmetic was `instancesTotal - instancesReady` per node, where
+    //! `instancesTotal` counts instances with `desired_action='START'`. That is a
+    //! count of replicas, not of the per-node limit the scheduler enforces, so the
+    //! two numbers answered different questions and only one of them decided
+    //! placement.
+    //!
+    //! This module does not call the CLI (that needs a live Kernel). It pins the
+    //! two properties that made the answer wrong, so a future "optimisation" that
+    //! reintroduces local arithmetic has to delete a test that says why not.
+
+    /// The shape the old code computed, kept here as the counterexample.
+    ///
+    /// A node at 3 ready of 4 total yields "1 free" - and the publisher was
+    /// refused on that node, because the limit counts ALL START instances
+    /// (4 of 4) while `instancesReady` counted only the ones reporting READY.
+    #[test]
+    fn ready_below_total_does_not_mean_a_free_placement_slot() {
+        let instances_ready = 3;
+        let instances_total = 4;
+        let old_free = (instances_total - instances_ready).max(0);
+        assert_eq!(old_free, 1, "the old arithmetic reported a free slot");
+
+        // The scheduler's number for the same node. It is a different quantity:
+        // every START instance occupies a slot whether or not it reports READY,
+        // so 4 of 4 is full.
+        let start_instances = 4;
+        let per_node_limit = 4;
+        assert!(
+            start_instances >= per_node_limit,
+            "the node was full by the limit the scheduler enforces, while the old \
+             verdict said CAPACITY_AVAILABLE with {old_free} free"
+        );
+    }
+
+    /// The command must not contain the arithmetic it used to perform.
+    ///
+    /// A behavioural test would need a live Kernel and a full node; this is the
+    /// structural assertion that survives without one, and it fails on exactly the
+    /// change that would reintroduce the defect.
+    ///
+    /// TWO TRAPS, AND THIS TEST FELL INTO BOTH BEFORE IT WORKED.
+    ///
+    /// 1. COMMENTS ARE NOT CODE. Searching the whole file matched the comment above
+    ///    `Command::Capacity`, which quotes the old arithmetic to explain why it was
+    ///    removed - the same shape as `verify-main.mjs` reading "NO `paths:` filter,
+    ///    deliberately" as a filter.
+    /// 2. `include_str!("main.rs")` CONTAINS THIS TEST. Searching the whole file for
+    ///    the offender also matches the literal in the assertion below, so the test
+    ///    could never pass no matter what the command did.
+    ///
+    /// So the search is bounded to the region between the `Command::Capacity` arm and
+    /// the next command arm, with comments stripped. That is the code under test and
+    /// nothing else.
+    #[test]
+    fn the_command_no_longer_subtracts_ready_from_total() {
+        let src = include_str!("main.rs");
+        let start = src
+            .find("Command::Capacity {")
+            .expect("the capacity arm exists");
+        // The arm ends at the next `Command::` variant, which is `NodeToken`.
+        let end = src[start..]
+            .find("Command::NodeToken")
+            .map(|offset| start + offset)
+            .expect("the arm after capacity exists");
+        let arm: String = src[start..end]
+            .lines()
+            .filter(|line| {
+                let t = line.trim_start();
+                !(t.starts_with("//") || t.starts_with("///") || t.starts_with("//!"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // WHAT IS ASSERTED, AND WHY IT IS NOT A SPECIFIC EXPRESSION.
+        //
+        // The first version searched for `total - ready`, and the counterfactual
+        // proved that too narrow: restoring a local verdict with
+        // `let verdict = if total_free >= replicas { "CAPACITY_AVAILABLE" } ...`
+        // reintroduced the defect exactly, and the assertion passed because that
+        // rewrite happened not to spell the subtraction. A structural test that only
+        // catches one phrasing of the bug it names is a test of the phrasing.
+        //
+        // The property is: the verdict is READ FROM the preflight, never chosen
+        // here. So the assertion is on the absence of the literals this command
+        // would have to invent, and on the presence of the read.
+        for invented in ["\"CAPACITY_AVAILABLE\"", "\"CAPACITY_BLOCKED\"", "\"FITS\""] {
+            assert!(
+                !arm.contains(invented),
+                "capacity must take its verdict from /api/v1/capacity/preflight; \
+                 choosing {invented} here is the second implementation of the capacity \
+                 rule that produced CAPACITY_AVAILABLE on a full node"
+            );
+        }
+        // And it must actually read the kernel's answer, or it has no source of
+        // truth at all.
+        assert!(
+            arm.contains("/api/v1/capacity/preflight"),
+            "the command must ask the kernel for the preflight verdict"
+        );
+        assert!(
+            arm.contains("preflight[\"verdict\"]"),
+            "and the reported verdict must be the preflight's own field"
         );
     }
 }
