@@ -418,6 +418,26 @@ pub(crate) const INSTANCE_OBSERVATION_SQL: &str = r#"
       AND (observed_at IS NULL OR observed_at < $4)
     "#;
 
+/// A node may not report a generation OLDER than the one the Kernel already has.
+///
+/// The generation is bumped when a node's identity is replaced (a re-enrolment, or a
+/// clone detected by the control token). Afterwards, the OLD process may still be
+/// running and still heartbeating - with a valid credential, because the credential
+/// is checked separately. Accepting its report would let the retired process write
+/// instance state for a node the platform has replaced.
+///
+/// A function rather than an inline `if` so the boundary can be tested: the same
+/// comparison appears in `jobs.rs`, and a copied condition has no counterfactual.
+pub(crate) fn check_node_generation(reported: i64, kernel: i64) -> crate::error::AppResult<()> {
+    if reported < kernel {
+        return Err(crate::error::AppError::conflict(
+            "STALE_NODE_GENERATION",
+            format!("node generation {reported} is older than kernel generation {kernel}"),
+        ));
+    }
+    Ok(())
+}
+
 pub async fn heartbeat(
     State(state): State<AppState>,
     Path(node_id): Path<Uuid>,
@@ -426,15 +446,7 @@ pub async fn heartbeat(
 ) -> AppResult<Json<DesiredNodeState>> {
     let node = authenticate_node(&state, node_id, &headers).await?;
     validate_node_data_endpoint(&state.config, &payload.data_endpoint)?;
-    if payload.generation < node.generation {
-        return Err(AppError::conflict(
-            "STALE_NODE_GENERATION",
-            format!(
-                "node generation {} is older than kernel generation {}",
-                payload.generation, node.generation
-            ),
-        ));
-    }
+    check_node_generation(payload.generation, node.generation)?;
     let observed_at = payload.observed_at;
     let status = match payload.status {
         NodeStatus::Ready => "READY",
@@ -1247,6 +1259,129 @@ mod observation_order {
             .await
             .ok();
     }
+
+    /// AN OBSERVATION FOR AN INSTANCE THE KERNEL DOES NOT HAVE MUST CHANGE NOTHING.
+    ///
+    /// `heartbeat` applies each observation through `INSTANCE_OBSERVATION_SQL` and
+    /// treats `rows_affected() == 0` as "unknown or superseded" - it logs and moves
+    /// on. Nothing asserted that the ZERO really means zero, i.e. that the statement
+    /// cannot match a DIFFERENT row.
+    ///
+    /// The failure this guards is a stray id landing on the wrong instance: the
+    /// statement is keyed on `(id, node_id, deployment_generation)`, so getting this
+    /// wrong would write the state of one instance onto another. `node_id` is the
+    /// predicate that stops a node reporting about an instance it does not host.
+    #[tokio::test]
+    async fn an_observation_for_an_unknown_instance_writes_nothing() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        // The row that must NOT change.
+        let tag = Uuid::new_v4().simple().to_string();
+        let node = Uuid::new_v4();
+        let package = Uuid::new_v4();
+        let deployment = Uuid::new_v4();
+        let instance = Uuid::new_v4();
+        let plugin = format!("test.unknown.{tag}");
+        let publisher = format!("pub-{tag}");
+
+        sqlx::query(
+            "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+        )
+        .bind(&publisher)
+        .execute(&pool)
+        .await
+        .expect("publisher");
+        sqlx::query(
+            "INSERT INTO kernel.nodes
+               (id, name, control_token_hash, data_token, generation, os, arch,
+                labels, capabilities, status, enrolled_at, last_seen_at)
+             VALUES ($1,$2,'x','tok',1,'linux','amd64','{}'::jsonb,'[]'::jsonb,'READY',now(),now())",
+        )
+        .bind(node)
+        .bind(format!("unknown-{tag}"))
+        .execute(&pool)
+        .await
+        .expect("node");
+        sqlx::query(
+            "INSERT INTO kernel.plugin_packages
+               (package_id, plugin_id, version, schema_version, publisher, manifest,
+                artifact_digest, bundle_digest, payload_digest, status, signature_state)
+             VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+        )
+        .bind(package)
+        .bind(&plugin)
+        .bind(&publisher)
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .bind(format!("sha256:{}", Uuid::new_v4().simple()))
+        .execute(&pool)
+        .await
+        .expect("package");
+        sqlx::query(
+            "INSERT INTO kernel.plugin_deployments
+               (id, plugin_id, package_id, version, desired_replicas, generation,
+                placement, resources, status, created_at, updated_at)
+             VALUES ($1,$2,$3,'1.0.0',1,1,'{}'::jsonb,
+                     '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb,'PENDING',now(),now())",
+        )
+        .bind(deployment)
+        .bind(&plugin)
+        .bind(package)
+        .execute(&pool)
+        .await
+        .expect("deployment");
+        sqlx::query(
+            "INSERT INTO kernel.plugin_instances
+               (id, deployment_id, node_id, slot, deployment_generation,
+                desired_action, state)
+             VALUES ($1,$2,$3,0,1,'START','STARTING')",
+        )
+        .bind(instance)
+        .bind(deployment)
+        .bind(node)
+        .execute(&pool)
+        .await
+        .expect("instance");
+
+        // 1. An id that does not exist at all.
+        let unknown = Uuid::new_v4();
+        let applied = observe(&pool, unknown, node, "READY", "2026-11-20T10:00:00Z").await;
+        assert_eq!(applied, 0, "an unknown instance id must match no row");
+
+        // 2. THE DANGEROUS SHAPE: the RIGHT instance id, from the WRONG node.
+        //    Keyed on id alone this would write; keyed on (id, node_id) it does not.
+        let other_node = Uuid::new_v4();
+        let applied = observe(&pool, instance, other_node, "READY", "2026-11-20T10:00:01Z").await;
+        assert_eq!(
+            applied, 0,
+            "a node must not be able to report about an instance it does not host; \
+             without the node_id predicate this writes another node's instance"
+        );
+
+        // 3. AND THE ROW IS EXACTLY AS IT WAS.
+        let (state, observed): (
+            String,
+            Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,
+        ) = sqlx::query_as("SELECT state, observed_at FROM kernel.plugin_instances WHERE id=$1")
+            .bind(instance)
+            .fetch_one(&pool)
+            .await
+            .expect("state");
+        assert_eq!(
+            state, "STARTING",
+            "neither rejected observation may leave a mark"
+        );
+        assert_eq!(observed, None, "and no observation time was recorded");
+
+        sqlx::query("DELETE FROM kernel.plugin_deployments WHERE id=$1")
+            .bind(deployment)
+            .execute(&pool)
+            .await
+            .ok();
+    }
 }
 
 /// A NODE REVOKED WHILE A DEPLOYMENT IS STILL BEING PLACED.
@@ -1592,5 +1727,46 @@ mod revocation_mid_deploy {
             .execute(&pool)
             .await
             .ok();
+    }
+
+    /// A NODE MAY NOT REPORT A GENERATION OLDER THAN THE KERNEL'S.
+    ///
+    /// The generation is bumped when a node's identity is replaced. Afterwards the
+    /// OLD process may still be running and still heartbeating, with a credential
+    /// that is still valid - the credential check is separate and does not know the
+    /// generation moved. Accepting its report would let a retired process write
+    /// instance state for a node the platform has replaced.
+    ///
+    /// The comparison had no Rust test. The only reference anywhere was a comment in
+    /// a shell script describing what it could not check.
+    ///
+    /// These are the three boundaries, and the third is the one that matters: EQUAL
+    /// is accepted, because a node reporting the generation it was given is exactly
+    /// what a healthy heartbeat looks like.
+    #[test]
+    fn a_stale_generation_is_refused_and_the_current_one_is_not() {
+        use crate::nodes::check_node_generation;
+
+        // Older: refused, and the error names both numbers so an operator can see
+        // which process is behind.
+        let error = check_node_generation(3, 4).expect_err("generation 3 < 4 must be refused");
+        let message = format!("{error:?}");
+        assert!(
+            message.contains("STALE_NODE_GENERATION"),
+            "the refusal must carry the stable code the Node keys its behaviour on: \
+             {message}"
+        );
+        assert!(
+            message.contains('3') && message.contains('4'),
+            "and it must name both generations: {message}"
+        );
+
+        // EQUAL: accepted. This is the ordinary case, and a check that refused it
+        // would stop every node from ever heartbeating again.
+        check_node_generation(4, 4).expect("the current generation must be accepted");
+
+        // NEWER: accepted. A node that has re-enrolled with a higher generation is
+        // ahead of the Kernel on purpose; the Kernel adopts it in the same handler.
+        check_node_generation(5, 4).expect("a newer generation must be accepted");
     }
 }

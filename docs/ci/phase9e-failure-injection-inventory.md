@@ -171,6 +171,62 @@ third time on this branch** (`INSTANCE_OBSERVATION_SQL`,
 `PLACEMENT_CANDIDATE_NODES_SQL`, now this). The rule: a test that contains a copy
 of the SQL has no counterfactual.
 
+### 9. Activation's three refusals, and the one that is load-bearing
+
+`activate_inner` refuses before writing anything: `DEPLOYMENT_NOT_READY` (the row
+is not READY), `REPLICAS_NOT_READY` (the row says READY, the instances disagree),
+`REVISION_CONFLICT` (a stale `expectedRevision`). None had a Rust test - the only
+coverage was live acceptance, which is not a required check.
+
+`REPLICAS_NOT_READY` is the one with teeth. The `status` column is written by a
+reconcile pass from facts it read at the start of that pass; activation re-counts
+the INSTANCES rather than trusting it. If it trusted the column, a deployment whose
+replica died between the reconcile and the activate would take the route anyway -
+and the Gateway routes on the ACTIVE revision and knows nothing about instance
+health at that moment.
+
+**Counterfactual: skip the count and the activation returns `200` with an ACTIVE
+revision created** for a deployment where one of two replicas is STARTING. The test
+does not merely fail - the mutation makes the API report success.
+
+### 10. The three rollback branches that say "not yet"
+
+`rollback` answers in four ways and only the happy path was covered. The three 202s
+are a multi-step operator flow, and each says something different:
+
+| target state | answer |
+|---|---|
+| no deployment | create it, "wait for READY, then activate" |
+| PENDING / PREPARING | "still starting" - and create **no second row** |
+| FAILED / DISABLED / DRAINING / DEGRADED | redeploy first |
+
+The middle one carries the guarantee: a second deployment row for one version means
+two placement attempts for the same release competing for the node's slots - the
+cap-across-versions problem ADR-027 exists for.
+
+To make this testable at all, `rollback` split into a handler and `rollback_inner`.
+Counterfactual: removing the still-starting branch makes the test fail, because the
+response then says "must be redeployed" about a version that is being built.
+
+### 11. Heartbeat boundaries, deploy bounds, and the toggle refusals
+
+Four smaller gaps, each with a counterfactual:
+
+- **`STALE_NODE_GENERATION`** — a node reporting an OLDER generation than the
+  Kernel's is refused. The only reference anywhere was a comment in a shell script
+  describing what it could not check. `check_node_generation` is now a function
+  both call sites share.
+- **an observation for an unknown instance** — `rows_affected() == 0` was logged
+  and nothing asserted the zero was real. The dangerous shape is the RIGHT instance
+  id from the WRONG node: keyed on `id` alone it writes, keyed on `(id, node_id)`
+  it does not. Removing the `node_id` predicate fails the test.
+- **deploy parameter bounds** — `desiredReplicas` is **refused** outside `0..=20`,
+  not clamped. A first version of this test asserted only that the constant existed.
+- **enable/disable refusals** — `DEPENDENCY_BLOCKED` is the one with teeth:
+  disabling a plugin another ACTIVE plugin requires leaves the consumer running
+  against a route that is gone. Counterfactual: removing the check makes `disable`
+  return `200` and stop the provider.
+
 ## Attempted, and not delivered: `diagnose_placement`
 
 `diagnose_placement` is the second pass that runs when no slot found a candidate.
