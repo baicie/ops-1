@@ -1369,4 +1369,210 @@ mod tests {
             }
         }
     }
+
+    // ------------------------------------------------------------------
+    // THE INPUTS THAT WERE ALWAYS EMPTY
+    // ------------------------------------------------------------------
+    //
+    // `input()` above sets `reserved`, `used_nodes`, `global_counts` and
+    // `deployment_counts` to `HashMap::new()`, and every test in this module uses
+    // it. So the pure preflight was only ever asked "does an EMPTY node fit this":
+    // `NO_CPU`, `NO_MEMORY`, and both instance limits were never produced through
+    // `preflight()` - only through `evaluate_node` directly.
+    //
+    // That matters because `preflight` is what the `capacity` endpoint returns to an
+    // operator asking "will my deploy fit". An answer computed as if the node were
+    // empty says FITS for a deploy the planner then refuses.
+
+    /// The preflight with real occupancy. Argument order follows `NodeUsage::of`:
+    /// `used_nodes` is THIS deployment's instances, `global_counts` is every
+    /// instance on the node.
+    fn input_occupied(
+        nodes: Vec<NodeRow>,
+        requested: ResourceRequirements,
+        replicas: i32,
+        reserved: HashMap<Uuid, (i64, i64)>,
+        used_nodes: HashMap<Uuid, usize>,
+        global_counts: HashMap<Uuid, usize>,
+    ) -> PreflightInput {
+        PreflightInput {
+            nodes,
+            selector: BTreeMap::new(),
+            requested,
+            replicas,
+            max_instances_per_deployment: 4,
+            max_instances_per_node: 4,
+            reserved,
+            used_nodes,
+            global_counts,
+            deployment_counts: HashMap::new(),
+            reclaimable: Vec::new(),
+            protected: Vec::new(),
+        }
+    }
+
+    fn ask(cpu: i64) -> ResourceRequirements {
+        ResourceRequirements {
+            cpu_millis: cpu,
+            memory_mib: 128,
+        }
+    }
+
+    /// CPU ALREADY RESERVED IS SUBTRACTED FROM THE BUDGET.
+    ///
+    /// `node()` reports 4 cores, so the budget is 3600m. 3000m reserved plus 1000m
+    /// requested is 4000m, which does not fit. Without `reserved` the same node
+    /// looks idle - and that is what every existing test asserted.
+    #[test]
+    fn cpu_already_reserved_can_make_the_node_not_fit() {
+        let node = node("cpu-full", "READY");
+        let id = node.id;
+        let report = super::preflight(&input_occupied(
+            vec![node],
+            ask(1000),
+            1,
+            HashMap::from([(id, (3000_i64, 0_i64))]),
+            HashMap::new(),
+            HashMap::new(),
+        ));
+        assert_eq!(
+            report.nodes[0].code,
+            Some("CPU_INSUFFICIENT"),
+            "3000m reserved + 1000m requested exceeds the 3600m budget of a 4-core \
+             node; a preflight that ignores `reserved` answers FITS and the planner \
+             then refuses: {:?}",
+            report.nodes[0]
+        );
+        assert_eq!(
+            report.nodes[0].verdict, "NO_CPU",
+            "and the verdict maps to NO_CPU, which is what an operator reads: {:?}",
+            report.nodes[0]
+        );
+    }
+
+    /// THE CONTROL: THE SAME REQUEST WITH NOTHING RESERVED FITS.
+    ///
+    /// Without it, an implementation that refused everything would pass.
+    #[test]
+    fn the_same_request_fits_when_nothing_is_reserved() {
+        let node = node("cpu-free", "READY");
+        let report = super::preflight(&input_occupied(
+            vec![node],
+            ask(1000),
+            1,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        ));
+        assert_eq!(
+            report.nodes[0].code, None,
+            "nothing reserved, so a 1000m request on a 4-core node fits: {:?}",
+            report.nodes[0]
+        );
+        assert_eq!(
+            report.replicas_placeable, 4,
+            "a 4-core node with nothing reserved has four free slots; \
+             `replicas_placeable` counts SLOTS, not replicas"
+        );
+    }
+
+    /// MEMORY ALREADY RESERVED IS SUBTRACTED TOO.
+    ///
+    /// The CPU test above proves `reserved` is read at all; this one proves the
+    /// MEMORY half of the same tuple is not ignored. `node()` reports 4 GiB, so the
+    /// budget is 3686 MiB (90% of 4096). 3600 MiB reserved plus a 256 MiB request
+    /// does not fit, while the CPU budget is untouched.
+    #[test]
+    fn memory_already_reserved_can_make_the_node_not_fit() {
+        let node = node("mem-full", "READY");
+        let id = node.id;
+        let report = super::preflight(&input_occupied(
+            vec![node],
+            ResourceRequirements {
+                cpu_millis: 100,
+                memory_mib: 256,
+            },
+            1,
+            HashMap::from([(id, (0_i64, 3600_i64))]),
+            HashMap::new(),
+            HashMap::new(),
+        ));
+        assert_eq!(
+            report.nodes[0].code,
+            Some("MEMORY_INSUFFICIENT"),
+            "3600 MiB reserved + 256 MiB requested exceeds the 3686 MiB budget of a \
+             4 GiB node; only the memory half of the reservation can refuse this: {:?}",
+            report.nodes[0]
+        );
+        assert_eq!(
+            report.nodes[0].verdict, "NO_MEMORY",
+            "and the verdict maps to NO_MEMORY: {:?}",
+            report.nodes[0]
+        );
+    }
+
+    /// ANOTHER PLUGIN'S INSTANCES FILL THE PER-NODE LIMIT.
+    ///
+    /// `global_counts` is every instance on the node. This deployment has none of
+    /// them, so the per-DEPLOYMENT limit is untouched - only the per-node one bites.
+    #[test]
+    fn another_plugins_instances_fill_the_per_node_limit() {
+        let node = node("shared", "READY");
+        let id = node.id;
+        let report = super::preflight(&input_occupied(
+            vec![node],
+            ask(100),
+            1,
+            HashMap::new(),
+            // none of them are this deployment's
+            HashMap::new(),
+            HashMap::from([(id, 4_usize)]),
+        ));
+        assert_eq!(
+            report.nodes[0].code,
+            Some("INSTANCE_CAPACITY_EXCEEDED"),
+            "the node is at its per-node limit of 4 with other plugins' instances: {:?}",
+            report.nodes[0]
+        );
+        assert_eq!(
+            report.nodes[0].instances_for_deployment, 0,
+            "and NONE of those instances belong to this deployment - which is what \
+             distinguishes this test from the one below"
+        );
+    }
+
+    /// THIS DEPLOYMENT'S OWN INSTANCES FILL ITS PER-DEPLOYMENT LIMIT.
+    ///
+    /// The mirror: the node has room, but this deployment is already at its own cap.
+    /// `used_nodes` feeds `deployment_instances`, `global_counts` feeds
+    /// `node_instances` - reading the wrong one for the wrong limit is the mistake
+    /// this pair of tests exists to catch.
+    #[test]
+    fn this_deployments_own_instances_fill_its_per_deployment_limit() {
+        let node = node("own", "READY");
+        let id = node.id;
+        let mut input = input_occupied(
+            vec![node],
+            ask(100),
+            1,
+            HashMap::new(),
+            HashMap::from([(id, 4_usize)]),
+            HashMap::from([(id, 4_usize)]),
+        );
+        // `deployment_counts` is what `instances_for_deployment` reports; it is
+        // separate from `used_nodes`, which feeds the per-deployment LIMIT check.
+        input.deployment_counts = HashMap::from([(id, 4_usize)]);
+        let report = super::preflight(&input);
+        assert_eq!(
+            report.nodes[0].code,
+            Some("INSTANCE_CAPACITY_EXCEEDED"),
+            "the deployment is at its own limit of 4: {:?}",
+            report.nodes[0]
+        );
+        assert_eq!(
+            report.nodes[0].instances_for_deployment, 4,
+            "and all four belong to this deployment, so the refusal is the \
+             per-deployment limit rather than the per-node one"
+        );
+    }
 }
