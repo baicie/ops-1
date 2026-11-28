@@ -2864,10 +2864,37 @@ fn node_matches(node: &NodeRow, selector: &BTreeMap<String, String>) -> bool {
     selector_mismatch(node, selector).is_none()
 }
 
-/// Re-evaluates every known node once a slot found no candidate. The scheduler
-/// only ever looks at READY, recently-seen nodes, so without this pass a
-/// deployment refused because its only node is UNREACHABLE waits forever with a
-/// reason that names nothing.
+/// Re-evaluates the deployment's OWN candidate range once a slot found no node.
+///
+/// The scheduler only looks at READY, recently-seen nodes; without this pass a
+/// deployment refused because its only matching node is UNREACHABLE waits forever
+/// with a reason that names nothing.
+///
+/// IT IS SCOPED TO THE DEPLOYMENT'S SELECTOR, AND THAT IS THE WHOLE POINT.
+///
+/// This used to scan `SELECT * FROM kernel.nodes WHERE revoked_at IS NULL` - every
+/// node in the database - while its caller `reconcile_deployment` filtered
+/// candidates by the deployment's `nodeSelector`. So a node the deployment could
+/// never run on could win the "furthest refusal" contest and be reported as the
+/// reason: a deployment whose label matches nothing would be told its obstacle was
+/// CPU pressure on an unrelated host. That sends an operator to the wrong machine,
+/// which is worse than no diagnosis.
+///
+/// Three attempts to test the old behaviour failed for exactly this reason - a
+/// foreign node in the shared test database outranked the fixture's - and the
+/// failure was the finding.
+///
+/// The narrowing happens in TWO STAGES, so the two very different answers stay
+/// distinguishable:
+///
+/// 1. `matched` - nodes that satisfy the selector. If this is EMPTY, the answer is
+///    about the selector; no node's resources are relevant and none is named.
+/// 2. `refused` - of the matched nodes, the refusal that got furthest, evaluated by
+///    the SAME `evaluate_node` the scheduler uses.
+///
+/// A node outside the selector is never named as this deployment's obstacle. Nodes
+/// are still listed in `matched_nodes` / `total_nodes` so an operator can see how
+/// narrow the range is, but they do not produce a `placement_rejection`.
 async fn diagnose_placement(
     state: &AppState,
     placement: &PlacementContext<'_>,
@@ -2875,13 +2902,31 @@ async fn diagnose_placement(
     used_nodes: &HashMap<Uuid, usize>,
     global_counts: &HashMap<Uuid, usize>,
 ) -> anyhow::Result<Option<(String, PlacementRejection, Uuid)>> {
-    let nodes = sqlx::query_as::<_, NodeRow>(
-        "SELECT * FROM kernel.nodes WHERE revoked_at IS NULL ORDER BY name",
-    )
-    .fetch_all(&state.db)
-    .await?;
+    // INCLUDING REVOKED NODES, so "the only node in your selector was revoked"
+    // is an answerable question. `evaluate_node` refuses them with
+    // `NodeNotReady{status:"REVOKED"}`, which is exactly what the operator needs
+    // to hear - it is a different problem from "the node is unhealthy", and the
+    // diagnosis must not make them indistinguishable by filtering one out.
+    let nodes = sqlx::query_as::<_, NodeRow>("SELECT * FROM kernel.nodes ORDER BY name")
+        .fetch_all(&state.db)
+        .await?;
+    let matched: Vec<&NodeRow> = nodes
+        .iter()
+        .filter(|node| node_matches(node, placement.selector))
+        .collect();
+    if matched.is_empty() {
+        // NOTHING MATCHES THE SELECTOR. Reporting a node's CPU or memory here would
+        // name a machine this deployment cannot use - the defect this function is
+        // scoped to avoid. The caller keeps its SELECTOR_MISMATCH explanation.
+        tracing::debug!(
+            total_nodes = nodes.len(),
+            selector = ?placement.selector,
+            "placement diagnosis: no node matches the selector; the refusal is the selector"
+        );
+        return Ok(None);
+    }
     let mut furthest: Option<(String, PlacementRejection, Uuid)> = None;
-    for node in &nodes {
+    for node in matched {
         let usage = NodeUsage::of(node, reserved, used_nodes, global_counts);
         let Err(rejection) = evaluate_node(node, usage, placement) else {
             continue;
@@ -11706,6 +11751,261 @@ mod tests {
                 "the refusal must say there is no deployment, not something vaguer: \
                  {error:?}"
             );
+        }
+    }
+
+    /// TASK-27: THE DIAGNOSIS NAMES THE DEPLOYMENT'S OWN OBSTACLE, NOT ANY NODE'S.
+    ///
+    /// `diagnose_placement` used to scan every unrevoked node and report the
+    /// "furthest" refusal. Its caller filters candidates by the deployment's
+    /// `nodeSelector`, so a node the deployment can never run on could win that
+    /// contest - a deployment whose label matched nothing would be told its obstacle
+    /// was CPU pressure on an unrelated host.
+    ///
+    /// Three attempts to test the old behaviour failed for that reason: a foreign
+    /// node in the shared database outranked the fixture's, and the failure WAS the
+    /// finding. Now that the function is scoped, these tests can be exact.
+    mod diagnose_scope {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        /// A node with a unique label pair so only this test's selector matches it.
+        async fn scoped_node(
+            pool: &PgPool,
+            run: &str,
+            tag: &str,
+            cores: i64,
+            revoked: bool,
+        ) -> Uuid {
+            let id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot, revoked_at)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64',$4::jsonb,'[]'::jsonb,
+                         'READY',now(),now(),'http://scope:7000',$5,
+                         CASE WHEN $6 THEN now() ELSE NULL END)",
+            )
+            .bind(id)
+            .bind(format!("scope-{run}-{tag}"))
+            .bind(format!("tok-{}", Uuid::new_v4().simple()))
+            .bind(serde_json::json!({ "test-run": run }))
+            .bind(serde_json::json!({
+                "cpuCores": cores,
+                "memoryTotalBytes": 8i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0,
+            }))
+            .bind(revoked)
+            .execute(pool)
+            .await
+            .expect("node");
+            id
+        }
+
+        fn context<'a>(
+            selector: &'a std::collections::BTreeMap<String, String>,
+            requested: &'a opsweave_contracts::ResourceRequirements,
+        ) -> super::PlacementContext<'a> {
+            super::PlacementContext {
+                selector,
+                requested,
+                max_instances_per_deployment: 1,
+                max_instances_per_node: 4,
+            }
+        }
+
+        async fn diagnose(
+            state: &crate::state::AppState,
+            placement: &super::PlacementContext<'_>,
+        ) -> Option<(String, super::PlacementRejection, Uuid)> {
+            let reserved = std::collections::HashMap::new();
+            let used = std::collections::HashMap::new();
+            let global = std::collections::HashMap::new();
+            super::super::diagnose_placement(state, placement, &reserved, &used, &global)
+                .await
+                .expect("diagnose")
+        }
+
+        /// A NODE OUTSIDE THE SELECTOR IS NEVER THE ANSWER, EVEN IF IT IS THE ONLY
+        /// NODE THAT FAILS.
+        ///
+        /// This is the exact shape that made three earlier attempts unusable: one
+        /// node matches the selector and fits, another does not match and cannot -
+        /// and the old code reported the second. The in-range node fits, so there is
+        /// nothing to diagnose and the answer must be `None`.
+        #[tokio::test]
+        async fn a_node_outside_the_selector_is_never_named() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let run = Uuid::new_v4().simple().to_string();
+
+            // In range, plenty of CPU.
+            scoped_node(&pool, &run, "inrange", 8, false).await;
+            // Out of range, one core - the node the old code would have named.
+            let other = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64','{\"test-run\":\"elsewhere\"}'::jsonb,
+                         '[]'::jsonb,'READY',now(),now(),'http://out:7000',$4)",
+            )
+            .bind(other)
+            .bind(format!("out-{run}"))
+            .bind(format!("tok-{}", Uuid::new_v4().simple()))
+            .bind(serde_json::json!({
+                "cpuCores": 1,
+                "memoryTotalBytes": 4i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0,
+            }))
+            .execute(&pool)
+            .await
+            .expect("out-of-range node");
+
+            let selector =
+                std::collections::BTreeMap::from([("test-run".to_string(), run.clone())]);
+            let requested = opsweave_contracts::ResourceRequirements {
+                cpu_millis: 100,
+                memory_mib: 128,
+            };
+            let result = diagnose(&state, &context(&selector, &requested)).await;
+            assert!(
+                result.is_none(),
+                "a node that does not match the selector cannot be this deployment's \
+                 obstacle; the in-range node fits, so there is nothing to report - got \
+                 {result:?}"
+            );
+        }
+
+        /// WHEN NOTHING MATCHES THE SELECTOR, THE ANSWER IS NOT A NODE.
+        ///
+        /// The caller keeps its `SELECTOR_MISMATCH` explanation. Naming any node
+        /// here would be the defect: the deployment cannot run on it at all.
+        #[tokio::test]
+        async fn no_matching_node_yields_no_node_to_blame() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let run = Uuid::new_v4().simple().to_string();
+            // A node whose selector will never match.
+            scoped_node(&pool, &format!("{run}-none"), "lonely", 1, false).await;
+
+            let selector = std::collections::BTreeMap::from([(
+                "test-run".to_string(),
+                format!("{run}-present"),
+            )]);
+            let requested = opsweave_contracts::ResourceRequirements {
+                cpu_millis: 100,
+                memory_mib: 128,
+            };
+            let result = diagnose(&state, &context(&selector, &requested)).await;
+            assert!(
+                result.is_none(),
+                "with no node matching the selector, no node's refusal may be blamed - \
+                 got {result:?}"
+            );
+        }
+
+        /// INSIDE THE SELECTOR, THE REAL OBSTACLE IS REPORTED.
+        ///
+        /// One matching node, too small for the request. The answer must be that
+        /// node and a CPU refusal - the control for the two tests above, which would
+        /// both pass against a function that never reported anything.
+        #[tokio::test]
+        async fn a_matching_node_that_is_too_small_is_named_with_its_reason() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let run = Uuid::new_v4().simple().to_string();
+            let node = scoped_node(&pool, &run, "tiny", 1, false).await;
+
+            let selector =
+                std::collections::BTreeMap::from([("test-run".to_string(), run.clone())]);
+            let requested = opsweave_contracts::ResourceRequirements {
+                cpu_millis: 2000,
+                memory_mib: 128,
+            };
+            let (name, rejection, id) = diagnose(&state, &context(&selector, &requested))
+                .await
+                .expect("the matching node cannot host a 2000m request on one core");
+            assert_eq!(id, node);
+            assert_eq!(name, format!("scope-{run}-tiny"));
+            assert!(
+                matches!(rejection, super::PlacementRejection::CpuInsufficient { .. }),
+                "and the reason is the node's actual obstacle: {rejection:?}"
+            );
+        }
+
+        /// A MATCHING BUT REVOKED NODE IS NOT A CANDIDATE EITHER.
+        ///
+        /// `evaluate_node` refuses it with `NodeNotReady{status:"REVOKED"}`, which is
+        /// a legitimate answer: the node IS in the deployment's range and the
+        /// operator needs to know it was revoked rather than merely unhealthy.
+        #[tokio::test]
+        async fn a_matching_revoked_node_is_reported_as_revoked() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let run = Uuid::new_v4().simple().to_string();
+            let node = scoped_node(&pool, &run, "revoked", 8, true).await;
+
+            let selector =
+                std::collections::BTreeMap::from([("test-run".to_string(), run.clone())]);
+            let requested = opsweave_contracts::ResourceRequirements {
+                cpu_millis: 100,
+                memory_mib: 128,
+            };
+            let (_, rejection, id) = diagnose(&state, &context(&selector, &requested))
+                .await
+                .expect("a revoked but matching node is a refusal worth reporting");
+            assert_eq!(id, node);
+            match rejection {
+                super::PlacementRejection::NodeNotReady { status } => assert_eq!(
+                    status, "REVOKED",
+                    "the reason must say REVOKED, not merely 'not ready', so an operator \
+                     knows the node was taken out of service rather than being slow"
+                ),
+                other => panic!("expected NodeNotReady(REVOKED), got {other:?}"),
+            }
         }
     }
 }
