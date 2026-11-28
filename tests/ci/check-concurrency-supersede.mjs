@@ -125,6 +125,15 @@ function evaluateNode(node, ctx) {
     if (value === undefined) throw new Error(`unknown github context: github.${gh[1]}`);
     return value;
   }
+  // `inputs.<name>`. Only the `workflow_dispatch` trigger has it, and a group
+  // that reads it is keying on a caller-supplied value — which is what
+  // `main-verification.yml` does so a dispatch verifies the commit it names.
+  const inp = /^inputs\.([A-Za-z_][A-Za-z0-9_-]*)$/.exec(src);
+  if (inp) {
+    const value = ctx.inputs?.[inp[1]];
+    if (value === undefined) throw new Error(`unknown input: inputs.${inp[1]}`);
+    return value;
+  }
   const fmt = /^format\(([\s\S]*)\)$/.exec(src);
   if (fmt) {
     const args = splitArgs(fmt[1]).map((a) => evaluateNode(parseExpr(a), ctx));
@@ -385,24 +394,61 @@ for (const file of files) {
   // So the expectation is inverted - two pushes must BOTH survive - and it is
   // checked explicitly rather than left as an unregistered exception. A workflow
   // that quietly opts out of the matrix is how the matrix stops meaning anything.
-  if (file === 'release-certification.yml') {
+  if (file === 'release-certification.yml' || file === 'main-verification.yml') {
     const conc = parseConcurrency(readFileSync(WF + file, 'utf8'));
     const problems = [];
     if (!conc) problems.push(`${file}: no concurrency: block`);
     else {
+      // `main-verification.yml` keys on the COMMIT, so two DIFFERENT commits never
+      // share a group. The matrix below models one `main` ref and cannot see
+      // `github.sha`, so for it the meaningful property is the same one
+      // certification has: one push must not displace another commit's evidence.
+      // Two pushes to one ref are two commits, and each was a real push to main
+      // whose verification is its own record.
       let a, b;
+      // `github.sha` and `inputs.*` are modelled here because a per-commit group
+      // needs them; `ctxFor` builds the subset the suite workflows use, and
+      // widening it would change what their cases assert.
+      const pushCtx = (n, sha) => ({
+        github: { workflow: file, ref: 'refs/heads/main', event_name: 'push', run_id: 1000 + n, sha },
+        inputs: { sha },
+      });
       try {
-        a = evaluate(conc.group, ctxFor(file, { event: 'push', ref: 'refs/tags/v1', runId: 1 }));
-        b = evaluate(conc.group, ctxFor(file, { event: 'push', ref: 'refs/tags/v1', runId: 2 }));
+        a = evaluate(conc.group, pushCtx(1, 'a'.repeat(40)));
+        b = evaluate(conc.group, pushCtx(2, 'b'.repeat(40)));
+        // A workflow_dispatch for an OLD commit must not displace that commit's
+        // push verification either: the dispatch is a re-ask of the same question.
+        const dispatch = evaluate(conc.group, {
+          github: { workflow: file, ref: 'refs/heads/main', event_name: 'workflow_dispatch', run_id: 3000, sha: 'b'.repeat(40) },
+          inputs: { sha: 'b'.repeat(40) },
+        });
+        if (a === b) {
+          problems.push(`${file}: two different commits share group "${a}"; verification is per-commit evidence and must not be displaced`);
+        }
+        if (dispatch !== b) {
+          // Only `main-verification.yml` keys on the commit; certification keys
+          // on `run_id`, where a dispatch is deliberately a separate record.
+          if (file === 'main-verification.yml') {
+            problems.push(`${file}: a workflow_dispatch for commit ${'b'.repeat(7)} lands in group "${dispatch}" rather than "${b}"; a re-ask of the same commit must not displace its push verification`);
+          }
+        }
       } catch (error) {
         problems.push(`${file}: cannot evaluate the group (${error.message})`);
       }
-      if (a !== undefined && a === b) {
-        problems.push(`${file}: two certifications share group "${a}"; a second one would displace the first, and both are evidence`);
-      }
-      if (a !== undefined && !/run_id/.test(conc.group ?? '')) {
-        problems.push(`${file}: the group does not contain run_id, so certifications are not per-run`);
-      }
+  // The property the brief names: the observer must never cancel a run that
+  // would otherwise produce evidence. `cancelInProgress` is the RAW STRING
+  // (`'false'`), which is truthy — so it is evaluated, not tested for truthiness.
+  // The same bug was latent in the release-certification branch above, where no
+  // assertion read the field.
+  let cip;
+  try {
+    cip = evaluate(conc.cancelInProgress, pushCtx(1, 'a'.repeat(40)));
+  } catch (error) {
+    problems.push(`${file}: cannot evaluate cancel-in-progress (${error.message})`);
+  }
+  if (cip === true) {
+    problems.push(`${file}: cancel-in-progress is true; a cancelled observer reports nothing about its commit`);
+  }
     }
     for (const p of problems) { errors += 1; process.stdout.write(`ERROR ${p}\n`); }
     continue;

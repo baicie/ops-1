@@ -112,6 +112,12 @@ export const JOB_TO_SUITE = {
   'web-unit': 'web-unit',
   contracts: 'contracts',
   'spec-coverage': 'spec-coverage',
+  // The gate's own counterfactuals. Mapped to `spec-coverage` for the same
+  // reason `lint` is: it is the suite that owns "the repository's own tooling is
+  // sound", and an unmapped job is a note when green but a FAIL when red. Before
+  // this mapping existed the job did not exist at all - 29 governance tests ran
+  // only on a push to main, which is after the merge they were meant to protect.
+  'ci-governance': 'spec-coverage',
   'platform-only': 'platform-only',
   'platform-image-build': 'platform-image-build',
   'runtime-image-build': 'platform-image-build',
@@ -354,6 +360,17 @@ export const NON_GATE_WORKFLOWS = {
   // dispatch, produces a receipt, and decides nothing about whether code may
   // merge - a commit that fails certification can still be merged (ADR-029).
   'release-certification.yml': 'certification only; never a merge criterion',
+
+  // POST-MERGE OBSERVER, not a merge criterion. It verifies a commit that has
+  // ALREADY landed on main, so it produces no check on any pull request and
+  // cannot be one: registering it would leave every PR waiting on a context that
+  // only appears after the merge it was supposed to gate.
+  //
+  // It was a job in `ci.yml` before, and that placement was itself the defect:
+  // a job cannot wait for its own workflow, so it read the check state four
+  // seconds after a push whose suites took fifty minutes, and its verdict was a
+  // function of runner queue latency rather than of `main`.
+  'main-verification.yml': 'post-merge observer; decides nothing about whether code may merge',
 };
 
 /**

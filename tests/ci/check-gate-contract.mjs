@@ -175,10 +175,11 @@ export function inspectContract(ctx) {
     // is a note when green and a FAIL when red), so it is not repeated as an error
     // here - naming `scope` as a failure would be wrong, it is a control job.
     //
-    // `verify-main` is the same shape and deliberately outside JOB_TO_SUITE: it
-    // runs only on a push to main, answers "what did main ACTUALLY run", and is a
-    // report rather than a merge criterion. Putting it in `needs:` would make the
-    // gate wait on a job that itself reports on the gate's outcome.
+    // `verify-main` USED TO BE HERE and is no longer a job at all: it moved to
+    // `.github/workflows/main-verification.yml`, because a job cannot wait for
+    // its own workflow and so could not see the suites it was judging. Its
+    // replacement is registered in NON_GATE_WORKFLOWS, where (3b) below checks
+    // that it does not claim to be a merge gate.
   }
 
   // (3) workflows named vs workflows present
@@ -196,6 +197,38 @@ export function inspectContract(ctx) {
   for (const [suite, producers] of Object.entries(T.delegated)) {
     for (const wf of asList(producers)) {
       if (!present.includes(wf)) problems.push(`DELEGATED names ${wf} as a producer of ${suite}; it does not exist`);
+    }
+  }
+
+  // (3b) A WORKFLOW THAT PRODUCES NO PR CHECK MUST NOT CLAIM TO BE A MERGE GATE.
+  //
+  // The registration check above only asks whether a workflow is NAMED. It says
+  // nothing about whether the name is TRUE, and a counterfactual showed the
+  // difference: moving `main-verification.yml` from NON_GATE_WORKFLOWS into
+  // GATE_OWNERSHIP as `'merge'` passed every assertion in this file.
+  //
+  // That would be a silent hole in the other direction. `main-verification.yml`
+  // triggers on `push` to main and `workflow_dispatch` only. It produces no
+  // check on any pull request, so as a `merge` owner it could never contribute a
+  // red - while the gate's own ownership table would say the workflow was
+  // accounted for. The claim and the trigger have to agree.
+  //
+  // A workflow whose trigger map is PRESENT and names any event other than
+  // `pull_request` is refused: it has modelled its triggers, and none of them is
+  // a PR. A document with NO `on:`, or with an explicitly EMPTY one (`on: {}`),
+  // is a fixture that never modelled triggers — several attribution cases build
+  // exactly that, and demanding a trigger would fail them for a property they do
+  // not assert.
+  for (const [wf, kind] of Object.entries(T.gateOwnership)) {
+    if (kind !== 'merge') continue;
+    const doc = workflows.get(wf);
+    if (!doc || doc.unparsed) continue; // (2) and the loop above already report it
+    if (doc.on === undefined) continue;
+    const events = doc.on && typeof doc.on === 'object' ? Object.keys(doc.on) : [];
+    if (events.length === 0) continue; // a fixture without triggers; not this check's subject
+    if (!events.includes('pull_request')) {
+      problems.push(`GATE_OWNERSHIP says ${wf} is a merge-gate owner, but it does not trigger on pull_request`
+        + ` (its events are ${events.join(', ')}), so it can never produce a check a merge could be blocked by`);
     }
   }
 
