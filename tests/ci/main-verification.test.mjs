@@ -28,7 +28,7 @@ import {
   APPLICABILITY, OBSERVATION,
 } from './main-verification/expected-workflows.mjs';
 import { awaitPush, whatToAwaitOnPush } from './main-verification/await-push.mjs';
-import { decide, SELF_WORKFLOW } from './main-verification/verify.mjs';
+import { decide, makeReader, SELF_WORKFLOW } from './main-verification/verify.mjs';
 import { parseSlurpedPages, fetchCommitRuns } from './main-verification/github.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -368,6 +368,53 @@ test('a NaN budget is a configuration error, not an infinite loop', async () => 
   );
 });
 
+test('THE WAIT UNDERSTANDS WHAT THE PRODUCTION READER ACTUALLY RETURNS', async () => {
+  // THE DEFECT THIS PINS, and it was live on main for exactly one run.
+  //
+  // `whatToAwaitOnPush` read `snapshot.expected`. The production reader returns
+  // `snapshot.workflows.expected`. Against the real reader it saw an EMPTY
+  // obligation list, concluded nothing was owed, and reported "settled after 1
+  // read(s)" in about a second — on 8a29ea55, main's first push after this
+  // workflow existed, while four workflows were still running.
+  //
+  // Every test that existed fed the FLAT shape, so the suite was green while the
+  // production path was broken. That is the same defect class this phase exists
+  // to remove, committed by the code written to remove it.
+  //
+  // So this case does not hand-build a snapshot. It constructs the REAL reader
+  // and asserts the obligations survive the trip.
+  const reader = makeReader({ fromJson: fixtureFile({
+    files: ['apps/node/src/runtime.rs'],
+    runs: [run('ci.yml', null, { status: 'queued', conclusion: null })],
+  }) });
+  const snapshot = await reader(1);
+  assert.equal(snapshot.expected, undefined, 'the reader must not be assumed to return the flat shape');
+  assert.ok(Array.isArray(snapshot.workflows?.expected), 'the reader returns workflows.expected');
+  const { waiting } = whatToAwaitOnPush(snapshot);
+  assert.ok(waiting.length > 0, 'the wait must see the obligations the reader returned');
+  assert.ok(waiting.some((w) => w.startsWith('ci.yml')),
+    `ci.yml is queued and must be waited on; got ${JSON.stringify(waiting)}`);
+});
+
+test('the wait understands BOTH snapshot shapes', async () => {
+  // A fix that accepted only the nested shape would break every case above; a fix
+  // that accepted only the flat one is what shipped. Both are asserted.
+  const record = rec('ci.yml', APPLICABILITY.REQUIRED);
+  const queued = run('ci.yml', null, { status: 'queued', conclusion: null });
+  for (const [label, snapshot] of [
+    ['flat', { runs: [queued], expected: [record], filesError: null, error: null }],
+    ['nested', { runs: [queued], workflows: { expected: [record], selfReference: [], unparsed: [] }, filesError: null, error: null }],
+  ]) {
+    let t = 0;
+    const result = await awaitPush({
+      read: async () => snapshot,
+      budgetMs: 1000, pollMs: 50, now: () => (t += 300), sleep: async () => {},
+    });
+    assert.equal(result.timedOut, true, `${label}: a queued workflow must exhaust the budget, not settle`);
+    assert.ok(result.waiting.length > 0, `${label}: and the wait must name it`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Applicability: the trigger semantics GitHub actually implements.
 // ---------------------------------------------------------------------------
@@ -461,7 +508,11 @@ test('CLI: VERIFIED exits 0', () => {
     workflows: [rec('ci.yml', APPLICABILITY.REQUIRED), rec('staging-preview.yml', APPLICABILITY.REQUIRED)],
     runs: [run('ci.yml', 'success'), run('staging-preview.yml', 'success')],
   });
-  const r = cli(['--from-json', f, '--wait', '--json']);
+  // A BUDGET IS PASSED TO EVERY --wait INVOCATION. Without one the CLI uses its
+  // real 90-minute default, and a fixture whose workflow is still queued blocks
+  // the test for the full budget. Correct behaviour, broken test - the same class
+  // of mistake as feeding a shape production never produces.
+  const r = cli(['--from-json', f, '--wait', '--budget-ms', '300', '--json']);
   assert.equal(r.code, 0, r.stdout);
   assert.equal(JSON.parse(r.stdout).state, 'VERIFIED');
 });
@@ -471,7 +522,11 @@ test('CLI: FAILED exits 1', () => {
     workflows: [rec('ci.yml', APPLICABILITY.REQUIRED), rec('staging-preview.yml', APPLICABILITY.REQUIRED)],
     runs: [run('ci.yml', 'success'), run('staging-preview.yml', 'failure')],
   });
-  const r = cli(['--from-json', f, '--wait', '--json']);
+  // A BUDGET IS PASSED TO EVERY --wait INVOCATION. Without one the CLI uses its
+  // real 90-minute default, and a fixture whose workflow is still queued blocks
+  // the test for the full budget. Correct behaviour, broken test - the same class
+  // of mistake as feeding a shape production never produces.
+  const r = cli(['--from-json', f, '--wait', '--budget-ms', '300', '--json']);
   assert.equal(r.code, 1);
 });
 
@@ -480,7 +535,11 @@ test('CLI: INCOMPLETE_TIMEOUT exits 1 - a result that does not exist is not merg
     workflows: [rec('ci.yml', APPLICABILITY.REQUIRED)],
     runs: [],
   });
-  const r = cli(['--from-json', f, '--wait', '--json']);
+  // A BUDGET IS PASSED TO EVERY --wait INVOCATION. Without one the CLI uses its
+  // real 90-minute default, and a fixture whose workflow is still queued blocks
+  // the test for the full budget. Correct behaviour, broken test - the same class
+  // of mistake as feeding a shape production never produces.
+  const r = cli(['--from-json', f, '--wait', '--budget-ms', '300', '--json']);
   const parsed = JSON.parse(r.stdout);
   assert.equal(parsed.state, 'INCOMPLETE_TIMEOUT');
   assert.equal(r.code, 1);
@@ -491,7 +550,11 @@ test('CLI: SUPERSEDED exits 3 and is not VERIFIED', () => {
     workflows: [rec('ci.yml', APPLICABILITY.REQUIRED)],
     runs: [run('ci.yml', 'cancelled')],
   });
-  const r = cli(['--from-json', f, '--wait', '--json']);
+  // A BUDGET IS PASSED TO EVERY --wait INVOCATION. Without one the CLI uses its
+  // real 90-minute default, and a fixture whose workflow is still queued blocks
+  // the test for the full budget. Correct behaviour, broken test - the same class
+  // of mistake as feeding a shape production never produces.
+  const r = cli(['--from-json', f, '--wait', '--budget-ms', '300', '--json']);
   const parsed = JSON.parse(r.stdout);
   assert.equal(parsed.state, 'SUPERSEDED');
   assert.equal(r.code, 3);
@@ -501,7 +564,7 @@ test('CLI: a malformed fixture is refused with a non-zero status, never a green 
   const dir = mkdtempSync(join(tmpdir(), 'mainver-'));
   const path = join(dir, 'bad.json');
   writeFileSync(path, '{not json');
-  const r = cli(['--from-json', path, '--wait', '--json']);
+  const r = cli(['--from-json', path, '--wait', '--budget-ms', '300', '--json']);
   assert.notEqual(r.code, 0);
 });
 

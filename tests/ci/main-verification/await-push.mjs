@@ -88,7 +88,28 @@ export function whatToAwaitOnPush(snapshot) {
     if (!current || Number(run.attempt ?? 1) >= Number(current.attempt ?? 1)) byWorkflow.set(run.workflow, run);
   }
 
-  for (const record of snapshot?.expected ?? []) {
+  // WHERE THE OBLIGATIONS COME FROM.
+  //
+  // `snapshot.expected` is the shape the unit tests hand in; the production
+  // reader returns `snapshot.workflows.expected`. This function read only the
+  // first, so against the real reader it saw an EMPTY list, concluded nothing was
+  // owed, and returned "settled after 1 read(s)" in about a second — on `main`'s
+  // very first run of this workflow (8a29ea55), while four workflows were still
+  // running:
+  //
+  //     wait: all delegated suites settled after 1 read(s), 1s
+  //     "reason": "4 workflow(s) still had no answer when the budget ran out:
+  //                ci.yml: run is queued, data-foundation.yml: run is in_progress,
+  //                platform-linux-acceptance.yml: run is in_progress,
+  //                staging-preview.yml: run is in_progress"
+  //
+  // That is the defect this phase exists to remove, committed by the code
+  // written to remove it: the tests fed the flat shape, the reader produced the
+  // nested one, and the two never met. Accepting both is the fix; the test that
+  // pins it drives the PRODUCTION reader (`makeReader`) rather than a literal.
+  const obligations = snapshot?.expected ?? snapshot?.workflows?.expected ?? [];
+
+  for (const record of obligations) {
     if (record.applicability === APPLICABILITY.NOT_APPLICABLE) {
       settled.push({ name: record.workflow, state: 'not-applicable', reason: record.expectedReason });
       continue;
