@@ -304,17 +304,64 @@ count = 1   after revoke, for an instance with container_id
 Whether revocation *should* release those slots is a product decision. The test
 records the current behaviour and says so, rather than asserting it is correct.
 
-## Still open, by area
+## The remaining gaps, ranked by what a failure would cost
 
-| area | most significant gaps |
-|---|---|
-| node boundary | `pull` interaction with quarantine (the pull now has a failure test; the interaction does not); the `supervise()` LOOP itself (all three decisions it makes are now unit-tested; the loop that calls them is not driven end to end); node heartbeating with an old generation at the API (409 path); observation for an unknown instance |
-| capacity | the preflight's `reserved`/`deployment_counts` inputs always empty in tests; revoked node excluded from the preflight's node list |
-| lifecycle | `REPLICAS_NOT_READY` on activation; rollback to a staged-but-never-deployed version; redeploy while the old version is DRAINING; enable/disable repeated cycles |
-| diagnosis | `diagnose_placement` is untested AND unscoped — see the section above; the query has no selector, so it can blame a node the deployment was never eligible for |
+TASK-29 asked for risk classification rather than an unbounded list, and for each
+risk to name the LOWEST test layer that can actually verify it. The distinction
+matters: a SQL generation fence can be proven at L2, but "the container physically
+stopped" cannot.
 
-**This is not "add a few tests".** Three of the four release paths Phase 9C fixed
-have a test; the fault conditions that *cause* them mostly do not.
+Layers: **L1** pure function · **L2** Kernel against real PostgreSQL · **L3** real
+Node + Docker + Kernel · **L4** real staging.
+
+### P0 — a wrong answer corrupts state or crosses a boundary
+
+| risk | lowest layer that can prove it | status |
+|---|---|---|
+| cross-node mutation (a node reports about an instance it does not host) | L2 | **covered** — `an_observation_for_an_unknown_instance_writes_nothing`, counterfactual removes `node_id` |
+| unauthorised activation / revision confusion | L2 | **covered** — `REVISION_CONFLICT` test |
+| ACTIVE revision with no serving instance | L2 | **covered** — `REPLICAS_NOT_READY`; counterfactual makes activation return 200 |
+| reclaiming a serving instance | L2 | **covered** — ADR-030 matrix (TASK-10) |
+| releasing a deployment another plugin requires | L2 | **covered** — `DEPENDENCY_BLOCKED`; counterfactual returns 200 |
+| artifact / runtime identity | L3 | **partial** — `verify_digest` (mismatch, tag-only) is L1; the pull→verify→create chain is not driven |
+
+**No P0 is open.** Two of the covered ones were fixed by this pass (the
+`node_id` predicate had no test; `DEPENDENCY_BLOCKED` had none at all).
+
+### P1 — a permanent capacity loss or a deployment that cannot converge
+
+| risk | lowest layer | status |
+|---|---|---|
+| permanent capacity leak | L2 | **covered** — TASK-16 twenty-cycle, TASK-12 redeploy, scale-down |
+| container that cannot start eventually `Failed` with the right count | L2 | **covered** — TASK-28, and it found a real defect |
+| node revoked mid-deploy | L2 | **covered** — `revocation_mid_deploy` |
+| redeploy while the old version is DRAINING | L2 | **open** — the branch is reached only through live acceptance |
+| enable/disable repeated cycles | L2 | **open** — one round is exercised, only in live acceptance |
+| quarantine during a pull | L3 | **open** — needs a slow pull and a real lifecycle lock |
+
+### P2 — the operator is misled, or recovery is slow
+
+| risk | lowest layer | status |
+|---|---|---|
+| wrong node blamed for a placement refusal | L2 | **fixed this pass** — TASK-27 scoping |
+| preflight says FITS for a deploy the planner refuses | L1 | **fixed this pass** — the occupancy inputs were never populated |
+| `STALE_NODE_GENERATION` never exercised | L1 | **fixed this pass** |
+
+### What is deliberately not being promoted to a Phase 9 blocker
+
+The inventory's 40+ raw conditions include many that are the same risk at
+different layers. Treating each as its own gate is how a phase never ends. The
+rule applied above: **a condition becomes a blocker only if the lowest layer that
+could catch it is not already guarded.**
+
+That leaves three P1 items open. Each has a named successor rather than an
+open-ended test task:
+
+- **redeploy while DRAINING** and **repeated enable/disable** — both are lifecycle
+  sequences that the twenty-cycle test (TASK-16) exercises in a different order;
+  the specific orderings need their own L2 tests.
+- **quarantine during a pull** — needs L3, and L3 for the node runtime is the
+  supervisor work TASK-28 started.
 
 ## Maven Central 429: what is actually in place, and what it does not cover
 

@@ -229,8 +229,23 @@ jobs:
       - uses: actions/setup-go@v5
         with: { go-version: '1.25' }
 
+      # THE DEPENDENCY SET IS CACHED, AND IT WAS NOT BEFORE (TASK-32).
+      #
+      # Three workflows resolve the same `spring-boot-starter-parent:3.3.5` from
+      # Maven Central, each cold, each time. When Central returns 429 - measured
+      # four times across six runs on one branch - the expensive acceptance job
+      # fails for a reason that has nothing to do with the change under test, and
+      # a rerun costs 40-60 minutes.
+      #
+      # `cache: maven` keys on the POM files setup-java finds, so a POM change
+      # invalidates it; `cache-dependency-path` pins the exact file that declares
+      # the parent so a change there cannot be missed.
       - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '21' }
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: plugins/hello-java/pom.xml
 
       - name: Install Maven
         run: sudo apt-get update && sudo apt-get install -y maven
