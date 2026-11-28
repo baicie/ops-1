@@ -86,14 +86,48 @@ const has = (n) => argv.includes(n);
 export function decide({ runs, workflows, filesError = null, waiting = false, sha, source }) {
   const classified = classifyMainRuns(runs, workflows, { selfWorkflow: SELF_WORKFLOW, waiting });
 
-  // The three-level verdict the brief asks for. Only the first is decided here;
-  // the other two belong to workflows that do not exist in this form yet, and
-  // saying so is better than inventing them. `null` means "not decided by this
-  // observer", not "unknown" and not "passed".
+  // THE THREE LEVELS, IN THE REPOSITORY'S OWN VOCABULARY.
+  //
+  // The brief asks for `codeVerdict` / `stagingVerdict` / `releaseVerdict` and
+  // forbids one SUCCESS covering all three. `scripts/release-receipt.mjs` already
+  // carries that distinction as `CERTIFICATION_STATES`:
+  //
+  //     CODE_CERTIFIED -> ARTIFACT_VERIFIED -> STAGING_ACCEPTED -> PRODUCTION_APPROVED
+  //
+  // and it already records which of them that file can prove
+  // (`STATES_THIS_FILE_PROVES = ['CODE_CERTIFIED']`). Inventing a second
+  // vocabulary here would be the "second release system" the brief forbids, and
+  // the two would drift: a reader would have to know that `codeVerdict=VERIFIED`
+  // and `state=CODE_CERTIFIED` meant the same thing.
+  //
+  // So this observer reports in the receipt's words, and it asserts only the level
+  // it can actually establish. `certification` here is a STATEMENT ABOUT WHAT WAS
+  // CHECKED, deliberately weaker than the receipt's `state`, which is written by
+  // the certification workflow after reading this commit's merge-gate checks:
+  //
+  //   VERIFIED  -> CODE_CERTIFIED     every REQUIRED push workflow succeeded
+  //   anything  -> not CODE_CERTIFIED, with the reason
+  //
+  // The other levels are `null`, not 'UNKNOWN' and not 'PASS'. `null` says "this
+  // observer does not decide it", which is true; a string would imply it looked.
   const verdict = {
     codeVerdict: classified.state,
     stagingVerdict: null,
     releaseVerdict: null,
+  };
+  const certification = {
+    level: 'CODE_CERTIFIED',
+    reached: false,
+    statesInOrder: ['CODE_CERTIFIED', 'ARTIFACT_VERIFIED', 'STAGING_ACCEPTED', 'PRODUCTION_APPROVED'],
+    // This file's evidence is the PUSH runs for one commit. The receipt's
+    // CODE_CERTIFIED is a reading of that commit's MERGE-GATE checks. They are
+    // different executions, so a green here is necessary for a receipt but not
+    // sufficient for one, and saying so is the whole point of keeping the fields
+    // apart.
+    establishes:
+      'that this commit\'s push workflows all concluded success; it does not read the '
+      + 'merge-gate checks and is therefore not itself a certification',
+    decidedBy: 'nothing here; scripts/release-receipt.mjs writes the receipt',
   };
 
   const blockers = [];
@@ -112,6 +146,7 @@ export function decide({ runs, workflows, filesError = null, waiting = false, sh
 
   return {
     ...verdict,
+    certification: { ...certification, reached: state === 'VERIFIED' },
     state,
     sha,
     source,

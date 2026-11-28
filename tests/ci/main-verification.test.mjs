@@ -482,6 +482,38 @@ test('the verdict keeps code, staging and release separate', () => {
   assert.ok(Array.isArray(result.observations) && result.observations.length > 0);
 });
 
+test('the three levels use the REPOSITORY vocabulary, not a second one', async () => {
+  // `scripts/release-receipt.mjs` already carries the three-level distinction as
+  // CERTIFICATION_STATES. Inventing `codeVerdict=VERIFIED` etc. beside it would
+  // be the second release system the brief forbids, and a reader would have to
+  // know the two meant the same thing.
+  //
+  // This imports the receipt's own constant and asserts the observer's ladder is
+  // a subset in the same order - so if either list changes, this fails rather
+  // than letting them drift.
+  const receipt = await import('../../scripts/release-receipt.mjs');
+  const result = decide({
+    runs: [run('ci.yml', 'success'), run('staging-preview.yml', 'success')],
+    workflows: { expected: [rec('ci.yml', APPLICABILITY.REQUIRED), rec('staging-preview.yml', APPLICABILITY.REQUIRED)], selfReference: [], unparsed: [] },
+    filesError: null, waiting: false, sha: 'a'.repeat(40), source: 'test',
+  });
+  assert.ok(Array.isArray(receipt.CERTIFICATION_STATES), 'the receipt still exports its states');
+  assert.deepEqual(result.certification.statesInOrder, receipt.CERTIFICATION_STATES,
+    'the observer reports the receipt\'s ladder, in the receipt\'s order');
+  // This file establishes exactly one level and says so, matching the receipt's
+  // own `STATES_THIS_FILE_PROVES`.
+  assert.equal(result.certification.level, 'CODE_CERTIFIED');
+  assert.ok(receipt.STATES_THIS_FILE_PROVES.includes('CODE_CERTIFIED'));
+  // VERIFIED is the only state that reaches it.
+  assert.equal(result.certification.reached, true);
+  const failed = decide({
+    runs: [run('ci.yml', 'success'), run('staging-preview.yml', 'failure')],
+    workflows: { expected: [rec('ci.yml', APPLICABILITY.REQUIRED), rec('staging-preview.yml', APPLICABILITY.REQUIRED)], selfReference: [], unparsed: [] },
+    filesError: null, waiting: false, sha: 'a'.repeat(40), source: 'test',
+  });
+  assert.equal(failed.certification.reached, false, 'a red push workflow does not reach any level');
+});
+
 // ---------------------------------------------------------------------------
 // The CLI: the process status IS the verdict.
 // ---------------------------------------------------------------------------
