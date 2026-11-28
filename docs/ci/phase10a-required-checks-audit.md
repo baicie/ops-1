@@ -161,6 +161,50 @@ Checked while auditing rather than assumed: `verify-main.mjs:163-169` orders
 state machine is right; only the step's exit status is wrong. The distinction
 matters because fixing the first would have been a no-op.
 
+## The instrument cannot see what it is pointed at
+
+The `success` above is not an edge case. On the commit that motivated this audit,
+`4375c988`, the same job printed:
+
+```
+verify-main: INCOMPLETE (rc=1)
+```
+
+and the step concluded `success`. Both are consistent with the exit-status defect.
+**But the state itself was already the wrong answer, and the timing says why:**
+
+| | time |
+|---|---|
+| all five push workflows created | `06:25:52` |
+| `verify-main` job started | `06:25:56` |
+| `verify-main` read the check state | `06:26:12` |
+| `verify-main` job finished | `06:26:23` |
+| `runtime-conformance` settled | `06:30:20` |
+| `staging-preview` failed | `06:44:11` |
+| `data-foundation` settled | `06:49:09` |
+| `plugin-lifecycle` settled | `07:16:14` |
+| `ci` (containing this job) settled | `07:16:30` |
+
+**At the moment it read, zero of the five had settled.** `verify-main` has no
+`needs:`, so it runs in the first seconds of a push whose suites take fifty
+minutes, and its answer is a snapshot of a state that has not formed yet. Run
+against the same commit *now*, it returns the correct `FAILED`.
+
+Compare `63ef2451`, where it did report `FAILED`: there the job was queued for ten
+minutes and only started at `23:29:36`, by which time a fast-failing
+`staging-preview` had already settled at `23:22:42`.
+
+**So the difference between `FAILED` and `INCOMPLETE` on those two commits is
+runner queue delay, not the state of `main`.** Same tool, same code, different
+answer depending on how busy GitHub's runners were that minute. A verification
+whose verdict is a function of queue latency is not a verification; it is a
+sample.
+
+This is worth separating from the exit-status defect because the fixes are
+different, and fixing only the exit status would make the job **deterministically
+red on every push** — `INCOMPLETE` would become a red check for the normal case,
+which would train everyone to ignore it, and that is worse than a silent green.
+
 ## What would move this
 
 1. **Decide `strict`** — true or false — so the preflight stops refusing both
@@ -202,6 +246,13 @@ matters because fixing the first would have been a no-op.
    required — but without it, `verify-main` is a report CI cannot act on at all.
    **Not applied here**: it changes a post-merge job's contract, and this document is
    the input to that decision rather than the decision.
+
+   **It must not be applied alone.** With the exit status fixed and the timing
+   unchanged, `INCOMPLETE` — the state of *every* push in its first minutes —
+   becomes a red check every time. The job needs `needs:` on the suites it judges,
+   or a bounded wait like `ci-gate`'s, before its status is allowed to mean
+   anything. `ci-gate` already solves this problem and its solution is 2,716 s of
+   measured waiting; the mistake to avoid is building a second, weaker one.
 3. **Authorise the write.** `gh api -X PUT repos/baicie/ops-1/rulesets/26958761
    --input docs/ci/ruleset-candidate-ten.json` after the preflight is 21/21.
    `PUT` replaces the whole `rules` array; `check-ruleset-payload.mjs` exists
