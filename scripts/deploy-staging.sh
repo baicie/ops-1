@@ -163,9 +163,27 @@ warn() {
   append_log "WARN $*"
 }
 
+# die <code> <message...>
+#
+# THE PHASE IS READ FROM `FAILURE_PHASE`, which must have been set by
+# `set_failure_phase` for THIS failure — and the first version of this got that
+# wrong in ten places. The phase was assigned on the line *beside* each die, so any
+# die the inserter missed kept whatever an EARLIER, SUCCESSFUL check had left in
+# the variable.
+#
+# Measured on run 46152094215: the pull was denied (RELEASE_IDENTITY), the
+# ACCESS_DENIED arm had no phase line, and the record said HOST_PREPARATION —
+# left over from a preflight check that had passed. The gate still refused the
+# transfer, because both phases are `false`; it refused for the wrong reason, and
+# a reader of the artifact was told the host was unprepared when it was not.
+#
+# `assert_phase_was_set` below is the structural fix: a die with no phase for this
+# failure is a programming error, and it is reported as one rather than being
+# papered over with a leftover value.
 die() {
   local code="${1:-1}"
   shift || true
+  assert_phase_was_set "$*"
   printf '%s ERROR %s\n' "$(iso_now)" "$*" >&2
   append_log "ERROR $*"
   record_failure
@@ -209,6 +227,23 @@ FAILURE_FILE="$DEPLOY_DIR/last-failure.json"
 set_failure_phase() {
   FAILURE_PHASE="$1"
   FAILURE_REASON="${2:-}"
+  FAILURE_PHASE_SET=1
+}
+
+# Did THIS failure set a phase, or is the variable carrying an older one?
+#
+# Reset on every set, so a phase set by a check that then PASSED cannot be
+# inherited by a later failure. Nothing resets it otherwise: the script does not
+# know when a check "passed", only when it died.
+FAILURE_PHASE_SET=""
+
+assert_phase_was_set() {
+  if [ -z "$FAILURE_PHASE_SET" ]; then
+    FAILURE_PHASE="UNKNOWN"
+    FAILURE_REASON="a failure with no phase set by this code path: ${1:-}"
+    printf '%s WARN internal: no set_failure_phase before die (%s); recording UNKNOWN\n' \
+      "$(iso_now)" "${1:-}" >&2
+  fi
 }
 
 # fallback_allowed <phase>
@@ -458,22 +493,26 @@ assert_service_env_boundary() {
     node)
       for key in $NODE_ENV_FORBIDDEN_KEYS; do
         if grep -Eq "^[[:space:]]*\${key}[[:space:]]*=" "$file"; then
+          set_failure_phase HOST_PREPARATION "node.env may not carry the docker socket"
           die 1 "$file must not define $key: the node needs the docker socket and a kernel URL, nothing else (ADR-014 §8)"
         fi
       done
       hit="$(grep -Eo '^[[:space:]]*[A-Za-z0-9_]*SECRET[A-Za-z0-9_]*' "$file" | tr -d '[:space:]' | head -n1 || true)"
       if [ -n "$hit" ]; then
+        set_failure_phase HOST_PREPARATION "node.env carries secrets"
         die 1 "$file must not define $hit: node.env carries no secrets (ADR-014 §8)"
       fi
       ;;
     postgres)
       hit="$(grep -Eo '^[[:space:]]*[A-Za-z0-9_]+' "$file" | tr -d '[:space:]' | grep -Ev '^POSTGRES_[A-Z0-9_]+$' | head -n1 || true)"
       if [ -n "$hit" ]; then
+        set_failure_phase HOST_PREPARATION "postgres.env holds foreign keys"
         die 1 "$file must hold POSTGRES_* keys only, but defines $hit (ADR-014 §8)"
       fi
       ;;
     kernel)
       if grep -Eq '^[[:space:]]*POSTGRES_PASSWORD[[:space:]]*=' "$file"; then
+        set_failure_phase HOST_PREPARATION "postgres.env carries the db password"
         die 1 "$file must not define POSTGRES_PASSWORD: the kernel reads DATABASE_URL, not the superuser password (ADR-014 §8)"
       fi
       ;;
@@ -535,6 +574,7 @@ load_services() {
   local raw svc
   raw="$(compose config --services 2>/dev/null || true)"
   if [ -z "$raw" ]; then
+    set_failure_phase HOST_PREPARATION "compose services unreadable"
     die 1 "cannot read services from $COMPOSE_FILE ('docker compose config --services' produced no output); check that OPSWEAVE_IMAGE and the variables in $ENV_FILE are valid"
   fi
   ALL_SERVICES=()
@@ -549,6 +589,7 @@ load_services() {
     fi
   done
   if [ "${#APP_SERVICES[@]}" -eq 0 ]; then
+    set_failure_phase HOST_PREPARATION "compose defines no app services"
     die 1 "compose project defines none of the expected application services ($APP_SERVICE_CANDIDATES); defined: ${ALL_SERVICES[*]}"
   fi
   log "compose services: ${ALL_SERVICES[*]}; application services: ${APP_SERVICES[*]}"
@@ -604,6 +645,7 @@ detect_docker_gid() {
   fi
   gid="$(stat -c '%g' "$sock" 2>/dev/null || true)"
   if ! printf '%s' "$gid" | grep -Eq '^[0-9]+$'; then
+    set_failure_phase HOST_PREPARATION "docker socket gid unreadable"
     die 1 "cannot read a numeric group id from $sock; refusing to start the node with a guessed DOCKER_GID"
   fi
   recorded="$(env_file_value DOCKER_GID "")"
@@ -713,6 +755,7 @@ check_image_available() {
           set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
           die 1 "image $IMAGE_REPO:$sha cannot be read: the registry requires authentication and ${REGISTRY_AUTH_STATE} did not grant it. Provision $GHCR_TOKEN_FILE on this host, or log this host in to ghcr.io. (Retrying would not help.)" ;;
         ACCESS_DENIED)
+          set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
           die 1 "image $IMAGE_REPO:$sha cannot be read: ${REGISTRY_VERIFY_DETAIL}. The credential in use is valid but lacks permission for $IMAGE_REPO. (Retrying would not help.)" ;;
         DIGEST_MISMATCH)
           set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
@@ -943,14 +986,18 @@ prewarm_image() {
       set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
       die 1 "cannot obtain $IMAGE_REPO:$sha: the registry requires authentication and ${REGISTRY_AUTH_STATE} did not grant it (${REGISTRY_VERIFY_DETAIL}). If that state is EXISTING_CREDENTIAL, the login already on this host is stale or lacks read access to $IMAGE_REPO - the token file is what would replace it. Nothing on this host was changed." ;;
     ACCESS_DENIED)
+      set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
       die 1 "cannot obtain $IMAGE_REPO:$sha: ${REGISTRY_VERIFY_DETAIL}. The credential is accepted but not permitted to read $IMAGE_REPO; a pull cannot fix a permission. Nothing on this host was changed." ;;
     RATE_LIMITED)
+      set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
       die 1 "cannot obtain $IMAGE_REPO:$sha: the registry is rate-limiting this host (${REGISTRY_VERIFY_DETAIL}). Retry later; nothing on this host was changed." ;;
     REGISTRY_UNAVAILABLE)
+      set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
       die 1 "cannot obtain $IMAGE_REPO:$sha: the registry could not be reached (${REGISTRY_VERIFY_DETAIL}). Nothing on this host was changed." ;;
     *)
       # An unrecognised failure keeps the pull's own reason, because that is the
       # evidence, and does NOT get folded into a named category it may not be.
+      set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
       die 1 "cannot obtain $IMAGE_REPO:$sha from the registry (${REGISTRY_VERIFY_STATE}: ${REGISTRY_VERIFY_DETAIL}); nothing on this host was changed (no deploy lock taken, no container replaced). The pull's own error is above." ;;
   esac
 }
@@ -1764,9 +1811,11 @@ cmd_rollback() {
   previous="$(pointer_value previous)"
   current="$(current_sha || true)"
   if ! [[ "$previous" =~ $SHA_RE ]]; then
+    set_failure_phase HEALTH_VERIFICATION "no previous release"
     die 1 "no previous successful release is recorded (pointer $DEPLOY_DIR/previous); nothing to roll back to — pass --sha to deploy an earlier commit instead"
   fi
   if [ "$previous" = "$current" ]; then
+    set_failure_phase HEALTH_VERIFICATION "previous equals current"
     die 1 "the recorded previous release ($previous) is already the current release; nothing to roll back to"
   fi
   started="$(record_field "$DEPLOY_DIR/$previous.json" deployed_at)"
