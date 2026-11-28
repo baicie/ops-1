@@ -91,21 +91,47 @@ out="$(node "$TOOL" --snapshot docs/ci/ruleset-26958761-original-strict.json 2>&
 printf '%s\n' "$out" | grep -q "the rollback payload matches the LIVE state, rule for rule" \
   && ok "the snapshot path exercises the rollback/live comparison" \
   || bad "the rollback comparison did not run against a snapshot"
-[ "$rc" -eq 0 ] || [ -n "$(printf '%s\n' "$out" | grep 'payloads DISAGREE on strict')" ] \
-  && ok "the only failure against a valid snapshot is the strict disagreement" \
+[ "$rc" -eq 0 ] \
+  && ok "the preflight passes against a valid snapshot, including the resolved strict question" \
   || bad "an unexpected failure appeared: $(printf '%s\n' "$out" | grep FAIL | head -2)"
 
-echo "== 6. the strict disagreement is REPORTED, not resolved silently"
-# It is a real inconsistency between the two shipped payloads, and the operator
-# has to choose. A preflight that picked one for them would be making the
-# decision the brief reserves.
+echo "== 6. the strict target is DECLARED and the candidate is checked against it"
+# This case used to assert the OPPOSITE: that the preflight reported a
+# disagreement between the nine- and ten-context payloads and deferred the
+# decision. The decision has since been made (docs/ci/phase10a-ruleset-migration.md):
+# the target is candidate-ten with strict=true, and the nine-context payload is
+# historical evidence rather than a competing target.
+#
+# What must still hold is the pair of properties that made the old check worth
+# having: the candidate matches the declared target, and the historical payload
+# was NOT rewritten to agree with it. The second is the one that rots quietly.
 out="$(node "$TOOL" --snapshot docs/ci/ruleset-26958761-original-strict.json 2>&1)"
-printf '%s\n' "$out" | grep -q "DISAGREE on strict: ten-context=" \
-  && ok "the preflight reports the strict disagreement between payloads" \
-  || bad "the strict disagreement was not reported"
-printf '%s\n' "$out" | grep -q "decide which is intended" \
-  && ok "it says the decision belongs to someone else" \
-  || bad "it did not defer the decision"
+printf '%s\n' "$out" | grep -q "the candidate matches the declared target on strict" \
+  && ok "the candidate is checked against a declared strict target" \
+  || bad "the candidate is not checked against a declared target"
+printf '%s\n' "$out" | grep -q "the historical nine-context payload still records strict=false, unedited" \
+  && ok "the historical payload is asserted unedited, not brought into line" \
+  || bad "the historical payload's immutability is not asserted"
+
+echo "== 6b. the strict check BITES when the candidate drifts"
+# A check that passes for both values is not a check. This drives the real
+# candidate through the real tool with strict flipped, and requires a FAIL.
+TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
+python3 - "$TMPD" <<'PYPAY'
+import json,sys,os
+d=json.load(open('docs/ci/ruleset-candidate-ten.json'))
+for r in d['rules']:
+    if r['type']=='required_status_checks':
+        r['parameters']['strict_required_status_checks_policy']=False
+json.dump(d, open(os.path.join(sys.argv[1],'drifted.json'),'w'), indent=2)
+PYPAY
+cp docs/ci/ruleset-candidate-ten.json "$TMPD/orig.json"
+cp "$TMPD/drifted.json" docs/ci/ruleset-candidate-ten.json
+drift="$(node "$TOOL" --snapshot docs/ci/ruleset-26958761-original-strict.json 2>&1)"
+cp "$TMPD/orig.json" docs/ci/ruleset-candidate-ten.json
+printf '%s\n' "$drift" | grep -q "FAIL the candidate sets strict=false" \
+  && ok "a candidate that drifts off the target is refused" \
+  || bad "the strict check passed on a drifted candidate"
 
 echo
 [ "$FAIL" -eq 0 ] && { echo "$PASS passed, 0 failed"; exit 0; }

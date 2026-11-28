@@ -205,31 +205,41 @@ if (candidate) {
       ? ok(`the candidate sets strict_required_status_checks_policy explicitly (${strict})`)
       : bad(`strict_required_status_checks_policy is ${strict}, expected an explicit boolean`);
 
-    // THE TWO SHIPPED PAYLOADS DISAGREE ON STRICT, AND A PREFLIGHT THAT IGNORES
-    // THAT IS NOT DOING ITS JOB.
+    // THE TWO SHIPPED PAYLOADS DISAGREE ON STRICT — NOW RESOLVED, NOT IGNORED.
     //
     // `docs/ci/ruleset-audit.md:58` and `ruleset-restore.md:20` record the
     // intermediate payload as "nine contexts + strict: false", and line 74 calls
     // it the rollback that "removes strict". The ten-context candidate sets
-    // `strict: true`. Both cannot be the intended end state.
+    // `strict: true`.
     //
-    // This does not decide which is right - that is the operator's call and the
-    // write is BLOCKED_AUTH. It reports the disagreement so it is resolved
-    // deliberately rather than by whichever file is sent.
+    // The decision (docs/ci/phase10a-ruleset-migration.md): the TARGET is
+    // `candidate-ten.json` with `strict: true`. The nine-context payload is
+    // HISTORICAL EVIDENCE of the earlier migration and is NOT a competing
+    // target — it predates `ci-gate` entirely, and adopting it now would leave
+    // the aggregate gate advisory for ever.
+    //
+    // So the check is no longer "do they agree" (they do not, and they should
+    // not). It is "is the declared target actually the one the candidate
+    // carries", which is the property a preflight can assert without deciding a
+    // product question on the operator's behalf.
+    const TARGET_STRICT = true;
+    if (strict !== TARGET_STRICT) {
+      bad(`the candidate sets strict=${strict}, but the declared migration target is strict=${TARGET_STRICT}`
+        + ' (docs/ci/phase10a-ruleset-migration.md)');
+    } else {
+      ok(`the candidate matches the declared target on strict (${TARGET_STRICT})`);
+    }
+    // And the historical payload must NOT have been rewritten to match. History
+    // that has been edited to agree with the present is not history, and the
+    // rollback path depends on it still describing what was actually sent then.
     const nineWithChecks = join(ROOT, 'docs/ci/ruleset-26958761-with-required-checks.json');
     const nine = readJson(nineWithChecks, 'the nine-context payload');
     if (nine) {
       const nineStrict = (nine.rules ?? [])
         .find((r) => r.type === 'required_status_checks')?.parameters?.strict_required_status_checks_policy;
-      if (nineStrict === strict) {
-        ok(`the nine- and ten-context payloads agree on strict (${strict})`);
-      } else {
-        bad(
-          `the payloads DISAGREE on strict: ten-context=${strict}, nine-context=${nineStrict}. ` +
-          `docs/ci/ruleset-audit.md records the migration as "strict: false"; ` +
-          `decide which is intended before either is sent`,
-        );
-      }
+      nineStrict === false
+        ? ok('the historical nine-context payload still records strict=false, unedited')
+        : bad(`the historical nine-context payload now says strict=${nineStrict}; it must stay as it was sent`);
     }
 
     // 5. API-acceptable field names. GitHub silently ignores unknown keys in a
