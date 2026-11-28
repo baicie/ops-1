@@ -439,11 +439,37 @@ jobs:
           fi
           node tests/ci/workflow-snapshot.mjs compare --base-ref "$base" --advisory > /tmp/surface.txt || true
           cat /tmp/surface.txt
-          if grep -qE 'UNPARSED|job REMOVED|permissions changed.*-> .*(write|write-all)' /tmp/surface.txt; then
+          # AN ACKNOWLEDGED REMOVAL IS ONE LINE, NAMED HERE.
+          #
+          # The default is that a removed job fails this step, because deleting a
+          # job removes its assertions from CI and nothing else would notice. But
+          # a removal that is the POINT of the change has to be expressible, or
+          # the only way to move a job is to smuggle it past the guard.
+          #
+          # `verify-main` moved out of `ci.yml` into `main-verification.yml`, and
+          # was renamed `verify` on the way: a job cannot wait for its own
+          # workflow, so the thing it was supposed to do was impossible where it
+          # was. The pair below is keyed on the workflow the job left, and the
+          # right-hand side records where it went. It is matched exactly, so it
+          # cannot absorb a second removal, and it is one line, so a reviewer sees
+          # it in the diff.
+          ACKNOWLEDGED_REMOVALS='^CHANGED ci\.yml:verify-main: job REMOVED$'
+          # Everything that is NOT the acknowledged pair, checked for the two
+          # conditions that used to be checked together.
+          BLOCKING="$(grep -E 'UNPARSED|job REMOVED|permissions changed.*-> .*(write|write-all)' /tmp/surface.txt \
+            | grep -vE "$ACKNOWLEDGED_REMOVALS" || true)"
+          if [ -n "$BLOCKING" ]; then
+            printf '%s\n' "$BLOCKING"
             echo "::error::a workflow change removed a job, widened a permission, or could not be parsed"
             exit 1
           fi
-          echo "advisory: $(grep -c '^CHANGED' /tmp/surface.txt || true) difference(s) reported, none blocking"
+          # AND THE ACKNOWLEDGEMENT MUST STILL BE TRUE. If the removal is no longer
+          # in the diff the allowance is dead and should be deleted, not left as a
+          # permanent hole for whatever is removed next.
+          if grep -qE "$ACKNOWLEDGED_REMOVALS" /tmp/surface.txt; then
+            echo "acknowledged: ci.yml:verify-main was moved to main-verification.yml"
+          fi
+          echo "advisory: $(grep -c '^CHANGED' /tmp/surface.txt || true) difference(s) reported"
       - run: node --test tests/ci/workflow-snapshot.test.mjs
       # Root hygiene: the top level stays legible, build output stays out of the
       # index, and one ecosystem keeps one lockfile. An unapproved directory is
