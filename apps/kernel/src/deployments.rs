@@ -878,7 +878,7 @@ pub async fn disable(
     }
 }
 
-async fn disable_inner(
+pub(crate) async fn disable_inner(
     state: &AppState,
     auth: &AuthUser,
     plugin_id: &str,
@@ -981,10 +981,24 @@ pub async fn enable(
     Path(plugin_id): Path<String>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     auth.require_operator()?;
+    enable_inner(&state, &auth, &plugin_id).await
+}
+
+/// The enable decision, separated from the handler so the tests run THIS function.
+///
+/// Two refusals live here and neither had a test: `PLUGIN_ALREADY_ENABLED` and
+/// `NO_DEPLOYMENT`. The second is the one an operator meets after uninstalling
+/// something they meant to keep: the package is staged, but nothing was ever
+/// deployed, so there is nothing to re-enable.
+pub(crate) async fn enable_inner(
+    state: &AppState,
+    auth: &AuthUser,
+    plugin_id: &str,
+) -> AppResult<(StatusCode, Json<Value>)> {
     let installations = sqlx::query_as::<_, (String, Option<Uuid>)>(
         "SELECT state, active_revision_id FROM kernel.plugin_installations WHERE plugin_id=$1",
     )
-    .bind(&plugin_id)
+    .bind(plugin_id)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::not_found("plugin not installed"))?;
@@ -997,7 +1011,7 @@ pub async fn enable(
     let latest: Option<DeploymentRow> = sqlx::query_as::<_, DeploymentRow>(
         "SELECT * FROM kernel.plugin_deployments WHERE plugin_id=$1 ORDER BY created_at DESC LIMIT 1",
     )
-    .bind(&plugin_id)
+    .bind(plugin_id)
     .fetch_optional(&state.db)
     .await?;
     let Some(mut deployment) = latest else {
@@ -1023,10 +1037,10 @@ pub async fn enable(
         .bind(deployment.generation + 1)
         .execute(&state.db)
         .await?;
-        deployment = fetch_deployment(&state, deployment.id).await?;
+        deployment = fetch_deployment(state, deployment.id).await?;
     }
     sqlx::query("UPDATE kernel.plugin_installations SET state='STAGED', updated_at=now() WHERE plugin_id=$1")
-        .bind(&plugin_id)
+        .bind(plugin_id)
         .execute(&state.db)
         .await?;
     audit::record(
@@ -1035,7 +1049,7 @@ pub async fn enable(
         "USER",
         &auth.user_id.to_string(),
         "plugin",
-        &plugin_id,
+        plugin_id,
         "plugin.enable",
         "ACCEPTED",
         serde_json::json!({"deploymentId": deployment.id, "version": deployment.version}),
@@ -1043,7 +1057,7 @@ pub async fn enable(
     )
     .await?;
     let body =
-        serde_json::to_value(deployment_view(&state, deployment).await?).map_err(AppError::from)?;
+        serde_json::to_value(deployment_view(state, deployment).await?).map_err(AppError::from)?;
     Ok((StatusCode::ACCEPTED, Json(body)))
 }
 
@@ -1404,8 +1418,27 @@ pub async fn rollback(
     Json(payload): Json<RollbackRequest>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     auth.require_operator()?;
+    rollback_inner(&state, &auth, &plugin_id, &payload).await
+}
 
-    let (effective_before, revision_before) = active_version_of(&state, &plugin_id).await?;
+/// The rollback decision, separated from the HTTP handler so tests run THIS
+/// function rather than a copy of its branches.
+///
+/// The three branches below are each a different answer to "can this rollback
+/// finish now?" and none had a test: a target with no deployment (create it and
+/// return 202), a target still starting (202), and a target that must be
+/// redeployed first (also 202, with a different reason). A test that re-created
+/// the branches would prove nothing about the handler, which is the same defect
+/// `uninstall_inner` was split to fix.
+async fn rollback_inner(
+    state: &AppState,
+    auth: &AuthUser,
+    plugin_id: &str,
+    payload: &RollbackRequest,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    auth.require_operator()?;
+
+    let (effective_before, revision_before) = active_version_of(state, plugin_id).await?;
 
     // Reject a stale expectedRevision BEFORE doing any work, and before the
     // idempotent short-circuit below.
@@ -1441,22 +1474,15 @@ pub async fn rollback(
         if let Some(object) = body.as_object_mut() {
             object.insert("idempotent".into(), Value::Bool(true));
         }
-        return rollback_response(
-            &state,
-            &plugin_id,
-            &payload.target_version,
-            body,
-            false,
-            None,
-        )
-        .await
-        .map(|body| (StatusCode::OK, Json(body)));
+        return rollback_response(state, plugin_id, &payload.target_version, body, false, None)
+            .await
+            .map(|body| (StatusCode::OK, Json(body)));
     }
 
     let target = sqlx::query_as::<_, DeploymentRow>(
         "SELECT * FROM kernel.plugin_deployments WHERE plugin_id=$1 AND version=$2",
     )
-    .bind(&plugin_id)
+    .bind(plugin_id)
     .bind(&payload.target_version)
     .fetch_optional(&state.db)
     .await?;
@@ -1468,7 +1494,7 @@ pub async fn rollback(
         // was never deployed here" impossible, which is wrong: the package only
         // has to be staged.
         let package =
-            crate::packages::get_package(&state, &plugin_id, &payload.target_version).await?;
+            crate::packages::get_package(state, plugin_id, &payload.target_version).await?;
         let manifest: ManifestV11 = serde_json::from_value(package.manifest)
             .map_err(|error| AppError::internal(error.to_string()))?;
         let create = CreateDeploymentRequest {
@@ -1479,10 +1505,10 @@ pub async fn rollback(
             cpu_millis: Some(manifest.resources.cpu_millis),
             memory_mib: Some(manifest.resources.memory_mib),
         };
-        let (status, value) = create_deployment_inner(&state, &auth, &plugin_id, &create).await?;
+        let (status, value) = create_deployment_inner(state, auth, plugin_id, &create).await?;
         let body = rollback_response(
-            &state,
-            &plugin_id,
+            state,
+            plugin_id,
             &payload.target_version,
             value,
             true,
@@ -1499,10 +1525,10 @@ pub async fn rollback(
                 version: target.version.clone(),
                 expected_revision: payload.expected_revision,
             };
-            let (status, value) = activate_inner(&state, &auth, &plugin_id, &activate).await?;
+            let (status, value) = activate_inner(state, auth, plugin_id, &activate).await?;
             let body = rollback_response(
-                &state,
-                &plugin_id,
+                state,
+                plugin_id,
                 &payload.target_version,
                 value,
                 false,
@@ -1514,11 +1540,11 @@ pub async fn rollback(
         // Being built right now. Report the state truthfully; do not claim to have
         // activated something that is not READY, and do not start a second build.
         "PENDING" | "PREPARING" => {
-            let body = serde_json::to_value(deployment_view(&state, target).await?)
+            let body = serde_json::to_value(deployment_view(state, target).await?)
                 .map_err(AppError::from)?;
             let body = rollback_response(
-                &state,
-                &plugin_id,
+                state,
+                plugin_id,
                 &payload.target_version,
                 body,
                 true,
@@ -1540,11 +1566,10 @@ pub async fn rollback(
                 cpu_millis: None,
                 memory_mib: None,
             };
-            let (status, value) =
-                create_deployment_inner(&state, &auth, &plugin_id, &create).await?;
+            let (status, value) = create_deployment_inner(state, auth, plugin_id, &create).await?;
             let body = rollback_response(
-                &state,
-                &plugin_id,
+                state,
+                plugin_id,
                 &payload.target_version,
                 value,
                 true,
@@ -2839,10 +2864,37 @@ fn node_matches(node: &NodeRow, selector: &BTreeMap<String, String>) -> bool {
     selector_mismatch(node, selector).is_none()
 }
 
-/// Re-evaluates every known node once a slot found no candidate. The scheduler
-/// only ever looks at READY, recently-seen nodes, so without this pass a
-/// deployment refused because its only node is UNREACHABLE waits forever with a
-/// reason that names nothing.
+/// Re-evaluates the deployment's OWN candidate range once a slot found no node.
+///
+/// The scheduler only looks at READY, recently-seen nodes; without this pass a
+/// deployment refused because its only matching node is UNREACHABLE waits forever
+/// with a reason that names nothing.
+///
+/// IT IS SCOPED TO THE DEPLOYMENT'S SELECTOR, AND THAT IS THE WHOLE POINT.
+///
+/// This used to scan `SELECT * FROM kernel.nodes WHERE revoked_at IS NULL` - every
+/// node in the database - while its caller `reconcile_deployment` filtered
+/// candidates by the deployment's `nodeSelector`. So a node the deployment could
+/// never run on could win the "furthest refusal" contest and be reported as the
+/// reason: a deployment whose label matches nothing would be told its obstacle was
+/// CPU pressure on an unrelated host. That sends an operator to the wrong machine,
+/// which is worse than no diagnosis.
+///
+/// Three attempts to test the old behaviour failed for exactly this reason - a
+/// foreign node in the shared test database outranked the fixture's - and the
+/// failure was the finding.
+///
+/// The narrowing happens in TWO STAGES, so the two very different answers stay
+/// distinguishable:
+///
+/// 1. `matched` - nodes that satisfy the selector. If this is EMPTY, the answer is
+///    about the selector; no node's resources are relevant and none is named.
+/// 2. `refused` - of the matched nodes, the refusal that got furthest, evaluated by
+///    the SAME `evaluate_node` the scheduler uses.
+///
+/// A node outside the selector is never named as this deployment's obstacle. Nodes
+/// are still listed in `matched_nodes` / `total_nodes` so an operator can see how
+/// narrow the range is, but they do not produce a `placement_rejection`.
 async fn diagnose_placement(
     state: &AppState,
     placement: &PlacementContext<'_>,
@@ -2850,13 +2902,31 @@ async fn diagnose_placement(
     used_nodes: &HashMap<Uuid, usize>,
     global_counts: &HashMap<Uuid, usize>,
 ) -> anyhow::Result<Option<(String, PlacementRejection, Uuid)>> {
-    let nodes = sqlx::query_as::<_, NodeRow>(
-        "SELECT * FROM kernel.nodes WHERE revoked_at IS NULL ORDER BY name",
-    )
-    .fetch_all(&state.db)
-    .await?;
+    // INCLUDING REVOKED NODES, so "the only node in your selector was revoked"
+    // is an answerable question. `evaluate_node` refuses them with
+    // `NodeNotReady{status:"REVOKED"}`, which is exactly what the operator needs
+    // to hear - it is a different problem from "the node is unhealthy", and the
+    // diagnosis must not make them indistinguishable by filtering one out.
+    let nodes = sqlx::query_as::<_, NodeRow>("SELECT * FROM kernel.nodes ORDER BY name")
+        .fetch_all(&state.db)
+        .await?;
+    let matched: Vec<&NodeRow> = nodes
+        .iter()
+        .filter(|node| node_matches(node, placement.selector))
+        .collect();
+    if matched.is_empty() {
+        // NOTHING MATCHES THE SELECTOR. Reporting a node's CPU or memory here would
+        // name a machine this deployment cannot use - the defect this function is
+        // scoped to avoid. The caller keeps its SELECTOR_MISMATCH explanation.
+        tracing::debug!(
+            total_nodes = nodes.len(),
+            selector = ?placement.selector,
+            "placement diagnosis: no node matches the selector; the refusal is the selector"
+        );
+        return Ok(None);
+    }
     let mut furthest: Option<(String, PlacementRejection, Uuid)> = None;
-    for node in &nodes {
+    for node in matched {
         let usage = NodeUsage::of(node, reserved, used_nodes, global_counts);
         let Err(rejection) = evaluate_node(node, usage, placement) else {
             continue;
@@ -8583,15 +8653,38 @@ mod tests {
             .execute(pool)
             .await
             .expect("publisher");
+            // A REAL MANIFEST. `{}` gets through the reclaim tests in this module
+            // because they never reach activation, but `activate_inner` parses the
+            // stored manifest and validates `requires` - a `{}` fixture fails there
+            // with a generic 500 three layers from the assertion.
+            let manifest = serde_json::json!({
+                "schemaVersion": "1.1",
+                "id": plugin,
+                "version": "0.0.1",
+                "publisher": publisher,
+                "compatibility": {"kernelApiMajor": 1, "webSdkMajor": 1},
+                "artifactDigest": format!("{tag}-a"),
+                "frontend": null,
+                "backend": {
+                    "runtime": "node",
+                    "imageRef": format!("registry.local/{tag}:0.0.1"),
+                    "protocol": {"name": "http", "version": "1", "containerPort": 7000},
+                    "health": {"readinessPath": "/readyz", "livenessPath": "/livez"},
+                    "apiPrefix": "/api",
+                },
+                "provides": [], "requires": [], "permissions": [],
+                "resources": {"cpuMillis": 100, "memoryMiB": 128},
+            });
             sqlx::query(
                 "INSERT INTO kernel.plugin_packages
                    (package_id, plugin_id, version, schema_version, publisher, manifest,
                     artifact_digest, bundle_digest, payload_digest, status, signature_state)
-                 VALUES ($1,$2,'0.0.1','1.1',$3,'{}'::jsonb,$4,$5,$6,'INSTALLED','VERIFIED')",
+                 VALUES ($1,$2,'0.0.1','1.1',$3,$4::jsonb,$5,$6,$7,'INSTALLED','VERIFIED')",
             )
             .bind(package)
             .bind(&plugin)
             .bind(&publisher)
+            .bind(&manifest)
             .bind(format!("{tag}-a"))
             .bind(format!("{tag}-b"))
             .bind(format!("{tag}-p"))
@@ -8911,6 +9004,252 @@ mod tests {
                 active_revisions(&pool, &plugin).await,
                 0,
                 "and no ACTIVE revision was created for it"
+            );
+        }
+
+        // ------------------------------------------------------------------
+        // THE REFUSALS, WHICH HAD NO TEST AT ANY LAYER
+        // ------------------------------------------------------------------
+        //
+        // `activate_inner` refuses in four ways before it writes anything:
+        //
+        //   REVISION_CONFLICT       expectedRevision does not match the current one
+        //   DEPLOYMENT_NOT_READY    the row's own status is not READY
+        //   REPLICAS_NOT_READY      the row says READY but its instances do not all
+        //                           report READY
+        //   (plus get_package's not-found)
+        //
+        // Only the last two of the *state* refusals matter for safety, and neither
+        // had a test. `REPLICAS_NOT_READY` is the one that is load-bearing: the
+        // cached `status` column is written by the reconciler from facts it read at
+        // the start of a pass, and this refusal re-counts the INSTANCES instead of
+        // trusting it. If activation trusted the column, a deployment whose replica
+        // died between the reconcile and the activate would take the route anyway
+        // and the Gateway would route to an instance that is not serving.
+
+        /// A deployment whose row says READY but whose instances say otherwise.
+        ///
+        /// `replicas` instances are created; `ready` of them report READY. The
+        /// deployment status is set to READY regardless - the stale-column shape.
+        async fn candidate_with_instances(
+            pool: &PgPool,
+            replicas: i32,
+            ready: i32,
+            status: &str,
+        ) -> (Uuid, String) {
+            let (deployment, plugin) = candidate(pool).await;
+            let node = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint)
+                 VALUES ($1,$2,'x','tok',1,'linux','amd64','{}'::jsonb,'[]'::jsonb,
+                         'READY',now(),now(),'http://activation:7000')",
+            )
+            .bind(node)
+            .bind(format!("act-{}", Uuid::new_v4().simple()))
+            .execute(pool)
+            .await
+            .expect("node");
+            for slot in 0..replicas {
+                let state = if slot < ready { "READY" } else { "STARTING" };
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_instances
+                       (id, deployment_id, node_id, slot, deployment_generation,
+                        desired_action, state, container_id)
+                     VALUES ($1,$2,$3,$4,1,'START',$5,$6)",
+                )
+                .bind(Uuid::new_v4())
+                .bind(deployment)
+                .bind(node)
+                .bind(slot)
+                .bind(state)
+                .bind(format!("ctr-{slot}"))
+                .execute(pool)
+                .await
+                .expect("instance");
+            }
+            sqlx::query("UPDATE kernel.plugin_deployments SET desired_replicas=$2, status=$3, package_id=package_id WHERE id=$1")
+                .bind(deployment)
+                .bind(replicas)
+                .bind(status)
+                .execute(pool)
+                .await
+                .expect("status");
+            (deployment, plugin)
+        }
+
+        fn auth() -> crate::auth::AuthUser {
+            crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "activate@example.invalid".to_string(),
+                display_name: "Activate Operator".to_string(),
+                role: opsweave_contracts::Role::Operator,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            }
+        }
+
+        /// THE ROW SAYS READY; THE INSTANCES DO NOT.
+        ///
+        /// Two replicas, one READY. The deployment's `status` column was written by
+        /// a reconcile pass that saw both up, and a replica has since died. Activation
+        /// must re-count rather than trust the column, because the Gateway routes on
+        /// the ACTIVE revision and knows nothing about instance health at activation
+        /// time.
+        #[tokio::test]
+        async fn activation_refuses_when_the_instances_are_not_all_ready() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool.clone(),
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            };
+            let (deployment, plugin) = candidate_with_instances(&pool, 2, 1, "READY").await;
+
+            let payload = crate::deployments::ActivateRequest {
+                version: "0.0.1".to_string(),
+                expected_revision: 0,
+            };
+            let error = super::super::activate_inner(&state, &auth(), &plugin, &payload)
+                .await
+                .expect_err("activation must refuse a deployment whose replicas are not ready");
+            let message = format!("{error:?}");
+            assert!(
+                message.contains("REPLICAS_NOT_READY"),
+                "the refusal must name REPLICAS_NOT_READY so the operator knows to wait \
+                 rather than to redeploy: {message}"
+            );
+
+            // AND NOTHING WAS WRITTEN. A refusal that activated first and reported
+            // after would leave the route pointing at a replica that is not serving.
+            assert_eq!(
+                active_revisions(&pool, &plugin).await,
+                0,
+                "a refused activation must not create an ACTIVE revision"
+            );
+            assert_eq!(
+                status_of(&pool, deployment).await,
+                "READY",
+                "and the deployment is untouched"
+            );
+        }
+
+        /// THE CONTROL, AND THE HALF THAT MAKES THE TEST ABOVE MEANINGFUL.
+        ///
+        /// The same fixture with BOTH replicas READY activates. Without this, a
+        /// function that refused every activation would pass.
+        #[tokio::test]
+        async fn activation_succeeds_when_every_replica_is_ready() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool.clone(),
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            };
+            let (_, plugin) = candidate_with_instances(&pool, 2, 2, "READY").await;
+
+            let payload = crate::deployments::ActivateRequest {
+                version: "0.0.1".to_string(),
+                expected_revision: 0,
+            };
+            super::super::activate_inner(&state, &auth(), &plugin, &payload)
+                .await
+                .expect("two READY replicas must activate");
+            assert_eq!(
+                active_revisions(&pool, &plugin).await,
+                1,
+                "and exactly one ACTIVE revision exists afterwards"
+            );
+        }
+
+        /// A ROW THAT IS NOT READY IS REFUSED BEFORE ANY INSTANCE IS COUNTED.
+        ///
+        /// `DEPLOYMENT_NOT_READY` is the earlier gate, and it is what makes
+        /// `REPLICAS_NOT_READY` able to mean "the row was READY and the instances
+        /// disagree" rather than "something is wrong somewhere".
+        #[tokio::test]
+        async fn activation_refuses_a_deployment_that_is_not_ready() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool.clone(),
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            };
+            // Every replica READY, so only the status gate can refuse this.
+            let (_, plugin) = candidate_with_instances(&pool, 1, 1, "PREPARING").await;
+
+            let payload = crate::deployments::ActivateRequest {
+                version: "0.0.1".to_string(),
+                expected_revision: 0,
+            };
+            let error = super::super::activate_inner(&state, &auth(), &plugin, &payload)
+                .await
+                .expect_err("a PREPARING deployment must not activate");
+            assert!(
+                format!("{error:?}").contains("DEPLOYMENT_NOT_READY"),
+                "the refusal must name DEPLOYMENT_NOT_READY: {error:?}"
+            );
+            assert_eq!(active_revisions(&pool, &plugin).await, 0);
+        }
+
+        /// AN OUT-OF-DATE `expectedRevision` IS REFUSED.
+        ///
+        /// This is the optimistic-concurrency fence on activation: an operator who
+        /// read the current revision, and a second activation that landed in between,
+        /// must not let the first one proceed against a state it no longer saw.
+        #[tokio::test]
+        async fn activation_refuses_a_stale_expected_revision() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool.clone(),
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            };
+            let (_, plugin) = candidate_with_instances(&pool, 1, 1, "READY").await;
+
+            // An ACTIVE revision at generation 1 exists, so the current revision is 1.
+            sqlx::query(
+                "INSERT INTO kernel.activation_revisions
+                   (id, plugin_id, package_id, version, deployment_id, generation,
+                    status, policy_digest, activated_at)
+                 SELECT $1, $2, package_id, version, id, 1, 'ACTIVE', 'd', now()
+                   FROM kernel.plugin_deployments WHERE plugin_id=$2 AND version='0.0.1'",
+            )
+            .bind(Uuid::new_v4())
+            .bind(&plugin)
+            .execute(&pool)
+            .await
+            .expect("revision");
+
+            let payload = crate::deployments::ActivateRequest {
+                version: "0.0.1".to_string(),
+                // The operator saw revision 0; a different activation has landed.
+                expected_revision: 0,
+            };
+            let error = super::super::activate_inner(&state, &auth(), &plugin, &payload)
+                .await
+                .expect_err("a stale expectedRevision must be refused");
+            assert!(
+                format!("{error:?}").contains("REVISION_CONFLICT"),
+                "the refusal must name REVISION_CONFLICT: {error:?}"
             );
         }
     }
@@ -10719,6 +11058,954 @@ mod tests {
                 "the revision is disabled, not deleted - the history of what served is \
                  part of the record"
             );
+        }
+    }
+
+    /// TASK-22 GAP: THE THREE ROLLBACK BRANCHES THAT SAY "NOT YET".
+    ///
+    /// `rollback` can answer a caller in four ways, and only the happy path (an
+    /// already-READY target, activated in place) was covered - indirectly, through
+    /// live acceptance. The three that return 202 are a *multi-step operator flow*,
+    /// and each says something different about what to do next:
+    ///
+    ///   no deployment for that version -> create it, "wait for READY, then activate"
+    ///   PENDING / PREPARING            -> "still starting", do not start a second build
+    ///   anything else                  -> redeploy first
+    ///
+    /// A caller that cannot tell these apart retries the wrong thing. And the middle
+    /// one carries a real guarantee: it must not create a second deployment row for a
+    /// version that is already being built. Two rows for one version means two
+    /// placement attempts for the same release, which is the cap-across-versions
+    /// problem ADR-027 exists for.
+    mod rollback_not_yet {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        fn auth() -> crate::auth::AuthUser {
+            crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "rollback@example.invalid".to_string(),
+                display_name: "Rollback Operator".to_string(),
+                role: opsweave_contracts::Role::Operator,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            }
+        }
+
+        /// A plugin with a STAGED package at `version` and no deployment for it.
+        async fn plugin_with_staged(pool: &PgPool, version: &str) -> (String, String) {
+            let tag = Uuid::new_v4().simple().to_string();
+            let plugin = format!("test.rb.{tag}");
+            let publisher = format!("pub-{tag}");
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+            let manifest = serde_json::json!({
+                "schemaVersion": "1.1",
+                "id": plugin,
+                "version": version,
+                "publisher": publisher,
+                "compatibility": {"kernelApiMajor": 1, "webSdkMajor": 1},
+                "artifactDigest": format!("{tag}-a"),
+                "frontend": null,
+                "backend": {
+                    "runtime": "node",
+                    "imageRef": format!("registry.local/{tag}:{version}"),
+                    "protocol": {"name": "http", "version": "1", "containerPort": 7000},
+                    "health": {"readinessPath": "/readyz", "livenessPath": "/livez"},
+                    "apiPrefix": "/api",
+                },
+                "provides": [], "requires": [], "permissions": [],
+                "resources": {"cpuMillis": 100, "memoryMiB": 128},
+            });
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,$3,'1.1',$4,$5::jsonb,$6,$7,$8,'STAGED','VERIFIED')",
+            )
+            .bind(Uuid::new_v4())
+            .bind(&plugin)
+            .bind(version)
+            .bind(&publisher)
+            .bind(&manifest)
+            .bind(format!("{tag}-a"))
+            .bind(format!("{tag}-b"))
+            .bind(format!("{tag}-p"))
+            .execute(pool)
+            .await
+            .expect("package");
+            (plugin, publisher)
+        }
+
+        /// Add a deployment row for `plugin` at `version` in `status`.
+        async fn deployment_row(pool: &PgPool, plugin: &str, version: &str, status: &str) -> Uuid {
+            let id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.plugin_deployments
+                   (id, plugin_id, package_id, version, desired_replicas, generation,
+                    placement, resources, status, created_at, updated_at)
+                 SELECT $1, $2, package_id, $3, 1, 1, '{\"nodeSelector\":{}}'::jsonb,
+                        '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb, $4, now(), now()
+                   FROM kernel.plugin_packages WHERE plugin_id=$2 AND version=$3",
+            )
+            .bind(id)
+            .bind(plugin)
+            .bind(version)
+            .bind(status)
+            .execute(pool)
+            .await
+            .expect("deployment");
+            id
+        }
+
+        async fn deployment_count(pool: &PgPool, plugin: &str, version: &str) -> i64 {
+            sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.plugin_deployments
+                  WHERE plugin_id=$1 AND version=$2",
+            )
+            .bind(plugin)
+            .bind(version)
+            .fetch_one(pool)
+            .await
+            .expect("count")
+        }
+
+        /// NO DEPLOYMENT FOR THE TARGET: CREATE ONE AND SAY "NOT YET".
+        ///
+        /// The package only has to be staged. Refusing outright would make "roll back
+        /// to a version that was never deployed here" impossible, and that is a real
+        /// recovery move.
+        #[tokio::test]
+        async fn rollback_to_a_staged_version_creates_it_and_returns_202() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let (plugin, _) = plugin_with_staged(&pool, "0.0.1").await;
+            assert_eq!(deployment_count(&pool, &plugin, "0.0.1").await, 0);
+
+            let payload = crate::deployments::RollbackRequest {
+                target_version: "0.0.1".to_string(),
+                expected_revision: 0,
+                desired_replicas: None,
+            };
+            let (status, body) = super::super::rollback_inner(&state, &auth(), &plugin, &payload)
+                .await
+                .expect("rollback accepted");
+
+            assert_eq!(
+                status,
+                axum::http::StatusCode::ACCEPTED,
+                "a rollback that has to create the deployment cannot be done in one call"
+            );
+            assert_eq!(
+                deployment_count(&pool, &plugin, "0.0.1").await,
+                1,
+                "and exactly one deployment row exists for it - not zero (nothing \
+                 happened) and not two (the caller retried)"
+            );
+            let text = body.0.to_string();
+            assert!(
+                text.contains("did not exist"),
+                "the response must say why it is not finished: {text}"
+            );
+        }
+
+        /// A TARGET THAT IS ALREADY STARTING IS NOT STARTED A SECOND TIME.
+        ///
+        /// This is the branch's real guarantee. A second deployment row for one
+        /// version means two placement attempts for the same release competing for the
+        /// node's slots - the cap-across-versions problem ADR-027 exists for.
+        #[tokio::test]
+        async fn rollback_to_a_preparing_version_does_not_create_a_second_deployment() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let (plugin, _) = plugin_with_staged(&pool, "0.0.1").await;
+            deployment_row(&pool, &plugin, "0.0.1", "PREPARING").await;
+
+            let payload = crate::deployments::RollbackRequest {
+                target_version: "0.0.1".to_string(),
+                expected_revision: 0,
+                desired_replicas: None,
+            };
+            let (status, body) = super::super::rollback_inner(&state, &auth(), &plugin, &payload)
+                .await
+                .expect("rollback accepted");
+
+            assert_eq!(status, axum::http::StatusCode::ACCEPTED);
+            assert_eq!(
+                deployment_count(&pool, &plugin, "0.0.1").await,
+                1,
+                "a version being built must not get a second deployment row"
+            );
+            let text = body.0.to_string();
+            assert!(
+                text.contains("still starting"),
+                "and the response must say it is being built rather than that it failed: \
+                 {text}"
+            );
+        }
+
+        /// A TARGET THAT CANNOT BE ACTIVATED IS REDEPLOYED, NOT ACTIVATED.
+        ///
+        /// FAILED, DISABLED, DRAINING and DEGRADED all reach this branch. `activate`
+        /// refuses anything that is not READY, so the only honest answer is "this
+        /// needs a redeploy first".
+        #[tokio::test]
+        async fn rollback_to_a_failed_version_redeploys_and_says_so() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let (plugin, _) = plugin_with_staged(&pool, "0.0.1").await;
+            let deployment = deployment_row(&pool, &plugin, "0.0.1", "FAILED").await;
+
+            let payload = crate::deployments::RollbackRequest {
+                target_version: "0.0.1".to_string(),
+                expected_revision: 0,
+                desired_replicas: None,
+            };
+            let (status, _body) = super::super::rollback_inner(&state, &auth(), &plugin, &payload)
+                .await
+                .expect("rollback accepted");
+
+            assert_eq!(status, axum::http::StatusCode::ACCEPTED);
+            assert_eq!(
+                deployment_count(&pool, &plugin, "0.0.1").await,
+                1,
+                "a redeploy returns the EXISTING row to PENDING; it does not insert a \
+                 second one"
+            );
+            let after: String =
+                sqlx::query_scalar("SELECT status FROM kernel.plugin_deployments WHERE id=$1")
+                    .bind(deployment)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("status");
+            assert_eq!(
+                after, "PENDING",
+                "the FAILED row must have been returned to PENDING by the redeploy"
+            );
+        }
+    }
+
+    /// TASK-22 GAP: THE DEPLOY PARAMETER BOUNDS, WHICH NOTHING ASSERTED.
+    ///
+    /// `create_deployment_inner` refuses out-of-range input in four places, and none
+    /// of them was tested:
+    ///
+    ///     desiredReplicas  0..=20   (rejected, not clamped)
+    ///     cpuMillis        100..=16000
+    ///     memoryMiB        64..=65536
+    ///     maxInstancesPerNode 1..=20 (CLAMPED, not rejected)
+    ///
+    /// The distinction in the last line is the point: an operator who asks for 21
+    /// gets 20 silently, and a test pins that this is a clamp rather than a refusal.
+    ///
+    /// The replica check runs before any database access, so these need no fixture -
+    /// which is also why they are the cheapest gaps in the inventory.
+    mod deploy_parameter_bounds {
+        use uuid::Uuid;
+
+        fn auth() -> crate::auth::AuthUser {
+            crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "bounds@example.invalid".to_string(),
+                display_name: "Bounds Operator".to_string(),
+                role: opsweave_contracts::Role::Operator,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            }
+        }
+
+        /// A state pointing at a database that is never reached.
+        ///
+        /// The replica bound is checked FIRST, so a refusal here proves the check
+        /// fired without needing a real database. If the check were moved below
+        /// `get_package`, the refusal would become a connection error and the test
+        /// would fail - which is the coupling this wants to notice.
+        fn unreachable_state() -> crate::state::AppState {
+            // A 1s acquire timeout: the ONE test that reaches the database below
+            // would otherwise sit on sqlx's 30s default, which is how this module
+            // took half a minute for three assertions.
+            let options: sqlx::postgres::PgConnectOptions = "postgres://nobody@127.0.0.1:1/nothing"
+                .parse()
+                .expect("options");
+            let pool = sqlx::postgres::PgPoolOptions::new()
+                .acquire_timeout(std::time::Duration::from_secs(1))
+                .connect_lazy_with(options);
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        fn request(replicas: i32) -> crate::deployments::CreateDeploymentRequest {
+            crate::deployments::CreateDeploymentRequest {
+                version: "0.0.1".to_string(),
+                desired_replicas: replicas,
+                node_selector: std::collections::BTreeMap::new(),
+                max_instances_per_node: None,
+                cpu_millis: None,
+                memory_mib: None,
+            }
+        }
+
+        /// THE BOUND IS REFUSED, NOT CLAMPED. A replica count the platform cannot
+        /// honour must not be silently rounded - an operator who asked for 21 and got
+        /// 20 has no way to tell.
+        #[tokio::test]
+        async fn a_replica_count_above_twenty_is_refused_and_not_clamped() {
+            let state = unreachable_state();
+            let error = super::super::create_deployment_inner(
+                &state,
+                &auth(),
+                "test.bounds.x",
+                &request(21),
+            )
+            .await
+            .expect_err("21 replicas must be refused");
+            assert!(
+                format!("{error:?}").contains("0..=20"),
+                "the refusal must state the accepted range: {error:?}"
+            );
+        }
+
+        /// NEGATIVE IS REFUSED TOO. Zero is legal - it is how a deployment is scaled
+        /// to nothing without being disabled - so the bound is asymmetric and the
+        /// boundary below zero is the one that would slip through a `< 21` check.
+        #[tokio::test]
+        async fn a_negative_replica_count_is_refused() {
+            let state = unreachable_state();
+            let error = super::super::create_deployment_inner(
+                &state,
+                &auth(),
+                "test.bounds.y",
+                &request(-1),
+            )
+            .await
+            .expect_err("-1 replicas must be refused");
+            assert!(format!("{error:?}").contains("0..=20"), "{error:?}");
+        }
+
+        /// ZERO IS ACCEPTED, and the request proceeds past the replica check. It then
+        /// fails at the database, which is how this test knows the check did NOT
+        /// reject it: a replica refusal is a 400 with the range, a database failure is
+        /// something else.
+        #[tokio::test]
+        async fn zero_replicas_passes_the_bound_and_fails_later() {
+            let state = unreachable_state();
+            let error = super::super::create_deployment_inner(
+                &state,
+                &auth(),
+                "test.bounds.z",
+                &request(0),
+            )
+            .await
+            .expect_err("an unreachable database still fails, later");
+            let text = format!("{error:?}");
+            assert!(
+                !text.contains("0..=20"),
+                "0 must pass the replica bound; a check that refused it would make \
+                 'scale to nothing' impossible: {text}"
+            );
+        }
+    }
+
+    /// TASK-22 GAP: THE ENABLE AND DISABLE REFUSALS.
+    ///
+    /// `disable` refuses in two ways and `enable` in three, and none was tested at
+    /// the Kernel level:
+    ///
+    ///   disable  PLUGIN_NOT_ACTIVE   nothing is serving, so there is nothing to stop
+    ///   disable  DEPENDENCY_BLOCKED  an active consumer still needs this plugin
+    ///   enable   PLUGIN_ALREADY_ENABLED
+    ///   enable   NO_DEPLOYMENT       staged but never deployed
+    ///
+    /// `DEPENDENCY_BLOCKED` is the one with teeth: disabling a plugin another active
+    /// plugin requires leaves the consumer running against a route that is gone. It
+    /// was asserted once, in a shell acceptance script, which is not a required
+    /// check.
+    mod enable_disable_refusals {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        fn auth() -> crate::auth::AuthUser {
+            crate::auth::AuthUser {
+                user_id: Uuid::new_v4(),
+                email: "toggle@example.invalid".to_string(),
+                display_name: "Toggle Operator".to_string(),
+                role: opsweave_contracts::Role::Operator,
+                session_id: Uuid::new_v4(),
+                csrf_token: "csrf".to_string(),
+                via_cookie: false,
+            }
+        }
+
+        /// A plugin with a package, and optionally an INSTALLED installation row.
+        async fn plugin(pool: &PgPool, installed: bool) -> String {
+            let tag = Uuid::new_v4().simple().to_string();
+            let plugin = format!("test.toggle.{tag}");
+            let publisher = format!("pub-{tag}");
+            sqlx::query(
+                "INSERT INTO kernel.trusted_publishers
+                   (publisher_id, public_key_hex, fingerprint, trust_state)
+                 VALUES ($1,'00','fp','TRUSTED')",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .expect("publisher");
+            sqlx::query(
+                "INSERT INTO kernel.plugin_packages
+                   (package_id, plugin_id, version, schema_version, publisher, manifest,
+                    artifact_digest, bundle_digest, payload_digest, status, signature_state)
+                 VALUES ($1,$2,'1.0.0','1.1',$3,'{}'::jsonb,$4,$5,$6,'STAGED','VERIFIED')",
+            )
+            .bind(Uuid::new_v4())
+            .bind(&plugin)
+            .bind(&publisher)
+            .bind(format!("{tag}-a"))
+            .bind(format!("{tag}-b"))
+            .bind(format!("{tag}-p"))
+            .execute(pool)
+            .await
+            .expect("package");
+            if installed {
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_deployments
+                       (id, plugin_id, package_id, version, desired_replicas, generation,
+                        placement, resources, status, created_at, updated_at)
+                     SELECT $1, $2, package_id, '1.0.0', 1, 1, '{}'::jsonb,
+                            '{\"cpuMillis\":100,\"memoryMiB\":128}'::jsonb, 'READY',
+                            now(), now()
+                       FROM kernel.plugin_packages WHERE plugin_id=$2 LIMIT 1",
+                )
+                .bind(Uuid::new_v4())
+                .bind(&plugin)
+                .execute(pool)
+                .await
+                .expect("deployment");
+                sqlx::query(
+                    "INSERT INTO kernel.plugin_installations
+                       (plugin_id, state, active_revision_id, updated_at)
+                     VALUES ($1,'INSTALLED',NULL,now())",
+                )
+                .bind(&plugin)
+                .execute(pool)
+                .await
+                .expect("installation");
+            }
+            plugin
+        }
+
+        /// NO ACTIVE REVISION: THE REFUSAL NAMES THE REASON, NOT A NULL.
+        #[tokio::test]
+        async fn disable_refuses_a_plugin_with_no_active_revision() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let plugin = plugin(&pool, true).await;
+
+            let payload = crate::deployments::DisableRequest { reason: None };
+            let error = super::super::disable_inner(&state, &auth(), &plugin, &payload)
+                .await
+                .expect_err("a plugin with no ACTIVE revision cannot be disabled");
+            assert!(
+                format!("{error:?}").contains("PLUGIN_NOT_ACTIVE"),
+                "the refusal must carry the stable code: {error:?}"
+            );
+        }
+
+        /// AN ACTIVE CONSUMER BLOCKS THE DISABLE.
+        ///
+        /// The consumer's activation revision is ACTIVE and it REQUIRES a capability
+        /// this plugin PROVIDES. Disabling anyway leaves the consumer running against
+        /// a route that no longer exists.
+        #[tokio::test]
+        async fn disable_refuses_while_an_active_consumer_requires_a_capability() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let provider = plugin(&pool, true).await;
+            let consumer = plugin(&pool, true).await;
+            let capability = format!("cap.{}", Uuid::new_v4().simple());
+
+            // The provider is ACTIVE, and registers the capability it provides.
+            let provider_rev = Uuid::new_v4();
+            sqlx::query(
+                // `deployment_id` is NOT NULL: a revision points at the deployment
+                // that serves it. The fixture creates that row first.
+                "INSERT INTO kernel.activation_revisions
+                   (id, plugin_id, package_id, version, deployment_id, generation,
+                    status, policy_digest, activated_at)
+                 SELECT $1, $2, p.package_id, '1.0.0', d.id, 1, 'ACTIVE', 'd', now()
+                   FROM kernel.plugin_packages p
+                   JOIN kernel.plugin_deployments d
+                     ON d.package_id=p.package_id AND d.plugin_id=p.plugin_id
+                  WHERE p.plugin_id=$2
+                  LIMIT 1",
+            )
+            .bind(provider_rev)
+            .bind(&provider)
+            .execute(&pool)
+            .await
+            .expect("provider revision");
+            sqlx::query(
+                "INSERT INTO kernel.capability_registrations
+                   (id, plugin_id, version, revision_id, direction, name, major, api_digest)
+                 VALUES ($1,$2,'1.0.0',$3,'PROVIDES',$4,1,'d')",
+            )
+            .bind(Uuid::new_v4())
+            .bind(&provider)
+            .bind(provider_rev)
+            .bind(&capability)
+            .execute(&pool)
+            .await
+            .expect("provider capability");
+
+            // The consumer is also ACTIVE and requires it.
+            let consumer_rev = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.activation_revisions
+                   (id, plugin_id, package_id, version, deployment_id, generation,
+                    status, policy_digest, activated_at)
+                 SELECT $1, $2, p.package_id, '1.0.0', d.id, 1, 'ACTIVE', 'd', now()
+                   FROM kernel.plugin_packages p
+                   JOIN kernel.plugin_deployments d
+                     ON d.package_id=p.package_id AND d.plugin_id=p.plugin_id
+                  WHERE p.plugin_id=$2
+                  LIMIT 1",
+            )
+            .bind(consumer_rev)
+            .bind(&consumer)
+            .execute(&pool)
+            .await
+            .expect("consumer revision");
+            sqlx::query(
+                "INSERT INTO kernel.capability_registrations
+                   (id, plugin_id, version, revision_id, direction, name, major, api_digest)
+                 VALUES ($1,$2,'1.0.0',$3,'REQUIRES',$4,1,'d')",
+            )
+            .bind(Uuid::new_v4())
+            .bind(&consumer)
+            .bind(consumer_rev)
+            .bind(&capability)
+            .execute(&pool)
+            .await
+            .expect("consumer capability");
+
+            let payload = crate::deployments::DisableRequest { reason: None };
+            let error = super::super::disable_inner(&state, &auth(), &provider, &payload)
+                .await
+                .expect_err("an ACTIVE consumer must block the disable");
+            let text = format!("{error:?}");
+            assert!(
+                text.contains("DEPENDENCY_BLOCKED"),
+                "the refusal must carry the stable code: {text}"
+            );
+            assert!(
+                text.contains(&consumer),
+                "and it must NAME the consumer, so the operator knows what to disable \
+                 first: {text}"
+            );
+
+            // AND THE PROVIDER IS STILL ACTIVE. A refusal that disabled first and
+            // reported after would leave the consumer broken.
+            let still: i64 = sqlx::query_scalar(
+                "SELECT count(*)::bigint FROM kernel.activation_revisions
+                  WHERE plugin_id=$1 AND status='ACTIVE'",
+            )
+            .bind(&provider)
+            .fetch_one(&pool)
+            .await
+            .expect("still active");
+            assert_eq!(still, 1, "a refused disable must not change anything");
+        }
+
+        /// ALREADY INSTALLED: NOTHING TO ENABLE.
+        #[tokio::test]
+        async fn enable_refuses_a_plugin_that_is_already_installed() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let plugin = plugin(&pool, true).await;
+
+            let error = super::super::enable_inner(&state, &auth(), &plugin)
+                .await
+                .expect_err("an INSTALLED plugin is already enabled");
+            assert!(
+                format!("{error:?}").contains("PLUGIN_ALREADY_ENABLED"),
+                "{error:?}"
+            );
+        }
+
+        /// STAGED BUT NEVER DEPLOYED: THERE IS NOTHING TO RE-ENABLE.
+        ///
+        /// The installation row exists and is not INSTALLED, and no deployment row
+        /// exists either. That is what "uninstalled a plugin and the package is still
+        /// staged" looks like.
+        #[tokio::test]
+        async fn enable_refuses_when_no_deployment_exists() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let plugin = plugin(&pool, false).await;
+            sqlx::query(
+                "INSERT INTO kernel.plugin_installations
+                   (plugin_id, state, active_revision_id, updated_at)
+                 VALUES ($1,'UNINSTALLED',NULL,now())",
+            )
+            .bind(&plugin)
+            .execute(&pool)
+            .await
+            .expect("installation");
+
+            let error = super::super::enable_inner(&state, &auth(), &plugin)
+                .await
+                .expect_err("nothing to re-enable");
+            assert!(
+                format!("{error:?}").contains("NO_DEPLOYMENT"),
+                "the refusal must say there is no deployment, not something vaguer: \
+                 {error:?}"
+            );
+        }
+    }
+
+    /// TASK-27: THE DIAGNOSIS NAMES THE DEPLOYMENT'S OWN OBSTACLE, NOT ANY NODE'S.
+    ///
+    /// `diagnose_placement` used to scan every unrevoked node and report the
+    /// "furthest" refusal. Its caller filters candidates by the deployment's
+    /// `nodeSelector`, so a node the deployment can never run on could win that
+    /// contest - a deployment whose label matched nothing would be told its obstacle
+    /// was CPU pressure on an unrelated host.
+    ///
+    /// Three attempts to test the old behaviour failed for that reason: a foreign
+    /// node in the shared database outranked the fixture's, and the failure WAS the
+    /// finding. Now that the function is scoped, these tests can be exact.
+    mod diagnose_scope {
+        use sqlx::postgres::PgConnectOptions;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+        async fn test_pool() -> Option<PgPool> {
+            let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                        panic!(
+                            "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset"
+                        );
+                    }
+                    eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                    return None;
+                }
+            };
+            let options: PgConnectOptions = url.parse().expect("test database URL parses");
+            let pool = PgPool::connect_with(options).await.expect("connect");
+            crate::db::migrate(&pool).await.expect("migrations");
+            Some(pool)
+        }
+
+        fn state_for(pool: PgPool) -> crate::state::AppState {
+            crate::state::AppState {
+                config: std::sync::Arc::new(crate::config::Config::from_env()),
+                db: pool,
+                http: reqwest::Client::new(),
+                cursor_secret: std::sync::Arc::new(vec![0u8; 32]),
+                rate_limiter: std::sync::Arc::new(crate::state::RateLimiter::default()),
+            }
+        }
+
+        /// A node with a unique label pair so only this test's selector matches it.
+        async fn scoped_node(
+            pool: &PgPool,
+            run: &str,
+            tag: &str,
+            cores: i64,
+            revoked: bool,
+        ) -> Uuid {
+            let id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot, revoked_at)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64',$4::jsonb,'[]'::jsonb,
+                         'READY',now(),now(),'http://scope:7000',$5,
+                         CASE WHEN $6 THEN now() ELSE NULL END)",
+            )
+            .bind(id)
+            .bind(format!("scope-{run}-{tag}"))
+            .bind(format!("tok-{}", Uuid::new_v4().simple()))
+            .bind(serde_json::json!({ "test-run": run }))
+            .bind(serde_json::json!({
+                "cpuCores": cores,
+                "memoryTotalBytes": 8i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0,
+            }))
+            .bind(revoked)
+            .execute(pool)
+            .await
+            .expect("node");
+            id
+        }
+
+        fn context<'a>(
+            selector: &'a std::collections::BTreeMap<String, String>,
+            requested: &'a opsweave_contracts::ResourceRequirements,
+        ) -> super::PlacementContext<'a> {
+            super::PlacementContext {
+                selector,
+                requested,
+                max_instances_per_deployment: 1,
+                max_instances_per_node: 4,
+            }
+        }
+
+        async fn diagnose(
+            state: &crate::state::AppState,
+            placement: &super::PlacementContext<'_>,
+        ) -> Option<(String, super::PlacementRejection, Uuid)> {
+            let reserved = std::collections::HashMap::new();
+            let used = std::collections::HashMap::new();
+            let global = std::collections::HashMap::new();
+            super::super::diagnose_placement(state, placement, &reserved, &used, &global)
+                .await
+                .expect("diagnose")
+        }
+
+        /// A NODE OUTSIDE THE SELECTOR IS NEVER THE ANSWER, EVEN IF IT IS THE ONLY
+        /// NODE THAT FAILS.
+        ///
+        /// This is the exact shape that made three earlier attempts unusable: one
+        /// node matches the selector and fits, another does not match and cannot -
+        /// and the old code reported the second. The in-range node fits, so there is
+        /// nothing to diagnose and the answer must be `None`.
+        #[tokio::test]
+        async fn a_node_outside_the_selector_is_never_named() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let run = Uuid::new_v4().simple().to_string();
+
+            // In range, plenty of CPU.
+            scoped_node(&pool, &run, "inrange", 8, false).await;
+            // Out of range, one core - the node the old code would have named.
+            let other = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO kernel.nodes
+                   (id, name, control_token_hash, data_token, generation, os, arch,
+                    labels, capabilities, status, enrolled_at, last_seen_at, data_endpoint,
+                    resource_snapshot)
+                 VALUES ($1,$2,'hash',$3,1,'linux','x86_64','{\"test-run\":\"elsewhere\"}'::jsonb,
+                         '[]'::jsonb,'READY',now(),now(),'http://out:7000',$4)",
+            )
+            .bind(other)
+            .bind(format!("out-{run}"))
+            .bind(format!("tok-{}", Uuid::new_v4().simple()))
+            .bind(serde_json::json!({
+                "cpuCores": 1,
+                "memoryTotalBytes": 4i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0,
+            }))
+            .execute(&pool)
+            .await
+            .expect("out-of-range node");
+
+            let selector =
+                std::collections::BTreeMap::from([("test-run".to_string(), run.clone())]);
+            let requested = opsweave_contracts::ResourceRequirements {
+                cpu_millis: 100,
+                memory_mib: 128,
+            };
+            let result = diagnose(&state, &context(&selector, &requested)).await;
+            assert!(
+                result.is_none(),
+                "a node that does not match the selector cannot be this deployment's \
+                 obstacle; the in-range node fits, so there is nothing to report - got \
+                 {result:?}"
+            );
+        }
+
+        /// WHEN NOTHING MATCHES THE SELECTOR, THE ANSWER IS NOT A NODE.
+        ///
+        /// The caller keeps its `SELECTOR_MISMATCH` explanation. Naming any node
+        /// here would be the defect: the deployment cannot run on it at all.
+        #[tokio::test]
+        async fn no_matching_node_yields_no_node_to_blame() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let run = Uuid::new_v4().simple().to_string();
+            // A node whose selector will never match.
+            scoped_node(&pool, &format!("{run}-none"), "lonely", 1, false).await;
+
+            let selector = std::collections::BTreeMap::from([(
+                "test-run".to_string(),
+                format!("{run}-present"),
+            )]);
+            let requested = opsweave_contracts::ResourceRequirements {
+                cpu_millis: 100,
+                memory_mib: 128,
+            };
+            let result = diagnose(&state, &context(&selector, &requested)).await;
+            assert!(
+                result.is_none(),
+                "with no node matching the selector, no node's refusal may be blamed - \
+                 got {result:?}"
+            );
+        }
+
+        /// INSIDE THE SELECTOR, THE REAL OBSTACLE IS REPORTED.
+        ///
+        /// One matching node, too small for the request. The answer must be that
+        /// node and a CPU refusal - the control for the two tests above, which would
+        /// both pass against a function that never reported anything.
+        #[tokio::test]
+        async fn a_matching_node_that_is_too_small_is_named_with_its_reason() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let run = Uuid::new_v4().simple().to_string();
+            let node = scoped_node(&pool, &run, "tiny", 1, false).await;
+
+            let selector =
+                std::collections::BTreeMap::from([("test-run".to_string(), run.clone())]);
+            let requested = opsweave_contracts::ResourceRequirements {
+                cpu_millis: 2000,
+                memory_mib: 128,
+            };
+            let (name, rejection, id) = diagnose(&state, &context(&selector, &requested))
+                .await
+                .expect("the matching node cannot host a 2000m request on one core");
+            assert_eq!(id, node);
+            assert_eq!(name, format!("scope-{run}-tiny"));
+            assert!(
+                matches!(rejection, super::PlacementRejection::CpuInsufficient { .. }),
+                "and the reason is the node's actual obstacle: {rejection:?}"
+            );
+        }
+
+        /// A MATCHING BUT REVOKED NODE IS NOT A CANDIDATE EITHER.
+        ///
+        /// `evaluate_node` refuses it with `NodeNotReady{status:"REVOKED"}`, which is
+        /// a legitimate answer: the node IS in the deployment's range and the
+        /// operator needs to know it was revoked rather than merely unhealthy.
+        #[tokio::test]
+        async fn a_matching_revoked_node_is_reported_as_revoked() {
+            let Some(pool) = test_pool().await else {
+                return;
+            };
+            let state = state_for(pool.clone());
+            let run = Uuid::new_v4().simple().to_string();
+            let node = scoped_node(&pool, &run, "revoked", 8, true).await;
+
+            let selector =
+                std::collections::BTreeMap::from([("test-run".to_string(), run.clone())]);
+            let requested = opsweave_contracts::ResourceRequirements {
+                cpu_millis: 100,
+                memory_mib: 128,
+            };
+            let (_, rejection, id) = diagnose(&state, &context(&selector, &requested))
+                .await
+                .expect("a revoked but matching node is a refusal worth reporting");
+            assert_eq!(id, node);
+            match rejection {
+                super::PlacementRejection::NodeNotReady { status } => assert_eq!(
+                    status, "REVOKED",
+                    "the reason must say REVOKED, not merely 'not ready', so an operator \
+                     knows the node was taken out of service rather than being slow"
+                ),
+                other => panic!("expected NodeNotReady(REVOKED), got {other:?}"),
+            }
         }
     }
 }

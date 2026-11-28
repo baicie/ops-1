@@ -1627,6 +1627,20 @@ async fn supervise(
             Err(error) => {
                 tracing::warn!(instance = %workload.instance_id, error = %error, attempt = restart_attempts + 1, "instance supervisor error");
                 restart_attempts += 1;
+                // THE COUNT IS RECORDED ON BOTH PATHS, and it used to be recorded on
+                // only one. The `Exited` branch above wrote `restart_count` before
+                // moving to Unhealthy; this branch did not, so an instance that
+                // failed because the RUNTIME call failed ended at `Failed` with
+                // `restart_count = 0` - an operator reading the status saw a
+                // container that never retried, which is the opposite of what
+                // happened.
+                //
+                // Found by the first test that drove the loop rather than the
+                // decision: `a_create_that_always_fails_exhausts_the_budget_and_fails`
+                // asserted the count and got zero.
+                if let Ok(mut status) = runtime.status.lock() {
+                    status.restart_count = restart_attempts;
+                }
                 runtime.set_state(RuntimeState::Unhealthy, Some(error.to_string()));
                 cleanup(&shared, &workload).await;
                 if exhausted_restart_budget(restart_attempts) {
@@ -3192,6 +3206,235 @@ mod tests {
             3,
             "if this number is meant to change, change this assertion in the same \
              commit - an edited constant should not be able to pass unnoticed"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // THE SUPERVISE LOOP ITSELF
+    // ------------------------------------------------------------------
+    //
+    // Phase 9E covered the DECISIONS `supervise` makes - `steady_state_decision`,
+    // `exhausted_restart_budget` - as pure functions, and `docker pull` and
+    // `verify_digest` at the adapter. The LOOP that calls them had never been run:
+    // nothing observed the sequence create -> start -> crash -> retry -> give up,
+    // or the cancel path, or the interaction with the lifecycle lock.
+    //
+    // `test_shared` above already builds a real `Shared` around a fake docker
+    // binary, so no production interface had to be extracted for any of this. That
+    // is worth stating plainly: TASK-28's design section proposed four new traits,
+    // and the existing helper made all of them unnecessary for the behaviour that
+    // matters.
+
+    /// A `docker` stand-in that behaves enough like the real one for `run_once`:
+    /// pull and verify succeed, create/start succeed, inspect reports a published
+    /// port, logs exits immediately.
+    ///
+    /// `$STATE_DIR/created` counts creates, so a test can assert HOW MANY TIMES the
+    /// container was started - the restart budget is a count, not a status.
+    fn fake_docker_for_supervise(dir: &std::path::Path, digest: &str) -> String {
+        let store = dir.join("store");
+        std::fs::create_dir_all(&store).unwrap();
+        let script = dir.join("docker");
+        std::fs::write(
+            &script,
+            format!(
+                r#"#!/bin/sh
+STORE="{store}"
+case "$1" in
+  pull) exit 0 ;;
+  image) printf '%s' '["registry.local/app@{digest}"]' ; exit 0 ;;
+  logs) exit 0 ;;
+  inspect)
+    # Used both for "is a container named X present" and for the port read.
+    for a in "$@"; do
+      case "$a" in
+        *NetworkSettings*) echo '{{"7000/tcp":[{{"HostIp":"127.0.0.1","HostPort":"32768"}}]}}' ; exit 0 ;;
+        *State.Running*) echo 'true' ; exit 0 ;;
+        *Config.Image*) echo 'registry.local/app@{digest}' ; exit 0 ;;
+      esac
+    done
+    # A bare inspect: the container exists with an id.
+    echo 'cid-test|true|registry.local/app@{digest}'
+    exit 0
+    ;;
+  rm|stop) exit 0 ;;
+  create)
+    count_file="$STORE/created"
+    n=$(cat "$count_file" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" > "$count_file"
+    printf 'cid-%s' "$n"
+    exit 0
+    ;;
+  start) exit 0 ;;
+  *) exit 0 ;;
+esac
+"#,
+                store = store.display(),
+                digest = digest
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        script.to_string_lossy().into_owned()
+    }
+
+    fn workload_for(image: &str) -> opsweave_contracts::DesiredWorkload {
+        let spec = serde_json::json!({
+            "instanceId": Uuid::new_v4().to_string(),
+            "deploymentId": Uuid::new_v4().to_string(),
+            "pluginId": "test.supervise",
+            "version": "1.0.0",
+            "generation": 1,
+            "action": "START",
+            "backend": {
+                "imageRef": image,
+                "containerPort": 7000,
+                "capabilityDigest": "digest",
+                "readinessPath": "/readyz",
+                "livenessPath": "/livez",
+                "apiPrefix": "/api",
+            },
+            "labels": {},
+            "resources": {"cpuMillis": 100, "memoryMiB": 128},
+        });
+        serde_json::from_value(spec).expect("workload deserializes")
+    }
+
+    fn creates(dir: &std::path::Path) -> i64 {
+        std::fs::read_to_string(dir.join("store").join("created"))
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0)
+    }
+
+    /// A CANCEL THAT ARRIVES BEFORE ANY WORK STOPS THE LOOP WITHOUT STARTING A
+    /// CONTAINER.
+    ///
+    /// Scenario E of TASK-28. The loop checks its cancel receiver at the top, so a
+    /// signal that arrives first must not create anything - and the instance must
+    /// end in `Stopped`, not `Failed`, because nothing went wrong.
+    #[tokio::test]
+    async fn a_cancel_before_the_first_pass_creates_nothing_and_stops() {
+        let dir = tempfile::tempdir().unwrap();
+        let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let binary = fake_docker_for_supervise(dir.path(), digest);
+        let shared = test_shared(&binary);
+        let image = format!("registry.local/app@{digest}");
+        let runtime = super::InstanceRuntime::new(workload_for(&image));
+        let (tx, mut rx) = tokio::sync::watch::channel(true);
+
+        // Cancelled already.
+        let _ = tx.send(true);
+        let runtime_for_task = runtime.clone();
+        let handle =
+            tokio::spawn(async move { super::supervise(shared, runtime_for_task, &mut rx).await });
+        tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("supervise must return promptly when cancelled")
+            .expect("no panic");
+
+        assert_eq!(
+            creates(dir.path()),
+            0,
+            "a cancel that arrives before the first pass must not create a container"
+        );
+        assert_eq!(
+            runtime.status_copy().state,
+            super::RuntimeState::Stopped,
+            "and the instance is Stopped - nothing failed"
+        );
+    }
+
+    /// A CONTAINER THAT CANNOT BE CREATED CONSUMES THE RESTART BUDGET AND THEN
+    /// GIVES UP.
+    ///
+    /// Scenario B of TASK-28, driven through the real loop. The fake accepts pull
+    /// and verify but refuses `create`, so every pass fails at the same point. The
+    /// assertions are the two numbers that matter: how many creates were ATTEMPTED,
+    /// and that the final state is `Failed` rather than retrying forever.
+    #[tokio::test]
+    async fn a_create_that_always_fails_exhausts_the_budget_and_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let digest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let store = dir.path().join("store");
+        std::fs::create_dir_all(&store).unwrap();
+        let script = dir.path().join("docker");
+        std::fs::write(
+            &script,
+            format!(
+                r#"#!/bin/sh
+case "$1" in
+  pull) exit 0 ;;
+  image) printf '%s' '["registry.local/app@{digest}"]' ; exit 0 ;;
+  logs) exit 0 ;;
+  inspect)
+    # The ownership probe asks for `{{.Id}}|{{index .Config.Labels ...}}` and
+    # treats a NON-ZERO EXIT as an error, which `probe_ownership` propagates -
+    # so answering 1 here makes `create_and_start` fail before it ever reaches
+    # `docker create`, and the test would be measuring the probe instead.
+    #
+    # Printing a line with an EMPTY label is the "container exists, not ours"
+    # shape... except that is Foreign and refuses. The shape wanted is ABSENT:
+    # exit 1 with docker's own "No such object", which `inspect` maps to `None`.
+    #
+    # That is what the real adapter does - but only after waiting out its
+    # 30-second hang detector when the format is the ownership one. Printing an
+    # empty id|label pair instead lets the probe answer immediately.
+    echo '|'
+    exit 0
+    ;;
+  create) echo "create refused" >&2 ; exit 125 ;;
+  rm|stop) exit 0 ;;
+  *) exit 0 ;;
+esac
+"#,
+                digest = digest
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let shared = test_shared(script.to_str().unwrap());
+        let image = format!("registry.local/app@{digest}");
+        let runtime = super::InstanceRuntime::new(workload_for(&image));
+        let (_tx, mut rx) = tokio::sync::watch::channel(false);
+
+        let runtime_for_task = runtime.clone();
+        let handle =
+            tokio::spawn(async move { super::supervise(shared, runtime_for_task, &mut rx).await });
+        // Each failed pass cleans up before retrying, and cleanup waits on the
+        // lifecycle lock with a 30 s bound. Four attempts therefore take far longer
+        // than the 8 s the backoff alone would suggest.
+        tokio::time::timeout(std::time::Duration::from_secs(180), handle)
+            .await
+            .expect("the loop must give up rather than retry forever")
+            .expect("no panic");
+
+        let status = runtime.status_copy();
+        assert_eq!(
+            status.state,
+            super::RuntimeState::Failed,
+            "a container that can never be created must end Failed, not Unhealthy \
+             forever: {status:?}"
+        );
+        assert!(
+            status.restart_count > super::MAX_RESTART_ATTEMPTS,
+            "and it must have consumed the budget before giving up; restart_count is {} \
+             against a budget of {}",
+            status.restart_count,
+            super::MAX_RESTART_ATTEMPTS
+        );
+        assert!(
+            status.error.is_some(),
+            "the failure must carry a reason an operator can read"
         );
     }
 }
