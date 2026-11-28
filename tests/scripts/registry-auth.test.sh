@@ -174,6 +174,33 @@ fi
 grep -q 'password-stdin' scripts/lib/registry-auth.sh \
   && ok "the token arrives on stdin" || bad "the token does not arrive on stdin"
 
+echo "== 16. every file the deploy script SOURCES is also SHIPPED to the host"
+# THE DEFECT THIS CATCHES, and it was live for one commit: the deploy script began
+# sourcing `lib/registry-auth.sh` while `staging-preview.yml` still scp'd only
+# `deploy-staging.sh`. On a host with a working deploy the script would abort at
+# the `source` line — a breakage that appears only in the real environment.
+#
+# The test does not hard-code the module name. It reads the source lines from the
+# script and asserts each one appears in the workflow's transfer step, so a second
+# module added later is covered without anyone remembering to update this file.
+SOURCED="$(grep -oE '\. .*lib/[a-z-]+\.sh' scripts/deploy-staging.sh | sed -E 's#.*/(lib/[a-z-]+\.sh).*#\1#' | sort -u)"
+[ -n "$SOURCED" ] && ok "the deploy script sources: $(printf '%s' "$SOURCED" | tr '\n' ' ')" \
+  || bad "no sourced module found; this test no longer checks anything"
+# COMMENTS ARE NOT TRANSFERS. The first version of this check searched the
+# surrounding region for the module's name — and the region contained the comment
+# explaining WHY the module is shipped, so removing the `scp` line still matched.
+# The counterfactual stayed green. What is asserted now is the TRANSFER ITSELF:
+# a line that actually copies or installs the file.
+for mod in $SOURCED; do
+  scp_line="$(grep -E "scp .*${mod}" .github/workflows/staging-preview.yml | grep -v '^[[:space:]]*#' || true)"
+  install_line="$(grep -E "install .*/${mod#lib/}" .github/workflows/staging-preview.yml | grep -v '^[[:space:]]*#' || true)"
+  if [ -n "$scp_line" ] && [ -n "$install_line" ]; then
+    ok "$mod is copied to the host and installed there"
+  else
+    bad "$mod is SOURCED by deploy-staging.sh but not transferred (scp: ${scp_line:-MISSING}; install: ${install_line:-MISSING}) — the host would abort at the source line"
+  fi
+done
+
 echo
 [ "$FAIL" -eq 0 ] && { echo "$PASS passed, 0 failed"; exit 0; }
 echo "$PASS passed, $FAIL failed"; exit 1
