@@ -77,6 +77,20 @@ classify_auth_failure() {
 # Prints the state and sets REGISTRY_AUTH_STATE. Never calls `die`: the caller
 # decides what an AUTH_FAILED means for its own step, which is the whole point of
 # separating the question.
+#
+# `EXISTING_CREDENTIAL` IS A STATEMENT ABOUT WHAT WAS FOUND, NOT WHAT WORKS.
+#
+# This is the distinction the first version got wrong. With no token file it
+# returned EXISTING_CREDENTIAL and the caller logged "pre-warm authentication:
+# EXISTING_CREDENTIAL" — which reads as "authentication is fine". Measured on run
+# 46133348247: the very next line was `error from registry: denied`. The state was
+# true (a docker login existed) and useless (it could not read the package), and
+# the two were not distinguished.
+#
+# There is no way to test a docker login without reading something from the
+# registry, so this function does not pretend to: it reports what it found and
+# leaves the verdict to `verify_manifest`. What changed is the WORDING at the call
+# sites and this comment, so a reader cannot mistake the state for a success.
 authenticate_registry() {
   local token_file="$1" image_repo="${2:-}" user out rc=0
   if [ ! -f "$token_file" ]; then

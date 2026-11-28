@@ -174,6 +174,38 @@ fi
 grep -q 'password-stdin' scripts/lib/registry-auth.sh \
   && ok "the token arrives on stdin" || bad "the token does not arrive on stdin"
 
+echo "== 15b. the PULL-FAILURE path reports the classified state, not a blank reason"
+# MEASURED ON RUN 46133348247. The host pull was denied:
+#
+#     pre-warm authentication: EXISTING_CREDENTIAL
+#     Error response from daemon: error from registry: denied
+#     ERROR cannot obtain ghcr.io/...: nothing on this host was changed
+#
+# The classification existed but `check_image_available` runs AFTER `prewarm_image`,
+# so on the one path that actually fails it was never reached and the operator was
+# told neither what failed nor that it was a permission problem.
+#
+# This asserts the code path, because the behaviour needs a registry to exercise:
+# the pull-failure branch must CALL verify_manifest before dying, and must name
+# the state in its message.
+PULLFAIL="$(sed -n '/if pull_image "\$sha"; then/,/^}/p' scripts/deploy-staging.sh)"
+printf '%s' "$PULLFAIL" | grep -q 'verify_manifest' \
+  && ok "the pull-failure path classifies before dying" \
+  || bad "the pull-failure path dies without classifying - the state machine is unreachable here"
+for st in AUTH_REQUIRED ACCESS_DENIED RATE_LIMITED REGISTRY_UNAVAILABLE; do
+  printf '%s' "$PULLFAIL" | grep -q "$st)" \
+    && ok "it names $st in its own message" \
+    || bad "the $st case has no message of its own"
+done
+# And an unrecognised failure must NOT be folded into a named bucket.
+printf '%s' "$PULLFAIL" | grep -qF 'REGISTRY_VERIFY_STATE' \
+  && ok "an unrecognised failure reports the raw state, not a guessed category" \
+  || bad "an unrecognised failure is being forced into a category"
+# EXISTING_CREDENTIAL must not be logged as if it were a success.
+grep -q 'unverified until the registry answers' scripts/deploy-staging.sh \
+  && ok "EXISTING_CREDENTIAL is logged as unverified, not as 'authentication ok'" \
+  || bad "EXISTING_CREDENTIAL reads as a success in the log"
+
 echo "== 16. every file the deploy script SOURCES is also SHIPPED to the host"
 # THE DEFECT THIS CATCHES, and it was live for one commit: the deploy script began
 # sourcing `lib/registry-auth.sh` while `staging-preview.yml` still scp'd only

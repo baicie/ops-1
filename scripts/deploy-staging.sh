@@ -794,7 +794,13 @@ prewarm_image() {
   # failure because an existing login may still work — but the log now says which
   # credential this step is running on, so a later 401 is explainable.
   if authenticate_registry "$GHCR_TOKEN_FILE" "$IMAGE_REPO"; then
-    log "pre-warm authentication: ${REGISTRY_AUTH_STATE}"
+    # WORDED SO IT CANNOT BE READ AS "AUTHENTICATION IS FINE". `EXISTING_CREDENTIAL`
+    # means a login was FOUND, not that it can read this package — measured on run
+    # 46133348247, where the next line was `error from registry: denied`.
+    case "$REGISTRY_AUTH_STATE" in
+      EXISTING_CREDENTIAL) log "pre-warm authentication: ${REGISTRY_AUTH_STATE} (no token file; an existing docker login will be used, unverified until the registry answers)" ;;
+      *) log "pre-warm authentication: ${REGISTRY_AUTH_STATE}" ;;
+    esac
   else
     warn "pre-warm authentication: ${REGISTRY_AUTH_STATE}; continuing on whatever credential is in place"
   fi
@@ -835,7 +841,34 @@ prewarm_image() {
   if pull_image "$sha"; then
     return 0
   fi
-  die 1 "cannot obtain $IMAGE_REPO:$sha from the registry; nothing on this host was changed (no deploy lock taken, no container replaced)"
+  # THE PULL FAILED. Classify it before dying, and say WHICH credential was in use.
+  #
+  # `check_image_available` already carries this classification, but it runs AFTER
+  # prewarm_image in cmd_deploy — so on the only path that actually fails in
+  # practice (a denied pull) it was never reached, and the log said
+  # "cannot obtain ... from the registry" with no reason. Measured on run
+  # 46133348247: `error from registry: denied` under
+  # `pre-warm authentication: EXISTING_CREDENTIAL`, and the operator was told
+  # neither that it was a permission problem nor that the "existing credential"
+  # was the thing being denied.
+  #
+  # The manifest read is the classifying step; it is cheap, it is the same
+  # function the later check uses, and its state is what the message reports.
+  verify_manifest "$IMAGE_REPO:$sha" >/dev/null || true
+  case "$REGISTRY_VERIFY_STATE" in
+    AUTH_REQUIRED)
+      die 1 "cannot obtain $IMAGE_REPO:$sha: the registry requires authentication and ${REGISTRY_AUTH_STATE} did not grant it (${REGISTRY_VERIFY_DETAIL}). If that state is EXISTING_CREDENTIAL, the login already on this host is stale or lacks read access to $IMAGE_REPO - the token file is what would replace it. Nothing on this host was changed." ;;
+    ACCESS_DENIED)
+      die 1 "cannot obtain $IMAGE_REPO:$sha: ${REGISTRY_VERIFY_DETAIL}. The credential is accepted but not permitted to read $IMAGE_REPO; a pull cannot fix a permission. Nothing on this host was changed." ;;
+    RATE_LIMITED)
+      die 1 "cannot obtain $IMAGE_REPO:$sha: the registry is rate-limiting this host (${REGISTRY_VERIFY_DETAIL}). Retry later; nothing on this host was changed." ;;
+    REGISTRY_UNAVAILABLE)
+      die 1 "cannot obtain $IMAGE_REPO:$sha: the registry could not be reached (${REGISTRY_VERIFY_DETAIL}). Nothing on this host was changed." ;;
+    *)
+      # An unrecognised failure keeps the pull's own reason, because that is the
+      # evidence, and does NOT get folded into a named category it may not be.
+      die 1 "cannot obtain $IMAGE_REPO:$sha from the registry (${REGISTRY_VERIFY_STATE}: ${REGISTRY_VERIFY_DETAIL}); nothing on this host was changed (no deploy lock taken, no container replaced). The pull's own error is above." ;;
+  esac
 }
 
 ensure_dependencies() {
