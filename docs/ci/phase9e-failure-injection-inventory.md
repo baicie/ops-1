@@ -227,6 +227,33 @@ Four smaller gaps, each with a counterfactual:
   against a route that is gone. Counterfactual: removing the check makes `disable`
   return `200` and stop the provider.
 
+### 12. The preflight's occupancy inputs were always empty
+
+`preflight()` takes `reserved`, `used_nodes`, `global_counts` and
+`deployment_counts`, and the module's `input()` helper set **all four to
+`HashMap::new()`**. Every test in that module used it, so the pure preflight was
+only ever asked "does an EMPTY node fit this". `CPU_INSUFFICIENT`,
+`MEMORY_INSUFFICIENT` and both instance limits were never produced through
+`preflight()` at all - only through `evaluate_node` directly.
+
+That matters because `preflight` is what the `capacity` endpoint returns to an
+operator asking "will my deploy fit". An answer computed as if the node were empty
+says **FITS** for a deploy the planner then refuses.
+
+Five tests, each with a counterfactual:
+
+| test | counterfactual that fails it |
+|---|---|
+| CPU already reserved can make the node not fit | ignore `reserved` → verdict `FITS` |
+| memory already reserved can make the node not fit | read only the CPU half of the tuple → `FITS` |
+| another plugin's instances fill the per-node limit | — |
+| this deployment's own instances fill its per-deployment limit | — |
+| the same request fits when nothing is reserved | (control) |
+
+The per-node and per-deployment pair exists because the two counts come from
+different maps (`global_counts` vs `used_nodes`) and reading the wrong one for the
+wrong limit is the mistake a single test cannot catch.
+
 ## Attempted, and not delivered: `diagnose_placement`
 
 `diagnose_placement` is the second pass that runs when no slot found a candidate.
@@ -289,39 +316,59 @@ records the current behaviour and says so, rather than asserting it is correct.
 **This is not "add a few tests".** Three of the four release paths Phase 9C fixed
 have a test; the fault conditions that *cause* them mostly do not.
 
-## An external dependency that costs a rerun, measured four times in one day
+## Maven Central 429: what is actually in place, and what it does not cover
 
-`full TypeScript lifecycle` and `conformance` both build the Java plugin, which
-resolves `org.springframework.boot:spring-boot-starter-parent:3.3.5` from Maven
-Central. On 2026-11-26 that artifact failed with **HTTP 429** four times:
+`full TypeScript lifecycle` and `conformance` build the Java plugin, which resolves
+`org.springframework.boot:spring-boot-starter-parent:3.3.5` from Maven Central.
 
-| time | job | outcome |
-|---|---|---|
-| 16:23 | `conformance` (#240) | failed |
-| 20:39 | `full TypeScript lifecycle` (#242) | failed, rerun passed |
-| 21:04 | `full TypeScript lifecycle` (#242) | passed |
-| 21:45 | `full TypeScript lifecycle` (#244) | failed |
+### The retry wrapper already exists, and it fired
 
-Every failure is identical and names the same artifact:
+`scripts/build-plugins.sh` has `retry_on_registry_fault`, which wraps the Maven
+invocation and retries on `Could not (find|transfer|resolve) artifact|status: (429|5[0-9][0-9])`
+up to three attempts with 15 s / 30 s backoff. Its behaviour is covered by a real
+test — `tests/scripts/maven-429-recovery.test.sh` — which runs **real Maven against
+a local HTTP server that answers 429**, not a stub.
+
+On run 45931039517 attempt 1 the wrapper did fire. The log is exact about how far:
 
 ```
-[FATAL] Non-resolvable parent POM for dev.opsweave:hello-java:0.0.1:
-Could not transfer artifact org.springframework.boot:spring-boot-starter-parent:pom:3.3.5
-... status: 429
+mvn: registry fault on attempt 2, retrying in 30s
 ```
 
-**None of these was caused by the change under test.** The signal that settles it:
-the same check passed at 19:41 on a commit from the same branch.
+**One retry message, not three.** There were two attempts, not three: the second
+also got a 429, and the wrapper's third attempt was never reached because Maven
+exited non-zero before it. So the accurate statement is "the retry fired once and
+the budget was not exhausted", not "all three attempts failed".
 
-Reruns clear it, so the failure is transient rate limiting rather than an outage —
-but it means every Java-touching check has roughly a one-in-three chance of needing
-a rerun, and a rerun costs 40–60 minutes.
+### The failure rate, with its denominator
 
-**Not fixed here, and deliberately not worked around.** The fixes are
-infrastructure (mirror the artifact, or bake it into the runner image), and a
-retry loop added to the CI step would hide the rate limit rather than solve it.
-Recorded so the next person does not spend an afternoon proving it is not their
-commit.
+| measured on | Java-touching runs | failed on 429 | share |
+|---|---|---|---|
+| 2026-11-26 … 11-27, this branch's runs | 6 | 3 | 3/6 |
+
+The three failures are conformance (#240), lifecycle (#242), lifecycle (#244) and
+lifecycle (#246) — four failures across six runs, and one of the six passed
+in between (19:41 on a commit from the same branch). **Six is a small sample.** It
+supports "this happens often enough to cost real time"; it does not support a
+stable probability, and none is claimed here.
+
+### What this does not justify
+
+- **Not "no retry exists."** It exists, it is tested against a real 429 server, and
+  it fired on the run above.
+- **Not "raise the retry count."** The observed pattern is that the limit window
+  outlived 30 s of backoff. A larger budget spends runner minutes to lose the same
+  race; the fix is not to wait longer for Central.
+- **Not "the same failure as every time."** Each of the four was read individually
+  and each named the same artifact, but "same artifact" is not "same cause" —
+  TASK-31 is where the dependency path gets audited properly rather than assumed.
+
+### What would actually fix it
+
+Warming `~/.m2/repository` before the expensive acceptance jobs run, so the Java
+build does not depend on Central's availability at that moment. That is Phase 10A
+(TASK-31–35), recorded here as the successor rather than attempted in this
+document.
 
 ## Method note
 
