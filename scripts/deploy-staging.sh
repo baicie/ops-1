@@ -24,6 +24,19 @@
 
 set -euo pipefail
 
+# TASK-36A: registry authentication and manifest verification, as two questions.
+#
+# Sourced by ABSOLUTE PATH derived from this file, not from `$PWD`. The script is
+# invoked from a checkout on the staging host, and a relative source would break
+# the moment someone ran it from another directory - after which the registry
+# checks would silently fall back to whatever the shell happened to have.
+#
+# `BASH_SOURCE[0]` rather than `$0` because this file is also sourced by tests.
+_DEPLOY_SRC="${BASH_SOURCE[0]}"
+# shellcheck source=lib/registry-auth.sh
+. "$(cd "$(dirname "$_DEPLOY_SRC")" && pwd)/lib/registry-auth.sh"
+unset _DEPLOY_SRC
+
 readonly PROJECT="opsweave-staging"
 readonly DEFAULT_IMAGE_REPO="ghcr.io/baicie/opsweave"
 readonly SHA_RE='^[0-9a-f]{40}$'
@@ -93,6 +106,11 @@ APP_SERVICES=()
 LOG_FILE=""
 IMAGE_DIGEST=""
 IMAGE_DIGEST_SOURCE=""
+# 1 when `check_image_available` read the reference's digest FROM THE REGISTRY.
+# Distinguishes "the image is here" (a local `docker image inspect`) from "the
+# registry says this reference is these bytes", which are different facts and
+# were previously conflated by the SSH-transfer fallback.
+IMAGE_REGISTRY_VERIFIED=""
 BACKUP_DIR=""
 BACKUP_DB="skipped"
 PG_READY_STATE="unknown"
@@ -566,38 +584,70 @@ cleanup_bootstrap() {
 }
 trap cleanup_bootstrap EXIT
 
-ensure_registry_auth() {
-  if [ ! -f "$GHCR_TOKEN_FILE" ]; then
-    log "no $GHCR_TOKEN_FILE; relying on an existing docker login for $IMAGE_REPO"
-    return 0
-  fi
-  local user
-  user="$(env_file_value OPSWEAVE_GHCR_USER x-access-token)"
-  log "authenticating docker to ghcr.io as $user using $GHCR_TOKEN_FILE (token read over stdin)"
-  if ! docker login ghcr.io --username "$user" --password-stdin <"$GHCR_TOKEN_FILE" >/dev/null 2>&1; then
-    warn "docker login with $GHCR_TOKEN_FILE failed; continuing with the existing credentials"
-    return 1
-  fi
-  return 0
-}
-
 resolve_remote_digest() {
   docker manifest inspect "$IMAGE_REPO:$1" >/dev/null 2>&1
 }
 
+# TASK-36A: authentication and verification are two questions, and this is where
+# the answer becomes an action.
+#
+# WHAT THIS REPLACES, AND WHY
+#
+# The old body was:
+#
+#     ensure_registry_auth || true          # an auth failure was swallowed
+#     while attempt <= 3: manifest inspect; sleep 5
+#     die "not resolvable ... check that the build pushed it and that
+#          registry credentials are valid"
+#
+# Measured on run 45999793408: the host had no ghcr.token, the existing login
+# could not read the manifest, and three retries at five seconds each produced a
+# message offering two explanations when the log knew which. Fifteen seconds
+# cannot fix a credential.
+#
+# The retry policy now comes from `retryable_verify_state`, so a 401 is reported
+# as a 401 on the first attempt instead of three lines later as "not resolvable".
 check_image_available() {
-  local sha="$1" attempt=1
-  ensure_registry_auth || true
-  while [ "$attempt" -le 3 ]; do
-    if resolve_remote_digest "$sha"; then
-      log "image $IMAGE_REPO:$sha resolves on the registry"
+  local sha="$1" attempt=1 state
+
+  # Authentication is its own step. A failure here is NAMED and the verification
+  # below still runs: with no explicit token, an existing login may well work, and
+  # refusing before asking the registry would break hosts where it does.
+  if ! authenticate_registry "$GHCR_TOKEN_FILE" "$IMAGE_REPO"; then
+    warn "registry authentication: ${REGISTRY_AUTH_STATE}; verifying anyway with whatever credential is in place"
+  else
+    log "registry authentication: ${REGISTRY_AUTH_STATE}"
+  fi
+
+  while :; do
+    if verify_manifest "$IMAGE_REPO:$sha" >/dev/null; then
+      log "image $IMAGE_REPO:$sha resolves on the registry (digest: ${REGISTRY_VERIFY_DETAIL})"
+      IMAGE_REGISTRY_VERIFIED="1"
       return 0
     fi
-    warn "image $IMAGE_REPO:$sha is not resolvable yet (attempt $attempt/3)"
+    state="$REGISTRY_VERIFY_STATE"
+
+    if ! retryable_verify_state "$state"; then
+      # NOT RETRIED, and each of these says something different.
+      case "$state" in
+        AUTH_REQUIRED)
+          die 1 "image $IMAGE_REPO:$sha cannot be read: the registry requires authentication and ${REGISTRY_AUTH_STATE} did not grant it. Provision $GHCR_TOKEN_FILE on this host, or log this host in to ghcr.io. (Retrying would not help.)" ;;
+        ACCESS_DENIED)
+          die 1 "image $IMAGE_REPO:$sha cannot be read: ${REGISTRY_VERIFY_DETAIL}. The credential in use is valid but lacks permission for $IMAGE_REPO. (Retrying would not help.)" ;;
+        DIGEST_MISMATCH)
+          die 1 "image $IMAGE_REPO:$sha is not the image that was built: ${REGISTRY_VERIFY_DETAIL}. Refusing to deploy a reference whose content does not match." ;;
+        *)
+          die 1 "image $IMAGE_REPO:$sha could not be verified on the registry: ${state} (${REGISTRY_VERIFY_DETAIL}). This is not a recognised transient failure, so it is not retried; the message above is the whole evidence." ;;
+      esac
+    fi
+
+    if [ "$attempt" -ge 3 ]; then
+      die 1 "image $IMAGE_REPO:$sha is not resolvable after 3 attempts: ${state} (${REGISTRY_VERIFY_DETAIL}). The registry answered and the answer was '${state}', which is not an authentication failure - look at the registry, not the build."
+    fi
+    warn "image $IMAGE_REPO:$sha: ${state} (attempt $attempt/3), retrying in 5s"
     attempt="$((attempt + 1))"
-    if [ "$attempt" -le 3 ]; then sleep 5; fi
+    sleep 5
   done
-  die 1 "image $IMAGE_REPO:$sha is not resolvable from this host; check that the build pushed it and that registry credentials are valid"
 }
 
 pull_image() {
@@ -739,7 +789,15 @@ prewarm_image() {
   fi
 
   # Credentials first: resolving the digest of a private package needs the same login the pull does.
-  ensure_registry_auth || true
+  #
+  # TASK-36A: the state is NAMED rather than discarded. The warm-up continues on a
+  # failure because an existing login may still work — but the log now says which
+  # credential this step is running on, so a later 401 is explainable.
+  if authenticate_registry "$GHCR_TOKEN_FILE" "$IMAGE_REPO"; then
+    log "pre-warm authentication: ${REGISTRY_AUTH_STATE}"
+  else
+    warn "pre-warm authentication: ${REGISTRY_AUTH_STATE}; continuing on whatever credential is in place"
+  fi
   mirrors="$(image_pull_mirrors)"
 
   if [ -n "$mirrors" ]; then

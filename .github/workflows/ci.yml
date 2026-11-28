@@ -1141,6 +1141,15 @@ jobs:
       # came from rather than to "noise".
       - name: The golden-path baseline's aggregation rules
         run: bash tests/ci/golden-path-baseline.test.sh
+      # --- the staging release path -----------------------------------------
+      # TASK-36A: registry authentication and manifest verification as two
+      # questions. The module is driven against a fake `docker`, so every state -
+      # AUTH_REQUIRED, DIGEST_MISMATCH, UNKNOWN - is exercised without a registry.
+      # It also asserts the deploy script SOURCES the module and no longer keeps a
+      # second copy, because a module nothing calls is the defect this repository
+      # has shipped repeatedly.
+      - name: Registry authentication and verification states
+        run: bash tests/scripts/registry-auth.test.sh
       # A new shell script must be linted without anyone remembering to add it.
       - name: Discovery of new CI inputs
         run: node tests/ci/check-l0-discovery.mjs --selftest
