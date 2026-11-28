@@ -1,0 +1,126 @@
+name: main verification
+
+# Post-merge verification of a commit on `main`.
+#
+# WHY THIS IS NOT A JOB IN `ci.yml` ANY MORE
+#
+# It was one, and two things followed from that, both measured on 4375c988 and
+# 63ef2451:
+#
+#   1. A JOB CANNOT WAIT FOR ITS OWN WORKFLOW. `verify-main` started 4 s after
+#      the push, read the check state at 06:26:12 and finished at 06:26:23 — while
+#      the five push workflows it judges settled between 06:30:20 and 07:16:30.
+#      At the moment it read, zero of five had settled.
+#
+#   2. THE VERDICT WAS A FUNCTION OF RUNNER QUEUE DELAY. On 63ef2451 the same job
+#      was queued for ten minutes, started at 23:29:36, and happened to read AFTER
+#      a fast-failing staging-preview landed — so it reported FAILED. On 4375c988
+#      it started immediately and reported INCOMPLETE. Same tool, same code,
+#      different answer, decided by how busy the runners were.
+#
+# A separate workflow can wait for all of them without needing itself.
+#
+# IT IS NOT A MERGE GATE. It observes main after a merge. Do NOT add it to the
+# ruleset's required checks: a required context that only appears on a push would
+# leave every PR waiting on a check that never arrives.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full 40-character commit SHA to verify (must be on main)
+        required: true
+        type: string
+
+# Least privilege. `checks: read` and `actions: read` are what let this read
+# another workflow's results; nothing here writes to the repository.
+permissions:
+  contents: read
+  actions: read
+  checks: read
+
+concurrency:
+  # One observer per commit. A newer push does NOT cancel an older commit's
+  # verification: each commit was a real push to main and its evidence is its
+  # own. The group is keyed on the SHA for that reason, and `cancel-in-progress`
+  # is left false so a re-run of the same SHA queues rather than killing the
+  # first — both are records of the same question.
+  group: main-verification-${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    # THE RELATIONSHIP THIS NUMBER MUST SATISFY, asserted by a test rather than
+    # left to whoever edits this file next:
+    #
+    #   job timeout  >  wait budget  +  setup  +  final collection
+    #   115 min      >  90 min       +  ~2 min +  ~1 min      = 93 min, with margin
+    #
+    # The wait budget is 90 min against a measured slowest push workflow of
+    # 3038 s (50.6 min) on 4375c988. A budget under ~55 min would fail healthy
+    # pushes, which is the failure mode that teaches people to ignore the tool.
+    #
+    # A job killed by its own timeout reports `cancelled`, which is a worse
+    # failure than a timeout with a reason — so the margin is deliberate.
+    timeout-minutes: 115
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify
+        id: verify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.sha }}
+          MAIN_VERIFICATION_BUDGET_MS: '5400000'
+        run: |
+          set -uo pipefail
+          # THE EXIT STATUS IS THE VERDICT, and it comes from the CLI rather than
+          # from a shell conditional. The previous wrapper computed the answer and
+          # then ended on an `echo`, so `::error::` — an annotation, not a status
+          # — was the only thing that came out of a FAILED main.
+          #
+          # `$?` is captured from the tool and re-raised at the END, so the
+          # evidence steps below still run on failure without masking the status.
+          rc=0
+          node tests/ci/main-verification/verify.mjs \
+            --sha "$TARGET_SHA" --wait \
+            --budget-ms "$MAIN_VERIFICATION_BUDGET_MS" \
+            --json --out-dir "$RUNNER_TEMP/main-verification" || rc=$?
+          echo "verify: exit $rc"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+      - name: Publish the summary
+        # Runs whether the verdict was green or red: a red main is the case the
+        # audience most needs the table for.
+        if: always()
+        run: |
+          set -uo pipefail
+          if [ -s "$RUNNER_TEMP/main-verification/summary.md" ]; then
+            cat "$RUNNER_TEMP/main-verification/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Main verification"
+              echo
+              echo "The tool wrote no summary. That is itself a result: the run did not"
+              echo "reach the point where it could decide one, and an absent report must"
+              echo "not read as a green one."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: main-verification-${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.sha }}
+          path: ${{ runner.temp }}/main-verification
+          if-no-files-found: warn
+          retention-days: 30

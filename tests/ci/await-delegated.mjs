@@ -139,6 +139,17 @@ export async function awaitDelegated(opts) {
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
     now = () => Date.now(),
     log = () => {},
+    // WHAT IS WORTH WAITING FOR is the one thing the two callers disagree about,
+    // so it is the one thing injected. Everything else — the budget guard, the
+    // backoff, the deadline clipping, the attempt counter — is shared, because
+    // those are the parts that were measured into place and a second copy would
+    // be a second thing to get wrong.
+    //
+    // The default is `whatToAwait`, which is what `ci-gate` means: a suite that
+    // another workflow is *currently running* will produce a check, so wait for
+    // it; a suite with neither a check nor a running workflow was never started,
+    // and no amount of waiting will make it appear.
+    waitFor = null,
   } = opts;
 
   // THE BUDGET IS VALIDATED HERE, because the loop below cannot survive a bad
@@ -169,6 +180,11 @@ export async function awaitDelegated(opts) {
     throw error;
   }
 
+  const decide = waitFor ?? ((snapshot) => {
+    const { ledger, workflowRuns, wanted: w } = snapshot;
+    return whatToAwait(ledger, workflowRuns, w ?? wanted);
+  });
+
   const started = now();
   let attempt = 0;
   let wait = pollMs;
@@ -177,8 +193,8 @@ export async function awaitDelegated(opts) {
   // answers and be using this only to re-check once.
   for (;;) {
     attempt += 1;
-    const { ledger, workflowRuns } = await read(attempt);
-    const { waiting, settled } = whatToAwait(ledger, workflowRuns, wanted);
+    const snapshot = await read(attempt);
+    const { waiting, settled } = decide(snapshot);
     const elapsedMs = now() - started;
 
     if (waiting.length === 0) {

@@ -439,11 +439,37 @@ jobs:
           fi
           node tests/ci/workflow-snapshot.mjs compare --base-ref "$base" --advisory > /tmp/surface.txt || true
           cat /tmp/surface.txt
-          if grep -qE 'UNPARSED|job REMOVED|permissions changed.*-> .*(write|write-all)' /tmp/surface.txt; then
+          # AN ACKNOWLEDGED REMOVAL IS ONE LINE, NAMED HERE.
+          #
+          # The default is that a removed job fails this step, because deleting a
+          # job removes its assertions from CI and nothing else would notice. But
+          # a removal that is the POINT of the change has to be expressible, or
+          # the only way to move a job is to smuggle it past the guard.
+          #
+          # `verify-main` moved out of `ci.yml` into `main-verification.yml`, and
+          # was renamed `verify` on the way: a job cannot wait for its own
+          # workflow, so the thing it was supposed to do was impossible where it
+          # was. The pair below is keyed on the workflow the job left, and the
+          # right-hand side records where it went. It is matched exactly, so it
+          # cannot absorb a second removal, and it is one line, so a reviewer sees
+          # it in the diff.
+          ACKNOWLEDGED_REMOVALS='^CHANGED ci\.yml:verify-main: job REMOVED$'
+          # Everything that is NOT the acknowledged pair, checked for the two
+          # conditions that used to be checked together.
+          BLOCKING="$(grep -E 'UNPARSED|job REMOVED|permissions changed.*-> .*(write|write-all)' /tmp/surface.txt \
+            | grep -vE "$ACKNOWLEDGED_REMOVALS" || true)"
+          if [ -n "$BLOCKING" ]; then
+            printf '%s\n' "$BLOCKING"
             echo "::error::a workflow change removed a job, widened a permission, or could not be parsed"
             exit 1
           fi
-          echo "advisory: $(grep -c '^CHANGED' /tmp/surface.txt || true) difference(s) reported, none blocking"
+          # AND THE ACKNOWLEDGEMENT MUST STILL BE TRUE. If the removal is no longer
+          # in the diff the allowance is dead and should be deleted, not left as a
+          # permanent hole for whatever is removed next.
+          if grep -qE "$ACKNOWLEDGED_REMOVALS" /tmp/surface.txt; then
+            echo "acknowledged: ci.yml:verify-main was moved to main-verification.yml"
+          fi
+          echo "advisory: $(grep -c '^CHANGED' /tmp/surface.txt || true) difference(s) reported"
       - run: node --test tests/ci/workflow-snapshot.test.mjs
       # Root hygiene: the top level stays legible, build output stays out of the
       # index, and one ecosystem keeps one lockfile. An unapproved directory is
@@ -976,6 +1002,151 @@ jobs:
       # this is that job.
       - name: Tracked PNGs are the curated baseline and within budget
         run: node tests/ci/check-tracked-png-budget.mjs
+  # L0.5 - CI GOVERNANCE. The gate's own counterfactuals, on every pull request.
+  #
+  # WHY THIS JOB EXISTS
+  #
+  # Measured: of the 32 commands the `verify-main` job ran, 29 executed in NO
+  # OTHER JOB. They ran only on a push to main - that is, after the merge that
+  # the tests were supposed to protect. `ci-gate --selftest`, the ledger tests,
+  # the bounded-wait tests, the ruleset payload checks and the API-failure
+  # counterfactuals were all post-merge.
+  #
+  # That is the same shape as a gate that cannot go red: the mechanism that
+  # decides whether CI is trustworthy was itself only checked after it had
+  # already been trusted. The brief for this phase says so directly - "CI Gate
+  # 自身必须成为合并前的必要验证".
+  #
+  # WHAT IT DELIBERATELY DOES NOT DO
+  #
+  #   - no `gh` calls: no token, no live API, no network. Everything here reads
+  #     committed files or drives pure functions, so it cannot fail for a reason
+  #     unrelated to the change.
+  #   - no staging, no Docker, no Maven.
+  #   - no duplication with `spec-coverage`, which already runs the impact and
+  #     filter-consistency checks; those are named here only where this job is
+  #     the FIRST place they run.
+  #
+  # `ci-gate` names this job in `needs:`, so its failure is a gate failure and a
+  # skipped or cancelled result is not a pass.
+  ci-governance:
+    runs-on: ubuntu-latest
+    # Measured: the whole set is seconds each, seconds in total. 15 gives room
+    # for a slow runner without hiding a hang.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+
+      # --- the gate itself ---------------------------------------------------
+      # `--selftest` drives the decision function against committed fixtures. A
+      # gate whose logic was never counterfactually tested is the thing this
+      # repository has been bitten by repeatedly.
+      - name: The gate's own selftest
+        run: node tests/ci/ci-gate.mjs --selftest
+      # The analyzer's output is what the gate judges.
+      - name: The impact analyzer
+        run: node --test tests/ci/impact.test.mjs
+      # The ledger and the bounded wait are the two halves of "the gate reads
+      # the right check for the right workflow, and does not pass on a result
+      # that does not exist yet".
+      - name: The check-run ledger and producer attribution
+        run: node --test tests/ci/check-run-ledger.test.mjs
+      - name: The bounded wait
+        run: node --test tests/ci/await-delegated.test.mjs
+      # Drives the PROCESS, not a helper: what it asserts is `main()`'s exit
+      # code, because that is the only thing CI reads.
+      - name: An API failure is not an empty commit
+        run: node --test tests/ci/ci-gate.api-failure.test.mjs
+      # Producer attribution across the two hand-maintained tables.
+      - name: Producer attribution is consistent
+        run: node --test tests/ci/ci-gate.attribution.test.mjs
+
+      # --- post-merge verification (TASK-39B/C/D) ----------------------------
+      # The classifier, the applicability rules, the attempt ledger, the wait,
+      # the exit-code contract, and the CLI's process status. Each case drives
+      # the production function; none re-implements it.
+      - name: Post-merge verification
+        run: node --test tests/ci/main-verification.test.mjs
+
+      # --- the contract the gate enforces ------------------------------------
+      - name: The gate contract
+        run: node tests/ci/check-gate-contract.mjs
+      - name: The concurrency matrix
+        run: node tests/ci/check-concurrency-supersede.mjs --selftest
+      - name: The concurrency matrix against the real workflows
+        run: node tests/ci/check-concurrency-supersede.mjs
+      # A test file that asserts nothing is not a passing test file. `node
+      # --test` exits 0 for an empty file, a comment-only file, and a file whose
+      # only test is `{skip: true}` - all three measured on Node 22.12.0.
+      - name: Every test CI runs asserts something
+        run: node tests/ci/check-test-substance.mjs --selftest
+      - name: Every registered test is referenced
+        run: node tests/ci/check-test-substance.mjs --all
+
+      # --- the ruleset migration's preconditions -----------------------------
+      # `PUT /rulesets/{id}` replaces the WHOLE rules array. A payload carrying
+      # only required_status_checks would silently delete main's other four
+      # protections.
+      - name: The ruleset payloads are complete
+        run: node tests/ci/check-ruleset-payload.mjs --selftest
+      - name: The ruleset payloads are complete (real files)
+        run: node tests/ci/check-ruleset-payload.mjs
+      - name: The ruleset payload tests
+        run: node --test tests/ci/check-ruleset-payload.test.mjs
+      # Can all ten required contexts appear on every pull request? A context
+      # that does not leaves every PR on "Expected" with no timeout.
+      - name: The required contexts have producers
+        run: node --test tests/ci/check-required-contexts.test.mjs
+      - name: The required contexts have producers (real files)
+        run: node tests/ci/check-required-contexts.mjs
+      # The pre-migration preflight, against the COMMITTED snapshot. CI has no
+      # ruleset read permission, so the live half is NOT_EVALUATED here; the
+      # self-test is what proves the tool still catches a lost protection.
+      - name: The ruleset preflight's own tests
+        run: bash tests/ci/check-ruleset-preflight.test.sh
+      # Is the gate actually enforceable? ADVISORY and PARTIAL exit 0 - they are
+      # facts for a migration to decide about. Only BROKEN fails.
+      - name: The gate's enforcement
+        run: node tests/ci/check-gate-enforcement.mjs --selftest
+
+      # --- evidence ----------------------------------------------------------
+      # ONE sanitization boundary, and the proof that no output surface escapes
+      # it: the collector redacted `log.excerpt` and copied a classifier's raw
+      # line verbatim into another field.
+      - name: Evidence is sanitised on every surface
+        run: bash tests/ci/evidence-sanitize.test.sh
+      # FOUR SUITES THAT MOVED HERE FROM `verify-main`. They were referenced only
+      # from that job, so removing it left them NOT_REFERENCED and the whole
+      # `spec-coverage` gate red - which is the check doing its job: a test no
+      # workflow runs is a test that has stopped being a gate. Each is offline and
+      # reads committed fixtures.
+      #
+      # The failure classifier's ATTRIBUTION, one finding per failed step. Ten
+      # committed counterexamples, each one a case V1 got confidently wrong.
+      - name: The failure classifier's attribution
+        run: bash tests/ci/classify-failure.test.sh
+      # Evidence scoped to a job and a pinned attempt, with a budget measured in
+      # UTF-8 BYTES rather than JavaScript characters.
+      - name: Failure evidence is scoped and bounded
+        run: bash tests/ci/collect-failure-evidence.test.sh
+      # The evidence index. The defect it was built to remove is real and
+      # measured: the run for the 8A merge commit had ZERO artifacts.
+      - name: The evidence index
+        run: bash tests/ci/evidence-index.test.sh
+      # The golden-path baseline's AGGREGATION rules, driven from saved STEP
+      # lines: a spread is max-minus-min, a step is classified by name rather
+      # than by duration, and a 151-second swing is attributed to the step it
+      # came from rather than to "noise".
+      - name: The golden-path baseline's aggregation rules
+        run: bash tests/ci/golden-path-baseline.test.sh
+      # A new shell script must be linted without anyone remembering to add it.
+      - name: Discovery of new CI inputs
+        run: node tests/ci/check-l0-discovery.mjs --selftest
+      - name: Discovery of new CI inputs (real files)
+        run: node tests/ci/check-l0-discovery.mjs
+
   contracts:
     runs-on: ubuntu-latest
     steps:
@@ -1678,6 +1849,7 @@ jobs:
     needs:
       - scope
       - lint
+      - ci-governance
       - rust
       - web
       - web-unit
@@ -1978,262 +2150,24 @@ jobs:
   # It cannot see the other workflows' runs as they complete — GitHub has no
   # "wait for another workflow" primitive — so it reports INCOMPLETE and says so,
   # which is the honest answer rather than a green tick on a partial picture.
-  verify-main:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: What main actually ran
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -uo pipefail
-          # Read the JSON and ignore the status: this tool's exit code is part of
-          # its contract (2 = nothing to read, 3 = superseded), and under
-          # `set -o pipefail` a correct UNAVAILABLE would otherwise abort the step.
-          rc=0
-          node tests/ci/verify-main.mjs --sha "$GITHUB_SHA" --json > /tmp/main-runs.json 2>/tmp/main-runs.err || rc=$?
-          STATE="$(node -e '
-            try { console.log(require("/tmp/main-runs.json").state); } catch { console.log("UNREADABLE"); }
-          ')"
-
-          {
-            echo "## Main verification (TASK-40)"
-            echo
-            echo "A green pull request is not a verified \`main\`: they are separate"
-            echo "executions of separate commits. This is what the PUSH runs for"
-            echo "\`$GITHUB_SHA\` actually concluded."
-            echo
-            echo '```'
-            # `head` reads the file directly; `cat f | head` is SC2002 and the
-            # lint is a gate. The file may not exist, so it is guarded rather
-            # than piped through a redirect that shellcheck rewrites away.
-            if [ -s /tmp/main-runs.err ]; then head -5 /tmp/main-runs.err; fi
-            node -e '
-              try {
-                const d = require("/tmp/main-runs.json");
-                console.log(d.state + "  " + d.sha);
-                console.log("  " + d.reason);
-                if (d.succeeded.length) console.log("  verified: " + d.succeeded.join(", "));
-                if (d.failed.length) console.log("  FAILED:   " + d.failed.join(", "));
-                if (d.cancelled.length) console.log("  CANCELLED: " + d.cancelled.join(", "));
-                if (d.pending.length) console.log("  pending:  " + d.pending.join(", "));
-                if (d.notTriggeredNote) console.log("  " + d.notTriggeredNote);
-              } catch (e) { console.log("could not read the result: " + e.message); }
-            '
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          # A DIFFERENT WORKFLOW'S RUN CANNOT BE WAITED ON, so INCOMPLETE is
-          # expected on a fresh push and is NOT a failure of this job. The states
-          # that are wrong on their own terms are a FAILED suite, which is
-          # reported; CANCELLED, which means a newer push superseded this commit
-          # and is the documented policy; and VERIFIED, which needs nothing.
-          echo "verify-main: $STATE (rc=$rc)"
-          if [ "$STATE" = "FAILED" ]; then
-            echo "::error::main ran a workflow that FAILED for $GITHUB_SHA — see the summary. This does not un-merge the commit; it is the fact a human needs."
-          fi
-
-      - name: The gate's own selftest
-        run: |
-          set -eu
-          # A gate whose logic was never counterfactually tested is the thing this
-          # repository has been bitten by repeatedly. Run it before trusting it.
-          node tests/ci/ci-gate.mjs --selftest
-          node --test tests/ci/impact.test.mjs
-          # The ledger and the bounded wait are the two halves of "the gate reads
-          # the right check for the right workflow, and does not pass on a result
-          # that does not exist yet". Both are tested here, next to the gate they
-          # belong to, so a change to either cannot land unverified - which is
-          # what happened on this branch's first run: `check-spec-coverage.mjs`
-          # rejected them as NOT_REFERENCED, correctly.
-          node --test tests/ci/check-run-ledger.test.mjs
-          node --test tests/ci/await-delegated.test.mjs
-          # Drives the PROCESS, not a helper: what it asserts is `main()`'s exit
-          # code, because that is the only thing CI reads. A fixture-level test
-          # would pass even if main() returned 0 on an API error.
-          node --test tests/ci/ci-gate.api-failure.test.mjs
-          # A test file that asserts nothing is not a passing test file.
-          #
-          # `node --test` exits 0 for an empty file, a comment-only file, and a
-          # file whose only test is `{skip: true}` - all three measured on Node
-          # 22.12.0. So "delete the assertions" is a way to make a red suite
-          # green and nothing here noticed. This checks the files CI actually
-          # runs, discovered from these workflow files rather than hard-coded.
-          node tests/ci/check-test-substance.mjs --selftest
-          node tests/ci/check-test-substance.mjs --all
-          # Every suite workflow must supersede a run that a newer push has made
-          # obsolete, and must never cancel a manual or scheduled run. Two
-          # properties, one place, because the second is the one that gets lost
-          # when someone "simplifies" the first to `cancel-in-progress: true`.
-          node tests/ci/check-concurrency-supersede.mjs --selftest
-          node tests/ci/check-concurrency-supersede.mjs
-          # The staging host is a deployment workflow with a different contract:
-          # transaction serialisation across runs, and a fail-closed identity
-          # check on every certifying job. Checked separately rather than folded
-          # into the suite matrix, which models cancellations and not locks.
-          node tests/ci/check-staging-concurrency.mjs --selftest
-          node tests/ci/check-staging-concurrency.mjs
-          # `PUT /rulesets/{id}` replaces the WHOLE rules array. A payload that
-          # carries only required_status_checks would silently delete main's other
-          # four protections. The saved restore payloads are checked here so the
-          # mistake cannot reach a terminal.
-          node tests/ci/check-ruleset-payload.mjs --selftest
-          node tests/ci/check-ruleset-payload.mjs
-          # TASK-19: the pre-migration preflight, against the COMMITTED snapshot.
-          # The two checks above compare saved file to saved file. Neither asks
-          # "is the live ruleset still what the migration assumes", which is a
-          # delta question and the one a migration actually depends on.
-          #
-          # CI has no ruleset read permission, so a live read would be
-          # NOT_EVALUATED here; the committed snapshot is used instead, and the
-          # tool prints its capture date so a stale baseline reads as stale.
-          #
-          # WHAT IS GATED IS THE SELF-TEST, not the preflight itself. The
-          # self-test is green (12 assertions) and would be red if the tool
-          # stopped catching a lost protection, an unexpected rule, or a changed
-          # payload - those are the properties that must not regress.
-          #
-          # The preflight's LIVE verdict is deliberately not a CI gate: it reports
-          # a real disagreement today (two payloads set opposite strict policies,
-          # and the choice is BLOCKED_AUTH), and gating on an unresolved decision
-          # would block every merge for a reason unrelated to the change under
-          # test. `node tests/ci/check-ruleset-preflight.mjs --offline` is run by
-          # the operator before the migration, which is when it matters.
-          bash tests/ci/check-ruleset-preflight.test.sh
-          # TASK-23: the golden-path baseline's AGGREGATION rules, driven from
-          # saved STEP lines. The live half needs `gh`; what has to be right is
-          # that a spread is max-minus-min, that a step is classified by name
-          # rather than by duration, and that a 151-second swing is attributed to
-          # the step it came from rather than to "noise".
-          bash tests/ci/golden-path-baseline.test.sh
-          # TASK-26: ONE sanitization boundary, and the proof that no output
-          # surface escapes it. Found by construction: the collector redacted
-          # `log.excerpt` and copied `classification.evidence[].line` verbatim from
-          # a classifier that had read the RAW log, so the same physical line
-          # appeared twice - redacted in one field, live in the other.
-          bash tests/ci/evidence-sanitize.test.sh
-          # TASK-27: the failure classifier's ATTRIBUTION, one finding per failed
-          # step. Ten committed counterexamples, each one a case V1 got confidently
-          # wrong (a recovered 429 as the root cause, a 429 from a succeeded job,
-          # a PASSING assertion quoted as the cause, two matrix rows collapsed into
-          # one). Driven from fixtures so a signature change is caught without
-          # waiting for a real 429.
-          bash tests/ci/classify-failure.test.sh
-          # TASK-22/28/29: evidence scoped to a job and a pinned attempt, and a
-          # budget measured in UTF-8 BYTES rather than JavaScript characters.
-          # Every case reads a fixture; none touches the network.
-          bash tests/ci/collect-failure-evidence.test.sh
-          # TASK-37: the evidence index. The defect it was built to remove is real
-          # and measured - the run for the 8A merge commit had ZERO artifacts, and
-          # the two Phase 8A diagnostic tools were invoked by no workflow at all.
-          # The cases here include the one that caught the index itself crediting a
-          # single artifact to 27 checks.
-          bash tests/ci/evidence-index.test.sh
-          # TASK-40: "PR 通过不等于 main 通过". Four of its five requirements were
-          # already enforced by tools that exist; the fifth - check what main
-          # actually ran after merging - had no tool at all. The cases here are the
-          # three that taught it: CANCELLED is not a failure and not a pass; a
-          # path-filtered workflow that did not run is not missing; a tag-triggered
-          # workflow owes nothing on a branch push.
-          bash tests/ci/verify-main.test.sh
-          # The migration's PRECONDITION: can all ten contexts the candidate
-          # ruleset requires actually appear on every pull request? A required
-          # context whose workflow has a path filter, or whose job is conditional,
-          # leaves the PR on "Expected - Waiting for status to be reported" with no
-          # timeout and no override. That is worse than an advisory gate, so it is
-          # checked before the ruleset is written rather than after.
-          node --test tests/ci/check-required-contexts.test.mjs
-          node tests/ci/check-required-contexts.mjs
-          # The ruleset migration's WRITE VERIFICATION: after a PUT, is the ruleset
-          # exactly what was sent? A 200 is not evidence, and the failure that
-          # matters is losing one of the four protections the migration must not
-          # touch. The rollback payload is asserted here too, so a file that claims
-          # to restore the old state and does not cannot sit in the repository.
-          node --test tests/ci/check-ruleset-payload.test.mjs
-          # The registry-digest check `publish-data-plugins.sh` now calls. It
-          # existed for weeks with no caller: the publish path embedded the LOCAL
-          # RepoDigest in every bundle, and on staging that digest returned 404 from
-          # the registry. Wired in and tested together, because either alone is a
-          # claim rather than a control.
-          node --test scripts/verify-registry-digest.test.mjs
-          # What a failed publish leaves behind. The script prints `exit 1` and a wall
-          # of text; this answers which phase, what changed, and where a retry starts.
-          # `scriptDrift` is what stops the model describing a release the script does
-          # not perform.
-          node --test scripts/ci/publish-phases.test.mjs
-          node scripts/ci/publish-phases.mjs --publish-script-drift
-          # A failed publish must name the plugins it never reached: `set -e` stops
-          # the loop at the first failure and the output otherwise says nothing about
-          # the rest. Measured with three plugins and a failure on the second.
-          bash tests/scripts/publish-untried-report.test.sh
-          # TASK-39's missing instrument: no artifact carried deployment status, so
-          # a deployed fix that did nothing could not explain itself. This collects
-          # `opsctl capacity --json` into the staging-deploy artifact, and the cases
-          # below are mostly FAILURES - the branch that runs on a full node is the
-          # only one that ever needed the step. The rule under test is that
-          # capacity.json is never empty, because an empty file reads as "no
-          # occupants", the opposite of a capacity failure.
-          bash tests/scripts/collect-capacity.test.sh
-          # Is the gate actually enforceable? Reads the LIVE ruleset, because a
-          # flawless workflow that nothing requires gates nothing. ADVISORY and
-          # PARTIAL exit 0 - they are facts for a migration to decide about, not
-          # code defects. Only BROKEN (a required context nobody produces) fails.
-          # This step has no GH_TOKEN, so it cannot read the live ruleset here -
-          # it runs with REPO unset and reports that instead of pretending. The
-          # live check is a local/operator command; `--selftest` is what CI guards.
-          node tests/ci/check-gate-enforcement.mjs --selftest
-          # The release receipt is what a promotion would verify. Its checks are
-          # offline; the live write/verify path needs a token and belongs to the
-          # certification workflow, not here.
-          node scripts/release-receipt.mjs --selftest
-          # The receipt's own counterfactuals. `--selftest` above proves the
-          # refusal messages; this file proves the two defects MEASURED against
-          # the previous implementation: a required suite that was red on both
-          # sides came back CERTIFIED, and a sticky-success rule let an old green
-          # mask a newer failing attempt.
-          node --test scripts/release-receipt.test.mjs
-          # The certification ledger. `release-certification.yml` used
-          # `unique_by(.name)` on the check-run list, which keeps the LAST element
-          # in ARRAY ORDER - and GitHub does not promise an order. Measured: an old
-          # success followed by a NEW failure reported `rust=success`.
-          node --test scripts/ci/release-check-ledger.test.mjs
-          # The certification's TARGET decision. It was five shell branches with no
-          # test, because "the workflow exists" was taken as "the chain is
-          # verified". Writing the cases found a real hole: a command substitution
-          # in an assignment does not trip `set -e`, so a refused target left the
-          # step at rc=0 and the next step certified whatever it could find.
-          node --test scripts/ci/resolve-certification-target.test.mjs
-          # A new shell script must be linted without anyone remembering to add
-          # it, and a new workflow must be seen. Counts the unpinned actions too,
-          # without failing on them - 126 exist today and making that fatal would
-          # teach people to bypass the check.
-          node tests/ci/check-l0-discovery.mjs --selftest
-          node tests/ci/check-l0-discovery.mjs
-          # The analyzer's output is what the gate judges, so its own tests run
-          # here too - including the cases that pin the analyzer to the suites a
-          # workflow can actually start.
-
-      # `--live` also asks GitHub whether the producing workflows are ENABLED.
-      # Everything the static check above reads is a property of the file, and all of
-      # it can be true while the workflow is disabled - in which case the required
-      # context never appears and every PR waits on it for ever.
-      #
-      # ADVISORY, AND WHY THAT IS ACCEPTABLE: the fatal check is the step above, on
-      # the same tree. This step only adds a fact a file cannot carry, and a
-      # repository that disables a workflow on purpose must not fail every PR. The
-      # operator running `--live` before writing the ruleset is where it is fatal -
-      # and the finding is printed either way.
-      - name: The required contexts' producers are enabled
-        run: node tests/ci/check-required-contexts.mjs --live || true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # `verify-main` WAS HERE. It is now `.github/workflows/main-verification.yml`.
+  #
+  # Two reasons, both measured, and neither is stylistic:
+  #
+  #   1. A JOB CANNOT WAIT FOR ITS OWN WORKFLOW. This job ran four seconds after
+  #      the push and read a check state in which nothing had settled. On
+  #      4375c988 it started at 06:25:56, read at 06:26:12 and finished at
+  #      06:26:23; the five push workflows it judges settled between 06:30:20
+  #      and 07:16:30. It printed INCOMPLETE - right about the moment, wrong
+  #      about the commit.
+  #
+  #   2. ITS VERDICT WAS A FUNCTION OF RUNNER QUEUE DELAY. On 63ef2451 the same
+  #      job was queued for ten minutes and happened to read AFTER a fast-failing
+  #      staging-preview landed, so it reported FAILED. Same code, different
+  #      answer, decided by how busy the runners were.
+  #
+  # What stays here is nothing: the governance self-tests this job also carried
+  # moved to `ci-governance` above, which runs on EVERY PULL REQUEST. Measured
+  # before the move: of the 32 commands this job ran, 29 executed in no other
+  # job - so the mechanism that decides whether CI is trustworthy was itself only
+  # checked after the merge it was supposed to protect.
