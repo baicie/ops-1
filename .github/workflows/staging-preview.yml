@@ -579,7 +579,30 @@ jobs:
           else
             code=$?
             echo "result=failure" >> "$GITHUB_OUTPUT"
-            echo "::error::The host deployment failed (exit $code). The host script attempted an automatic rollback; see the staging-deploy artifact for the recorded state."
+            # TASK-36B: ASK THE HOST WHAT PHASE FAILED, over the same connection.
+            #
+            # The exit code is 1 for every failure, so it cannot answer this. The
+            # host script now writes a typed record beside its deployment state,
+            # and the fallback below is gated on `fallback_allowed` from that
+            # record - not on the mere fact that this step failed.
+            #
+            # Measured on run 46143147549: the registry said `denied: denied`
+            # (a permission problem), and the fallback spent its full 900 s
+            # transferring an image whose identity could never be established.
+            #
+            # An unreadable record is recorded as UNKNOWN, which is NOT
+            # fallback-allowed: the safe default is to transfer nothing.
+            phase_json="$(ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'sudo -n cat /var/lib/opsweave-staging/deployments/last-failure.json 2>/dev/null' || true)"
+            phase="$(printf '%s' "$phase_json" | sed -n 's/.*"phase"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+            allowed="$(printf '%s' "$phase_json" | sed -n 's/.*"fallback_allowed"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | head -1)"
+            [ -n "$phase" ] || phase="UNKNOWN"
+            [ -n "$allowed" ] || allowed="false"
+            {
+              echo "phase=$phase"
+              echo "fallback_allowed=$allowed"
+            } >> "$GITHUB_OUTPUT"
+            echo "host failure phase: $phase (fallback allowed: $allowed)"
+            echo "::error::The host deployment failed in phase $phase (exit $code). The host script attempted an automatic rollback; see the staging-deploy artifact for the recorded state."
             exit "$code"
           fi
 
@@ -600,6 +623,31 @@ jobs:
         run: |
           set -euo pipefail
           set +x
+          # TASK-36B: THE FALLBACK RUNS ONLY WHEN THE FAILURE WAS A TRANSPORT FAILURE.
+          #
+          # This step used to run on the mere fact that the deploy step failed, and
+          # then decided for itself whether the failure was transport-shaped by
+          # asking whether the host held the image. That inference is invalid - "the
+          # host has the image" and "the registry has the image" are different facts
+          # - and it was wrong in the expensive direction: on run 46143147549 the
+          # registry answered `denied: denied`, a permission problem, and this step
+          # still spent its full 900 s transferring an image whose identity could
+          # never be established. It exited 124 at fifteen minutes.
+          #
+          # The host now says WHICH PHASE failed, in a typed record. Only
+          # IMAGE_TRANSPORT is fallback-allowed: bytes are what is missing, and a
+          # transfer can supply them. Every other phase is a statement about the
+          # image's identity, the release after it was obtained, or the host.
+          #
+          # An unreadable or absent phase is UNKNOWN, which is NOT allowed - the
+          # safe default is to transfer nothing.
+          PHASE='${{ steps.deploy.outputs.phase }}'
+          ALLOWED='${{ steps.deploy.outputs.fallback_allowed }}'
+          if [ "${ALLOWED:-false}" != "true" ]; then
+            echo "::error::Not transferring the image: the host failed in phase ${PHASE:-UNKNOWN}, which a transfer cannot fix. A copy of an image does not establish its identity, and it does not repair a release that failed after the image arrived. The host's own message above names the cause."
+            exit 1
+          fi
+          echo "host failed in phase $PHASE, which a transfer can fix; continuing"
           # Same guard as the deploy step: this step interpolates the same secret into a remote
           # command, and a deploy rejected for a malformed URL must not reach it unvalidated.
           if ! printf '%s' "$PUBLIC_URL" | grep -Eq '^https?://[A-Za-z0-9._~:/?#@!&()*+,;=%-]+$'; then
@@ -631,7 +679,28 @@ jobs:
           docker pull "$image"
           # timeout bounds the transfer itself, and pipefail turns a killed transfer into a failed
           # step instead of a deploy that waits for an image which never arrives.
-          docker save "$image" | gzip -1 | timeout "$TRANSFER_TIMEOUT" ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'gunzip | sudo docker load'
+          #
+          # TASK-36B: A TIMED-OUT TRANSFER SAYS SO. Measured on run 46143147549, the
+          # step exited 124 after exactly 900 s with nothing but
+          # `gzip: stdout: Broken pipe` — which states a symptom of the kill, not the
+          # fact that the transfer ran out of time. The four things the brief asks
+          # for on a timeout are: kill the local transfer (timeout does), audit the
+          # remote for leftovers (below), keep the phase (IMAGE_TRANSPORT), and
+          # record what was transferred (the host's image list, below).
+          transfer_rc=0
+          docker save "$image" | gzip -1 | timeout "$TRANSFER_TIMEOUT" ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'gunzip | sudo docker load' || transfer_rc=$?
+          if [ "$transfer_rc" -ne 0 ]; then
+            # The remote half may still be running after the local timeout closed the
+            # pipe. Report what is there rather than assuming either outcome, and do
+            # NOT claim a deploy.
+            remote="$(ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" "sudo docker image inspect --format '{{.Id}}' '$image' 2>/dev/null || echo ABSENT" || echo UNKNOWN)"
+            if [ "$transfer_rc" -eq 124 ]; then
+              echo "::error::The image transfer did not finish within ${TRANSFER_TIMEOUT}s (phase IMAGE_TRANSPORT). The local transfer was killed. The host's copy of $image is: ${remote}. Nothing was deployed."
+            else
+              echo "::error::The image transfer failed (exit $transfer_rc, phase IMAGE_TRANSPORT). The host's copy of $image is: ${remote}. Nothing was deployed."
+            fi
+            exit "$transfer_rc"
+          fi
           ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" "sudo docker image inspect '$image' >/dev/null && echo 'image present on the host: $image'"
 
           echo "the host holds $image; deploying $TARGET_SHA again"

@@ -168,7 +168,79 @@ die() {
   shift || true
   printf '%s ERROR %s\n' "$(iso_now)" "$*" >&2
   append_log "ERROR $*"
+  record_failure
   exit "$code"
+}
+
+# --- TASK-36B: a typed failure record ---------------------------------------
+#
+# WHY THIS EXISTS
+#
+# The host script exits 1 for every failure, so the exit code says nothing about
+# WHICH PHASE failed — and the workflow's SSH-transfer fallback used to run on the
+# mere fact that the deploy step failed. Measured on run 46143147549: the registry
+# answered `denied: denied` (a permission problem, nothing to do with transport),
+# the deploy step failed, and the fallback then spent its full 900 s transferring
+# an image that could never be read. It exited 124 at 15 minutes.
+#
+# The phases below are the ones the fallback must be able to tell apart. Only
+# IMAGE_TRANSPORT is recoverable by transferring bytes; `fallbackAllowed` is set
+# from that and nothing else.
+#
+#   PLUGIN_PUBLISH        a plugin the release needs is not READY
+#   RELEASE_IDENTITY      the image's identity could not be established (auth,
+#                         permission, digest mismatch, manifest missing)
+#   IMAGE_TRANSPORT       the image could not be MOVED to this host
+#   COMPOSE_UPDATE        the release failed to come up (compose/config)
+#   HEALTH_VERIFICATION   it came up and did not become healthy
+#   HOST_PREPARATION      the host was not in a state to deploy at all
+#   UNKNOWN               anything else, recorded as unknown rather than guessed
+#
+# A record is written on EVERY die, to a fixed small file the workflow reads over
+# SSH. It deliberately carries no secret: a phase name, a boolean, the sha, and a
+# short reason already present in the log.
+FAILURE_PHASE=""
+FAILURE_REASON=""
+FAILURE_FILE="$DEPLOY_DIR/last-failure.json"
+
+# set_failure_phase <phase> [reason]
+# Called before a die to say what failed. A die with no phase recorded is UNKNOWN,
+# which is not fallback-allowed — the safe default is "transfer nothing".
+set_failure_phase() {
+  FAILURE_PHASE="$1"
+  FAILURE_REASON="${2:-}"
+}
+
+# fallback_allowed <phase>
+# The single place the answer to "may the workflow transfer the image?" is decided.
+fallback_allowed() {
+  case "$1" in
+    # The image never arrived, and bytes are what is missing. This is the one case
+    # a transfer can fix.
+    IMAGE_TRANSPORT) printf 'true' ;;
+    # Everything else is either a statement about the image's IDENTITY (transferring
+    # a copy does not establish it), about the release after the image was obtained,
+    # or about the host. None of them is a transfer problem.
+    PLUGIN_PUBLISH|RELEASE_IDENTITY|COMPOSE_UPDATE|HEALTH_VERIFICATION|HOST_PREPARATION) printf 'false' ;;
+    *) printf 'false' ;;
+  esac
+}
+
+record_failure() {
+  local phase="${FAILURE_PHASE:-UNKNOWN}"
+  # Best effort: a failure to write the record must not replace the real failure.
+  [ -d "$DEPLOY_DIR" ] || mkdir -p "$DEPLOY_DIR" 2>/dev/null || return 0
+  {
+    printf '{\n'
+    printf '  "phase": %s,\n' "$(json_str "$phase")"
+    printf '  "fallback_allowed": %s,\n' "$(fallback_allowed "$phase")"
+    printf '  "sha": %s,\n' "$(json_or_null "${DEPLOY_TARGET_SHA:-}")"
+    printf '  "reason": %s,\n' "$(json_str "$(printf '%s' "${FAILURE_REASON:-}" | cut -c1-300)")"
+    printf '  "recorded_at": %s\n' "$(json_str "$(iso_now)")"
+    printf '}\n'
+  } >"$FAILURE_FILE.tmp" 2>/dev/null || return 0
+  chmod 600 "$FAILURE_FILE.tmp" 2>/dev/null || true
+  mv -f "$FAILURE_FILE.tmp" "$FAILURE_FILE" 2>/dev/null || true
 }
 
 usage() {
@@ -485,6 +557,7 @@ load_services() {
 preflight() {
   local cmd
   for cmd in docker curl; do
+    set_failure_phase HOST_PREPARATION "required command not found"
     command -v "$cmd" >/dev/null 2>&1 || die 1 "required command not found on this host: $cmd"
   done
   if docker compose version >/dev/null 2>&1; then
@@ -492,9 +565,12 @@ preflight() {
   elif command -v docker-compose >/dev/null 2>&1; then
     COMPOSE_CMD=(docker-compose)
   else
+    set_failure_phase HOST_PREPARATION "no compose command"
     die 1 "neither 'docker compose' nor 'docker-compose' is available"
   fi
+  set_failure_phase HOST_PREPARATION "compose file not found"
   [ -f "$COMPOSE_FILE" ] || die 1 "compose file not found: $COMPOSE_FILE (deployments/staging/compose.yaml must be installed under $ROOT_DIR first)"
+  set_failure_phase HOST_PREPARATION "environment file not found"
   [ -f "$ENV_FILE" ] || die 1 "environment file not found: $ENV_FILE"
   # Per-service env files first: compose refuses to resolve a service whose env_file is absent, and
   # the boundary check is what keeps a secret out of node.env (ADR-014 §8).
@@ -523,6 +599,7 @@ preflight() {
 detect_docker_gid() {
   local sock="${OPSWEAVE_DOCKER_SOCKET:-/var/run/docker.sock}" gid recorded
   if [ ! -e "$sock" ]; then
+    set_failure_phase HOST_PREPARATION "docker socket missing"
     die 1 "docker socket $sock does not exist; refusing to guess DOCKER_GID for the node container"
   fi
   gid="$(stat -c '%g' "$sock" 2>/dev/null || true)"
@@ -548,6 +625,7 @@ detect_docker_gid() {
 prepare_bind_dir() {
   local dir="$1" uid="$2" gid="$3" mode="$4" owner identity
   if [ ! -d "$dir" ]; then
+    set_failure_phase HOST_PREPARATION "cannot create bind directory"
     install -d -o "$uid" -g "$gid" -m "$mode" "$dir" || die 1 "cannot create $dir owned by $uid:$gid"
     log "created $dir owned by $uid:$gid mode $mode"
     return 0
@@ -567,6 +645,7 @@ prepare_bind_dirs() {
     warn "OPSWEAVE_SKIP_BIND_DIR_PREP is set with an overridden staging root; skipping ownership preparation (rehearsal only)"
     return 0
   fi
+  set_failure_phase HOST_PREPARATION "bind directories need root"
   [ "$(id -u)" = "0" ] || die 1 "bind-mounted host directories must be prepared as root; re-run with sudo"
   prepare_bind_dir "$DATA_DIR/pg" 999 999 0750
   prepare_bind_dir "$DATA_DIR/registry" 0 0 0755
@@ -631,17 +710,21 @@ check_image_available() {
       # NOT RETRIED, and each of these says something different.
       case "$state" in
         AUTH_REQUIRED)
+          set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
           die 1 "image $IMAGE_REPO:$sha cannot be read: the registry requires authentication and ${REGISTRY_AUTH_STATE} did not grant it. Provision $GHCR_TOKEN_FILE on this host, or log this host in to ghcr.io. (Retrying would not help.)" ;;
         ACCESS_DENIED)
           die 1 "image $IMAGE_REPO:$sha cannot be read: ${REGISTRY_VERIFY_DETAIL}. The credential in use is valid but lacks permission for $IMAGE_REPO. (Retrying would not help.)" ;;
         DIGEST_MISMATCH)
+          set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
           die 1 "image $IMAGE_REPO:$sha is not the image that was built: ${REGISTRY_VERIFY_DETAIL}. Refusing to deploy a reference whose content does not match." ;;
         *)
+          set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
           die 1 "image $IMAGE_REPO:$sha could not be verified on the registry: ${state} (${REGISTRY_VERIFY_DETAIL}). This is not a recognised transient failure, so it is not retried; the message above is the whole evidence." ;;
       esac
     fi
 
     if [ "$attempt" -ge 3 ]; then
+      set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
       die 1 "image $IMAGE_REPO:$sha is not resolvable after 3 attempts: ${state} (${REGISTRY_VERIFY_DETAIL}). The registry answered and the answer was '${state}', which is not an authentication failure - look at the registry, not the build."
     fi
     warn "image $IMAGE_REPO:$sha: ${state} (attempt $attempt/3), retrying in 5s"
@@ -857,6 +940,7 @@ prewarm_image() {
   verify_manifest "$IMAGE_REPO:$sha" >/dev/null || true
   case "$REGISTRY_VERIFY_STATE" in
     AUTH_REQUIRED)
+      set_failure_phase RELEASE_IDENTITY "$REGISTRY_VERIFY_STATE"
       die 1 "cannot obtain $IMAGE_REPO:$sha: the registry requires authentication and ${REGISTRY_AUTH_STATE} did not grant it (${REGISTRY_VERIFY_DETAIL}). If that state is EXISTING_CREDENTIAL, the login already on this host is stale or lacks read access to $IMAGE_REPO - the token file is what would replace it. Nothing on this host was changed." ;;
     ACCESS_DENIED)
       die 1 "cannot obtain $IMAGE_REPO:$sha: ${REGISTRY_VERIFY_DETAIL}. The credential is accepted but not permitted to read $IMAGE_REPO; a pull cannot fix a permission. Nothing on this host was changed." ;;
@@ -886,6 +970,7 @@ ensure_dependencies() {
     fi
     log "compose --wait is unavailable or did not confirm $svc health; starting it and polling instead"
     if ! compose up -d --no-deps "$svc"; then
+      set_failure_phase COMPOSE_UPDATE "dependency service did not start"
       die 1 "failed to start dependency service $svc"
     fi
   done
@@ -1005,9 +1090,11 @@ create_backup() {
   BACKUP_DB="skipped"
   if service_exists postgres; then
     if ! service_running postgres; then
+      set_failure_phase COMPOSE_UPDATE "postgres not running"
       die 1 "postgres is defined but not running; refusing to deploy without a database backup"
     fi
     if ! wait_for_postgres; then
+      set_failure_phase COMPOSE_UPDATE "postgres not usable"
       die 1 "postgres is not usable ($PG_READY_STATE) after ${POSTGRES_READY_TIMEOUT}s; aborting before any image change"
     fi
     if [ "$PG_READY_STATE" = "first-initialisation" ]; then
@@ -1019,10 +1106,12 @@ create_backup() {
     log "dumping postgres database $PG_DB to $BACKUP_DIR/postgres.dump"
     if ! compose exec -T postgres pg_dump -Fc -U "$PG_USER" -d "$PG_DB" >"$BACKUP_DIR/postgres.dump"; then
       rm -f "$BACKUP_DIR/postgres.dump"
+      set_failure_phase HOST_PREPARATION "backup failed"
       die 1 "pg_dump failed; aborting before any image change"
     fi
     BACKUP_DB="dumped"
     if ! verify_backup; then
+      set_failure_phase HOST_PREPARATION "backup verification failed"
       die 1 "backup verification failed; aborting before any image change"
     fi
   else
@@ -1463,9 +1552,12 @@ print_running_release() {
 # had no listener). The lock is held for the whole mutation; --status stays lock-free so
 # monitoring never blocks on an in-flight deploy.
 acquire_deploy_lock() {
+  set_failure_phase HOST_PREPARATION "flock missing"
   command -v flock >/dev/null 2>&1 || die 1 "flock is required to serialise deployments but is not installed"
+  set_failure_phase HOST_PREPARATION "deploy lock unopenable"
   exec 9>"$LOCK_FILE" || die 1 "cannot open the deploy lock $LOCK_FILE"
   if ! flock -w "$LOCK_TIMEOUT" 9; then
+    set_failure_phase HOST_PREPARATION "deploy lock held"
     die 1 "another deployment still holds $LOCK_FILE after waiting ${LOCK_TIMEOUT}s; refusing to run two deployments against the same host"
   fi
   log "deploy lock acquired ($LOCK_FILE)"
@@ -1473,6 +1565,9 @@ acquire_deploy_lock() {
 
 cmd_deploy() {
   local sha="$1" previous_running="" rollback_target="" healthy=0 stamp
+  # The typed failure record names the commit it was about. Set before the first
+  # thing that can fail, so an early preflight failure still says which release.
+  DEPLOY_TARGET_SHA="$sha"
   preflight
   prewarm_image "$sha"
   acquire_deploy_lock
@@ -1523,6 +1618,7 @@ cmd_deploy() {
   if [ -z "$rollback_target" ]; then
     write_record "$sha" false false "" "deploy"
     print_running_release
+    set_failure_phase HEALTH_VERIFICATION "unhealthy, nothing to roll back to"
     die 1 "release $sha is unhealthy and no previous release is recorded; the staging host needs manual attention"
   fi
   log "rolling back to previous release $rollback_target"
@@ -1537,6 +1633,7 @@ cmd_deploy() {
   fi
   write_record "$sha" false true "$rollback_target" "deploy"
   print_running_release
+  set_failure_phase HEALTH_VERIFICATION "unhealthy and rollback failed"
   die 1 "release $sha is unhealthy and rollback to $rollback_target also failed; the staging host needs manual attention"
 }
 
@@ -1682,11 +1779,13 @@ cmd_rollback() {
   ensure_dependencies
   if ! rollback_to_release "$previous"; then
     write_record "$previous" false true "" "manual-rollback"
+    set_failure_phase HEALTH_VERIFICATION "rollback failed"
     die 1 "rollback to $previous failed; the staging host needs manual attention"
   fi
   # A manual rollback is recorded as healthy=true, so it passes the same gate a deploy does.
   if ! certify_deployment "$previous"; then
     write_record "$previous" false false "" "manual-rollback"
+    set_failure_phase HEALTH_VERIFICATION "rolled back but kernel serves another commit"
     die 1 "rollback moved the containers to $previous but the kernel does not serve that commit ($SERVED_SHA_STATE); refusing to record it as a successful rollback"
   fi
   if [[ "$current" =~ $SHA_RE ]]; then

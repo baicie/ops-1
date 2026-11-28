@@ -206,6 +206,60 @@ grep -q 'unverified until the registry answers' scripts/deploy-staging.sh \
   && ok "EXISTING_CREDENTIAL is logged as unverified, not as 'authentication ok'" \
   || bad "EXISTING_CREDENTIAL reads as a success in the log"
 
+echo "== 15c. TASK-36B: only IMAGE_TRANSPORT may trigger the SSH transfer"
+# THE DEFECT MEASURED ON RUN 46143147549. The registry answered `denied: denied`
+# — a permission problem — the deploy step failed, and the fallback spent its full
+# 900 s transferring an image whose identity could never be established.
+#
+# The host script exits 1 for every failure, so the exit code cannot answer "which
+# phase". It now writes a typed record, and the workflow gates on it.
+#
+# `fallback_allowed` is the PRODUCTION function, extracted rather than copied: a
+# test with its own copy of the switch has no counterfactual. Extract the function
+# definition and evaluate it, so the shipped code is what is exercised.
+eval "$(sed -n '/^fallback_allowed() {/,/^}/p' scripts/deploy-staging.sh)"
+command -v fallback_allowed >/dev/null \
+  || bad "fallback_allowed could not be extracted from deploy-staging.sh"
+for phase in PLUGIN_PUBLISH RELEASE_IDENTITY COMPOSE_UPDATE HEALTH_VERIFICATION HOST_PREPARATION UNKNOWN ""; do
+  got="$(fallback_allowed "$phase")"
+  [ "$got" = "false" ] && ok "fallback refused for ${phase:-<empty>}" \
+    || bad "fallback ALLOWED for ${phase:-<empty>} - a transfer cannot fix that"
+done
+[ "$(fallback_allowed IMAGE_TRANSPORT)" = "true" ] \
+  && ok "fallback allowed for IMAGE_TRANSPORT, the one case bytes can fix" \
+  || bad "IMAGE_TRANSPORT is not fallback-allowed; the recoverable case would be refused"
+
+echo "== 15d. every die in the deploy script records a phase"
+# A die with no phase is UNKNOWN, which is not fallback-allowed - but a phase that
+# is never SET at a real failure site means the record says UNKNOWN for a failure
+# whose phase is knowable, and the operator loses the reason.
+NO_PHASE="$(grep -cE '^[[:space:]]*die [0-9]+ ' scripts/deploy-staging.sh)"
+WITH_PHASE="$(grep -c 'set_failure_phase' scripts/deploy-staging.sh)"
+# -1 for the function definition itself and -1 for the comment line above it
+[ "$WITH_PHASE" -ge 20 ] \
+  && ok "$WITH_PHASE phase markers across $NO_PHASE die call sites" \
+  || bad "only $WITH_PHASE phase markers for $NO_PHASE die sites; most failures would record UNKNOWN"
+grep -q 'record_failure' scripts/deploy-staging.sh \
+  && ok "die() writes the record" || bad "die() does not write a failure record"
+
+echo "== 15e. the workflow reads the phase from the HOST, and gates before transferring"
+FB="$(sed -n '/- name: Hand the image over SSH/,/docker save/p' .github/workflows/staging-preview.yml)"
+printf '%s' "$FB" | grep -q 'fallback_allowed' \
+  && ok "the fallback step reads the host's decision" \
+  || bad "the fallback does not consult fallback_allowed"
+# And it does so BEFORE any transfer work, or the gate is decorative.
+gate_line=$(printf '%s' "$FB" | grep -n 'ALLOWED' | head -1 | cut -d: -f1)
+save_line=$(printf '%s' "$FB" | grep -n 'docker save' | head -1 | cut -d: -f1)
+if [ -n "$gate_line" ] && [ -n "$save_line" ] && [ "$gate_line" -lt "$save_line" ]; then
+  ok "the gate runs before the transfer (line $gate_line < $save_line)"
+else
+  bad "the gate is after the transfer, or absent (gate=$gate_line save=$save_line)"
+fi
+# The old invalid inference must be gone.
+grep -q 'the host already holds' .github/workflows/staging-preview.yml \
+  && bad "the 'host holds the image therefore not transport' inference is still there" \
+  || ok "the invalid inference is gone"
+
 echo "== 16. every file the deploy script SOURCES is also SHIPPED to the host"
 # THE DEFECT THIS CATCHES, and it was live for one commit: the deploy script began
 # sourcing `lib/registry-auth.sh` while `staging-preview.yml` still scp'd only
