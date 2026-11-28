@@ -260,6 +260,90 @@ grep -q 'the host already holds' .github/workflows/staging-preview.yml \
   && bad "the 'host holds the image therefore not transport' inference is still there" \
   || ok "the invalid inference is gone"
 
+echo "== 15f. a die with no phase for THIS failure does not inherit an older one"
+# MEASURED ON RUN 46152094215, on the real host. The pull was denied — a
+# RELEASE_IDENTITY failure — and the ACCESS_DENIED arm had no phase line of its
+# own, so the record said HOST_PREPARATION: left over from a preflight check that
+# had PASSED. The gate still refused the transfer, because both phases are `false`,
+# so it refused for the wrong reason and told the operator the host was unprepared
+# when it was not.
+#
+# The fix is structural: `set_failure_phase` records that a phase was set for THIS
+# failure, and `die` refuses to use a phase that was not. This drives the real
+# functions, extracted from the script.
+# Both functions, plus the reset variable. Extracted rather than copied: a test
+# carrying its own copy of the switch has no counterfactual.
+#
+# EXTRACTED TO A FILE, then sourced. `eval "$(sed ...)"` looks equivalent and is
+# not: the sed patterns contain quotes that Bash re-parses before sed sees them, so
+# the extraction silently produced nothing and the test measured an undefined
+# function's absence as "the stale phase survived". A test that fails for a reason
+# in the test is as bad as one that passes for a reason in the test.
+PHASE_FNS="$WORK/phase-fns.sh"
+{
+  sed -n '/^FAILURE_PHASE_SET=""/p' scripts/deploy-staging.sh
+  sed -n '/^set_failure_phase() {/,/^}/p' scripts/deploy-staging.sh
+  sed -n '/^assert_phase_was_set() {/,/^}/p' scripts/deploy-staging.sh
+} > "$PHASE_FNS"
+# shellcheck source=/dev/null
+. "$PHASE_FNS"
+command -v set_failure_phase >/dev/null && command -v assert_phase_was_set >/dev/null \
+  || bad "the phase functions could not be extracted from deploy-staging.sh"
+iso_now() { printf 'test'; }
+
+FAILURE_PHASE="HOST_PREPARATION"; FAILURE_PHASE_SET=""
+# NOT `out="$(assert_phase_was_set ...)"`. A command substitution runs in a
+# SUBSHELL, so the function's assignments to FAILURE_PHASE never reach this shell
+# and the assertion below reads the value it set a line earlier. The first version
+# of this case did exactly that and reported the fix as broken. Redirect to a file
+# instead, which keeps the call in this shell.
+ERRFILE="$WORK/phase-err.txt"
+assert_phase_was_set "a message" 2>"$ERRFILE"
+[ "$FAILURE_PHASE" = "UNKNOWN" ] \
+  && ok "a stale phase is discarded and recorded as UNKNOWN" \
+  || bad "a stale phase survived: got $FAILURE_PHASE"
+grep -q 'no set_failure_phase' "$ERRFILE" \
+  && ok "and it says why, as an internal warning" \
+  || bad "the stale phase was discarded silently"
+
+# And a phase set for this failure IS used.
+FAILURE_PHASE_SET=""; set_failure_phase RELEASE_IDENTITY "denied"
+assert_phase_was_set "a message" 2>/dev/null
+[ "$FAILURE_PHASE" = "RELEASE_IDENTITY" ] \
+  && ok "a phase set for this failure is kept" || bad "got $FAILURE_PHASE"
+
+# Every die needs its phase on the immediately preceding line, or it inherits.
+GAPS=0
+for n in $(grep -n '^[[:space:]]*die [0-9]' scripts/deploy-staging.sh | cut -d: -f1); do
+  sed -n "$((n-1))p" scripts/deploy-staging.sh | grep -q 'set_failure_phase' || GAPS=$((GAPS+1))
+done
+[ "$GAPS" -eq 0 ] \
+  && ok "every die has its phase set on the line before it" \
+  || bad "$GAPS die call(s) inherit a phase from wherever the variable last was"
+
+# The assertion must be WIRED INTO die, not merely correct beside it.
+#
+# The first version of the case above called assert_phase_was_set directly, so
+# deleting the call from `die` left the whole suite green — it tested the function
+# and not the wiring, which is the "shipped but not connected" shape this repo
+# records by name. This drives `die` itself, in a subshell, and checks the record
+# it would have written.
+DIE_RECORD="$WORK/die-record.json"
+(
+  FAILURE_FILE="$DIE_RECORD"
+  FAILURE_PHASE="HOST_PREPARATION"   # a leftover, as on the real host
+  FAILURE_PHASE_SET=""
+  append_log() { :; }
+  record_failure() { printf '{"phase":"%s"}\n' "$FAILURE_PHASE" > "$FAILURE_FILE"; }
+  eval "$(sed -n '/^die() {/,/^}/p' scripts/deploy-staging.sh | sed 's/^  record_failure$/  record_failure/')"
+  die 1 "denied"
+) >/dev/null 2>&1
+if grep -q '"phase":"UNKNOWN"' "$DIE_RECORD" 2>/dev/null; then
+  ok "die itself records UNKNOWN when no phase was set for this failure"
+else
+  bad "die did not go through assert_phase_was_set: $(cat "$DIE_RECORD" 2>/dev/null || echo 'no record')"
+fi
+
 echo "== 16. every file the deploy script SOURCES is also SHIPPED to the host"
 # THE DEFECT THIS CATCHES, and it was live for one commit: the deploy script began
 # sourcing `lib/registry-auth.sh` while `staging-preview.yml` still scp'd only
