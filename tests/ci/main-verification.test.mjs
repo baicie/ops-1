@@ -29,7 +29,7 @@ import {
 } from './main-verification/expected-workflows.mjs';
 import { awaitPush, whatToAwaitOnPush } from './main-verification/await-push.mjs';
 import { decide, makeReader, SELF_WORKFLOW } from './main-verification/verify.mjs';
-import { parseSlurpedPages, fetchCommitRuns } from './main-verification/github.mjs';
+import { parseSlurpedPages, fetchCommitRuns, fetchPushFiles } from './main-verification/github.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, 'main-verification', 'verify.mjs');
@@ -302,6 +302,116 @@ test('N2: a run of the observer cannot be credited as a required workflow', () =
   assert.ok(!result.records.some((r) => r.workflow === SELF_WORKFLOW), 'the observer is not a record');
   assert.ok(!result.succeeded.includes(SELF_WORKFLOW), 'and it is not a success');
   assert.equal(result.state, 'INCOMPLETE', 'ci.yml is still owed, whatever the observer did');
+});
+
+// ---------------------------------------------------------------------------
+// FOUND BY ADVERSARIAL AUDIT, after the suite above was green.
+// ---------------------------------------------------------------------------
+//
+// Five independent reviewers were asked to find inputs that make this code report
+// success while being wrong. These are the three they reproduced against the real
+// functions. Every one is the same family: ABSENCE OF EVIDENCE READ AS EVIDENCE OF
+// SUCCESS, which is what this whole phase exists to remove.
+//
+// They are recorded here rather than folded into the cases above so a reader can
+// see that the earlier suite did not catch them.
+
+test('AUDIT-1: a NOT_APPLICABLE workflow GitHub IS RUNNING is not a pass', () => {
+  // Was: the record went to `notApplicable` and to nothing else, so `pending`
+  // stayed empty and the commit came back VERIFIED mid-flight.
+  const running = classify(
+    [run('x.yml', null, { status: 'in_progress', conclusion: null })],
+    [rec('x.yml', APPLICABILITY.NOT_APPLICABLE)],
+    { waiting: true },
+  );
+  assert.equal(running.state, 'INCOMPLETE', 'a running run is not "nothing owed"');
+  const cancelled = classify(
+    [run('x.yml', 'cancelled')],
+    [rec('x.yml', APPLICABILITY.NOT_APPLICABLE)],
+    { waiting: false },
+  );
+  assert.equal(cancelled.state, 'SUPERSEDED');
+  // A NOT_APPLICABLE workflow that ran and PASSED is still just extra evidence.
+  const passed = classify(
+    [run('ci.yml', 'success'), run('x.yml', 'success')],
+    [rec('ci.yml', APPLICABILITY.REQUIRED), rec('x.yml', APPLICABILITY.NOT_APPLICABLE)],
+  );
+  assert.equal(passed.state, 'VERIFIED');
+});
+
+test('AUDIT-2: an EMPTY obligation set is UNAVAILABLE, not vacuously VERIFIED', () => {
+  // "all 0 required workflow(s) completed success" was reachable and was a pass.
+  assert.equal(classify([], []).state, 'UNAVAILABLE');
+  assert.equal(classify([], [rec('x.yml', APPLICABILITY.NOT_APPLICABLE)]).state, 'UNAVAILABLE',
+    'records that all assert nothing are still not evidence');
+  // And the control still passes, so the new branch is not swallowing everything.
+  assert.equal(classify([run('ci.yml', 'success')], [rec('ci.yml', APPLICABILITY.REQUIRED)]).state, 'VERIFIED');
+});
+
+test('AUDIT-3: a RED run whose workflow is not in the expectation set is FAILED', () => {
+  // The loop visited only `records`, so a run with no record was never looked at -
+  // the other side of DEFECT 1, which the head of classify.mjs records by name.
+  const result = classify(
+    [run('ghost.yml', 'failure'), run('ci.yml', 'success')],
+    [rec('ci.yml', APPLICABILITY.REQUIRED)],
+  );
+  assert.equal(result.state, 'FAILED');
+  assert.ok(result.failed.some((f) => f.startsWith('ghost.yml')));
+  // A green stray run is not a failure, and must not flip a passing verdict.
+  const greenStray = classify(
+    [run('ghost.yml', 'success'), run('ci.yml', 'success')],
+    [rec('ci.yml', APPLICABILITY.REQUIRED)],
+  );
+  assert.equal(greenStray.state, 'VERIFIED');
+});
+
+test('AUDIT-4: the file list at the API page limit is UNKNOWN, not complete', () => {
+  // The comment claimed the API OMITS `files` past 300; it TRUNCATES. Only the
+  // omission was handled, so exactly-300 was handed on as the complete diff and a
+  // workflow whose path fell in the missing tail was called NOT_APPLICABLE.
+  const mk = (n) => JSON.stringify({ files: Array.from({ length: n }, (_, i) => ({ filename: `f${i}.txt` })) });
+  const at = (n) => fetchPushFiles({ sha: 'a'.repeat(40), exec: () => mk(n) });
+  assert.equal(at(299).ok, true, 'a short list is usable');
+  assert.equal(at(300).ok, false, 'exactly the page limit is ambiguous');
+  assert.match(at(300).error, /page limit/);
+});
+
+test('AUDIT-5: an unknown obligation set cannot be VERIFIED, and every field agrees', () => {
+  // `blockers` was a report; the state was computed beside it. The artifact could
+  // carry state VERIFIED and a blocker saying the file list was unavailable, and
+  // `codeVerdict` was copied before `state` was rewritten - so two adjacent fields
+  // could disagree.
+  for (const [label, extra] of [
+    ['filesError', { filesError: 'truncated at the page limit' }],
+    ['an unparsed workflow', { workflows: { expected: [rec('ci.yml', APPLICABILITY.REQUIRED)], selfReference: [], unparsed: [{ workflow: 'x.yml', error: 'tab' }] } }],
+  ]) {
+    const result = decide({
+      runs: [run('ci.yml', 'success')],
+      workflows: extra.workflows ?? { expected: [rec('ci.yml', APPLICABILITY.REQUIRED)], selfReference: [], unparsed: [] },
+      filesError: extra.filesError ?? null,
+      waiting: false, sha: 'a'.repeat(40), source: 'test',
+    });
+    assert.equal(result.state, 'UNAVAILABLE', label);
+    assert.equal(result.codeVerdict, result.state, `${label}: codeVerdict must equal state`);
+    assert.equal(result.certification.reached, false, `${label}: reached must follow the state`);
+  }
+});
+
+test('AUDIT-6: asUnavailable keeps every derived field consistent', async () => {
+  // The two API-error paths overwrote four fields by hand and left
+  // `certification.reached` at whatever `decide` computed.
+  const { asUnavailable } = await import('./main-verification/verify.mjs');
+  const base = decide({
+    runs: [run('ci.yml', 'success')],
+    workflows: { expected: [rec('ci.yml', APPLICABILITY.REQUIRED)], selfReference: [], unparsed: [] },
+    filesError: null, waiting: false, sha: 'a'.repeat(40), source: 'test',
+  });
+  assert.equal(base.certification.reached, true, 'the base is a pass');
+  const gone = asUnavailable(base, 'HTTP 502');
+  assert.equal(gone.state, 'UNAVAILABLE');
+  assert.equal(gone.codeVerdict, 'UNAVAILABLE');
+  assert.deepEqual(gone.blockers, ['HTTP 502']);
+  assert.equal(gone.certification.reached, false, 'a document may not say UNAVAILABLE and reached:true');
 });
 
 // ---------------------------------------------------------------------------

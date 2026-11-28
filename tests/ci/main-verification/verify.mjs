@@ -137,15 +137,33 @@ export function decide({ runs, workflows, filesError = null, waiting = false, sh
   if (workflows.unparsed.length) blockers.push(`${workflows.unparsed.length} workflow file(s) could not be parsed`);
   if (filesError) blockers.push(`the changed-file list was unavailable: ${filesError}`);
 
-  // A workflow file the parser refuses is an obligation nobody can enumerate. It
-  // cannot be VERIFIED, because "every workflow that runs on push succeeded" is a
-  // claim about a set that is not fully known.
-  const state = workflows.unparsed.length && isFinal(classified.state) && classified.state === 'VERIFIED'
+  // TWO THINGS THAT MAKE "EVERY WORKFLOW SUCCEEDED" A CLAIM ABOUT A SET WE DO NOT
+  // FULLY KNOW, and neither of them used to change the state.
+  //
+  // Found by adversarial audit. `blockers` was a report and the state was computed
+  // beside it, so the artifact could say `state: VERIFIED` with
+  // `blockers: ['the changed-file list was unavailable: ...']` in the same
+  // document. Verified by reproduction: an all-green run set with a filesError
+  // yielded VERIFIED, exit 0, certification.reached true.
+  //
+  //   unparsed workflows   an obligation nobody can enumerate
+  //   no file list         NOT_APPLICABLE was decided by NOTHING, so every
+  //                        filtered workflow's applicability is a guess
+  //
+  // Both are "we do not know what was owed". A pass on an unknown obligation set
+  // is the defect class this whole phase is about.
+  const unknownObligations = workflows.unparsed.length > 0 || filesError !== null;
+  const state = unknownObligations && classified.state === 'VERIFIED'
     ? 'UNAVAILABLE'
     : classified.state;
 
   return {
-    ...verdict,
+    // DERIVED, NOT COPIED. `codeVerdict` used to be `classified.state`, assigned
+    // before `state` was possibly rewritten, so a document could carry
+    // `codeVerdict: VERIFIED` and `state: UNAVAILABLE` in adjacent fields.
+    codeVerdict: state,
+    stagingVerdict: verdict.stagingVerdict,
+    releaseVerdict: verdict.releaseVerdict,
     certification: { ...certification, reached: state === 'VERIFIED' },
     state,
     sha,
@@ -184,6 +202,30 @@ export function decide({ runs, workflows, filesError = null, waiting = false, sh
     unparsedWorkflowFiles: workflows.unparsed,
     note: 'This describes the PUSH runs for this commit. A green pull request on the '
       + 'same content is a different execution and does not substitute for it.',
+  };
+}
+
+/**
+ * Turn a result into an UNAVAILABLE verdict, keeping EVERY derived field
+ * consistent.
+ *
+ * The two API-error paths used to do this by hand, overwriting `state`,
+ * `codeVerdict`, `reason` and `blockers` — and leaving `certification.reached`
+ * whatever `decide` had computed. Since `decide({runs: []})` used to classify zero
+ * obligations as VERIFIED, the artifact could say `state: UNAVAILABLE` and
+ * `certification.reached: true` in the same document. Found by adversarial audit.
+ *
+ * One helper because the fields are derived from one another, and a partial
+ * overwrite is how they came apart.
+ */
+export function asUnavailable(result, reason) {
+  return {
+    ...result,
+    state: 'UNAVAILABLE',
+    codeVerdict: 'UNAVAILABLE',
+    reason,
+    blockers: [reason],
+    certification: { ...result.certification, reached: false },
   };
 }
 
@@ -302,11 +344,10 @@ async function main() {
       // The API failed. That is its own verdict and it does not depend on the
       // budget; reporting INCOMPLETE_TIMEOUT would blame the suites.
       const snapshot = wait.last ?? { runs: [], workflows: { expected: [], selfReference: [], unparsed: [] }, filesError: null };
-      result = decide({ runs: [], workflows: snapshot.workflows, filesError: snapshot.filesError, waiting: false, sha: sha ?? 'unknown', source: 'api' });
-      result.state = 'UNAVAILABLE';
-      result.codeVerdict = 'UNAVAILABLE';
-      result.reason = wait.error;
-      result.blockers = [wait.error];
+      result = asUnavailable(
+        decide({ runs: [], workflows: snapshot.workflows, filesError: snapshot.filesError, waiting: false, sha: sha ?? 'unknown', source: 'api' }),
+        wait.error,
+      );
     } else {
       const snapshot = wait.last;
       // After the wait, the state is FINAL. `INCOMPLETE` (a progress state) is
@@ -318,11 +359,10 @@ async function main() {
   } else {
     const snapshot = await read(1);
     if (snapshot.error) {
-      result = decide({ runs: [], workflows: snapshot.workflows, filesError: snapshot.filesError, waiting: false, sha: sha ?? 'unknown', source: 'api' });
-      result.state = 'UNAVAILABLE';
-      result.codeVerdict = 'UNAVAILABLE';
-      result.reason = snapshot.error;
-      result.blockers = [snapshot.error];
+      result = asUnavailable(
+        decide({ runs: [], workflows: snapshot.workflows, filesError: snapshot.filesError, waiting: false, sha: sha ?? 'unknown', source: 'api' }),
+        snapshot.error,
+      );
     } else {
       result = decide({ runs: snapshot.runs, workflows: snapshot.workflows, filesError: snapshot.filesError, waiting: false, sha: sha ?? 'unknown', source: fromJson ? `fixture:${fromJson}` : 'api' });
     }

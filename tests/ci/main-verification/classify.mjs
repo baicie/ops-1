@@ -184,11 +184,21 @@ export function classifyMainRuns(runs, expected, opts = {}) {
         break;
 
       case APPLICABILITY.NOT_APPLICABLE:
-        // The trigger says no run was owed. A run that exists anyway and SUCCEEDED
-        // is extra evidence and does not change the verdict; one that failed was
-        // already caught above.
+        // The trigger says no run was owed THIS TIME. But GitHub evidently RAN it,
+        // and a run that exists is a fact about this commit.
+        //
+        // FOUND BY ADVERSARIAL AUDIT, and it is the same defect this file exists to
+        // remove, from a third direction: a NOT_APPLICABLE record whose run was
+        // still RUNNING or QUEUED was pushed to `notApplicable` and to nothing else,
+        // so `pending` stayed empty and the commit came back VERIFIED while a
+        // workflow was mid-flight. A workflow GitHub chose to run has not finished;
+        // that is not "nothing owed".
         notApplicable.push(record.workflow);
         if (observation === OBSERVATION.SUCCESS) record.note = 'ran anyway and passed';
+        else if (observation === OBSERVATION.CANCELLED) cancelled.push(record.workflow);
+        else if (observation === OBSERVATION.QUEUED || observation === OBSERVATION.RUNNING) {
+          pending.push(`${record.workflow}: did not apply to this push, but GitHub ran it and it is ${detail}`);
+        }
         break;
 
       default: {
@@ -210,6 +220,35 @@ export function classifyMainRuns(runs, expected, opts = {}) {
     notes.push(`ignored runs that were not pushes: ${ignoredEvents.join(', ')}`);
   }
 
+  // RUNS WITH NO EXPECTATION RECORD ARE STILL FACTS ABOUT THIS COMMIT.
+  //
+  // The loop above visits only `records`, so a run whose workflow is not in the
+  // expectation set was never looked at — and the head of this file records that
+  // exact shape as DEFECT 1 ("a workflow that RAN AND FAILED is invisible to the
+  // verdict"). The loop closed that for workflows the expectation set contains,
+  // which left it open for every other one.
+  //
+  // Two ways a run has no record, and neither is benign:
+  //   - the workflow file is not in THIS checkout (deleted on the target commit, or
+  //     renamed), so the expectation set could not produce it;
+  //   - the workflow file could not be parsed and was reported as `unparsed`.
+  // In both cases a red run is real evidence that the commit is red, and reporting
+  // VERIFIED because nothing was expected is absence-of-evidence-as-success.
+  const expectedNames = new Set(records.map((r) => r.workflow));
+  const strayRed = [];
+  for (const [workflow, run] of latest) {
+    if (expectedNames.has(workflow)) continue;
+    const { observation, detail } = observeRun(run);
+    if (observation === OBSERVATION.FAILURE || observation === OBSERVATION.TIMED_OUT) {
+      strayRed.push(`${workflow}: ${detail}`);
+    } else if (observation === OBSERVATION.QUEUED || observation === OBSERVATION.RUNNING) {
+      pending.push(`${workflow}: not in the expectation set, but a run exists and it is ${detail}`);
+    }
+  }
+  if (strayRed.length) {
+    failed.push(...strayRed.map((s) => `${s} (no expectation record for this workflow, but its run is red)`));
+  }
+
   let state; let reason;
   if (failed.length) {
     state = 'FAILED';
@@ -228,6 +267,30 @@ export function classifyMainRuns(runs, expected, opts = {}) {
     state = 'SUPERSEDED';
     reason = `${cancelled.length} workflow(s) were superseded by a newer push `
       + `(${cancelled.join(', ')}); this commit's suites never completed, so nothing about it was verified`;
+  } else if (records.length === 0) {
+    // VACUOUS TRUTH IS NOT EVIDENCE.
+    //
+    // `VERIFIED` used to be the `else` branch, so it was reached whenever nothing
+    // failed, nothing was pending, nothing was cancelled — INCLUDING when the
+    // obligation set was empty. Verified by adversarial audit: `classifyMainRuns([],
+    // {expected: []}, ...)` returned VERIFIED with "all 0 required workflow(s)
+    // completed success", exit 0, certification.reached true.
+    //
+    // That is reachable: an unparseable workflow is excluded from `expected`, a
+    // checkout whose workflows do not match the commit produces none, and any
+    // caller that hands over the wrong shape produces none. Every one of those is
+    // "we do not know what was owed", and the answer to that is not a pass.
+    state = 'UNAVAILABLE';
+    reason = 'no obligations were derived for this commit, so nothing was verified; '
+      + 'this is an empty or unreadable expectation set, not a passing one';
+  } else if (succeeded.length === 0) {
+    // Nothing failed, nothing is pending, nothing was cancelled, and NOTHING
+    // SUCCEEDED EITHER. The only way here is a set of records that all landed in a
+    // bucket that asserts nothing (all NOT_APPLICABLE, say). That is still not
+    // evidence that this commit works.
+    state = 'UNAVAILABLE';
+    reason = `no workflow produced a passing result for this commit (${records.length} record(s), `
+      + `${notApplicable.length} not applicable); nothing was verified`;
   } else {
     state = 'VERIFIED';
     reason = `all ${required.length} required workflow(s) completed success`

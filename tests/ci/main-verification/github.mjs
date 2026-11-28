@@ -129,17 +129,45 @@ export function fetchPushFiles({ sha, repo = REPO, exec = null } = {}) {
     return { ok: false, files: null, error: `the commit response was not JSON: ${error.message}` };
   }
   if (!Array.isArray(commit?.files)) {
-    // A commit with more than 300 changed files omits `files` entirely, and the
-    // truncation is not signalled in the body. Reporting it as unavailable is the
-    // only honest option: "no files" would mean "nothing matched any filter".
+    // No file list at all. Reporting it as unavailable is the only honest option:
+    // "no files" would mean "nothing matched any filter".
     return {
       ok: false,
       files: null,
-      error: 'the commit response carried no file list; for a commit touching more than 300 files the API omits it',
+      error: 'the commit response carried no file list',
+    };
+  }
+  // THE API TRUNCATES AT 300; IT DOES NOT OMIT.
+  //
+  // The comment here used to say a commit with more than 300 changed files omits
+  // `files` entirely, and only the omission was handled. Measured by adversarial
+  // audit: the endpoint returns the FIRST 300 and reports nothing wrong, so
+  // `ok: true` with 300 entries was handed to `applicabilityOfPush`, which treats
+  // any array as the complete diff. A workflow whose trigger path fell outside
+  // those 300 was then classified NOT_APPLICABLE — "none of this push's 300
+  // changed files match" — while GitHub had in fact run it.
+  //
+  // 300 is the documented page size, so an array of exactly 300 is
+  // INDISTINGUISHABLE from a complete list of exactly 300. Reporting the
+  // ambiguity is correct; guessing "complete" is the failure this whole file is
+  // about.
+  if (commit.files.length >= FILE_LIST_LIMIT) {
+    return {
+      ok: false,
+      files: null,
+      error: `the commit response returned ${commit.files.length} files, which is the API's page limit; `
+        + 'the list may be truncated, so applicability cannot be decided from it',
     };
   }
   return { ok: true, files: commit.files.map((f) => String(f.filename)), error: null };
 }
+
+/**
+ * The commit endpoint's file-list page size. Documented, and measured: a commit
+ * touching more than this returns exactly this many entries with no truncation
+ * signal in the body.
+ */
+export const FILE_LIST_LIMIT = 300;
 
 /**
  * `--slurp` wraps every page in an outer array. Some `gh` versions instead print
